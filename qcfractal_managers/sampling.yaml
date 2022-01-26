@@ -1,0 +1,25 @@
+common:
+ adapter: dask
+ tasks_per_worker: 1
+ cores_per_worker: 4
+ max_workers: 4
+ memory_per_worker: 12
+ scratch_directory: "/scratch"
+
+cluster:
+ scheduler: slurm
+ walltime: "180:00:00"
+
+dask:
+ queue: normal
+
+server:
+ fractal_uri: "localhost:7777"
+ username: "manager"
+ password: "flPMRbZef0-tgbfruDnPtLXI7aW9VrXUluCNPEonf98"
+ verify: "False"
+
+manager:
+    manager_name: sampling_manager
+    queue_tag: "sampling"
+
