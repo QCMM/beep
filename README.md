@@ -5,7 +5,7 @@ BEEP
 [![codecov](https://codecov.io/gh/REPLACE_WITH_OWNER_ACCOUNT/BEEP/branch/master/graph/badge.svg)](https://codecov.io/gh/REPLACE_WITH_OWNER_ACCOUNT/BEEP/branch/master)
 
 
-A binding energy evaluation platforma and database for molecules on interstellar ice-grain mantels
+A binding energy evaluation platform and database for molecules on interstellar ice-grain mantels
 
 ### Copyright
 
