@@ -66,20 +66,21 @@ parser.add_option("--rmsd_symmetry",
 parser.add_option("-d",
                   "--rmsd_value",
                   dest="rmsd_val",
-                  help="Rmsd geometrical criteria (default: 0.41 angstrom)"
-                  default= 0.41
+                  default= 0.40,
+                  help="Rmsd geometrical criteria (default: 0.41 angstrom)",
 )
 parser.add_option("-t",
                   "--max_structures",
                   dest="max_structures",
+                  default= 21,
                   help="Max number of binding sites per cluster (default: 21)"
-                  default= 21
 )
 parser.add_option("-p",
                   "--program",
                   dest="program",
+                  default="psi4",
                   help="The program to use for this calculation (default: psi4)",
-                  default="psi4")
+                  )
 
 parser.add_option("-k",
                   "--keyword_id",
