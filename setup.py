@@ -48,7 +48,7 @@ setup(
     # url='http://www.my_package.com',  # Website
     install_requires=[
         'numpy',
-        'qcfractal>=0.14.0'],              # Required packages, pulls from pip if needed; do not use for Conda deployment
+        ],              # Required packages, pulls from pip if needed; do not use for Conda deployment
     # platforms=['Linux',
     #            'Mac OS-X',
     #            'Unix',
