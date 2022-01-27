@@ -1,7 +1,5 @@
 import sys, time
 
-# sys.path.append('/home/svogt/fractal/site_finder')
-# from molecule_sampler import molecule_sampler as  mol_sample
 import qcfractal.interface as ptl
 from pathlib import Path
 
@@ -104,16 +102,23 @@ def be_stoich(
                 (m_1, -1.0),
                 (m_2, -1.0),
             ],
-            "be_nocp": [(d, 1.0), (m_1, -1.0), (m_2, -1.0)]
-            # "ie": [(d,1.0),(j7,-1.0),(j6,-1.0)],
-            # "de":[(m_1,1.0),(m_2,1.0),(j4,-1.0),(j5,-1.0)],
+            "be_nocp": [(d, 1.0), (m_1, -1.0), (m_2, -1.0)],
+            "ie": [(d, 1.0), (j7, -1.0), (j6, -1.0)],
+            "de": [(m_1, 1.0), (m_2, 1.0), (j4, -1.0), (j5, -1.0)],
         }
         ds_be.add_rxn(k, be_cal)
         ds_be.save()
 
 
 def compute_be(
-    wat_collection, small_collection, database, opt_lot, lot, o_file, client
+    wat_collection,
+    small_collection,
+    database,
+    opt_lot,
+    lot,
+    o_file,
+    client,
+    program="psi4",
 ):
     name_be = "be_" + str(database) + "_" + opt_lot.split("_")[0]
 
@@ -145,28 +150,42 @@ def compute_be(
         )
         return None
 
-    # ds_be.set_default_program("psi4")
-    # keywords= ptl.models.KeywordSet(values= {'reference' : 'uks'})
+    mol_id = ds_be.get_entries().loc[0].molecule
+    mult = client.query_molecules(mol_id)[0].molecular_multiplicity
+    if mult == 2:
+        ds_be.set_default_program("psi4")
+        keywords = ptl.models.KeywordSet(values={"reference": "uks"})
 
-    # ds_be.add_keywords("rad_be", "psi4", keywords, default= True)
+        ds_be.add_keywords("rad_be", "psi4", keywords, default=True)
 
-    # ds_be.save()
+        ds_be.save()
 
-    # c = ds_be.compute(lot.split("_")[0], lot.split("_")[1], keywords="rad_be", stoich="default", tag='be_comp')
-    c = ds_be.compute(
-        lot.split("_")[0], lot.split("_")[1], stoich="default", tag="be_comp"
-    )
-    c1 = ds_be.compute("hf3c", "minix", stoich="be_nocp", tag="be_hf3c")
+        c = ds_be.compute(
+            lot.split("_")[0],
+            lot.split("_")[1],
+            keywords="rad_be",
+            stoich="default",
+            tag="be_comp",
+            program=program,
+        )
+    else:
+        c = ds_be.compute(
+            lot.split("_")[0],
+            lot.split("_")[1],
+            stoich="default",
+            tag="be_comp",
+            program=program,
+        )
     print_out("Collection {}: {}, {}\n".format(name_be, c, c1), o_file)
 
-    f_w = open(
-        "/home/astrochem/energy_compute/job_ids/"
-        + ds_be.name
-        + "_"
-        + lot.split("_")[0]
-        + "_idlist.dat",
-        "w",
+    ids_path = Path(
+        ".enregy_job_ids/" + ds_be.name + "_" + lot.split("_")[0] + "_idlist.dat"
     )
+
+    if not ids_file.is_file():
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    f_w = open(ids_path, "w")
     id_str = ""
     for i in c.ids:
         id_str += i + " "
