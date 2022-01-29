@@ -32,9 +32,6 @@ def molecule_sampler(
 
     fill_num = len(str(number_of_structures))
 
-    ## Load the molecules from file
-    # w_molecule = qcel.models.Molecule.from_file(center_molecule, orient=True)
-    # s_molecule = qcel.models.Molecule.from_file(sampling_molecule, orient=True)
 
     # Define the maximum  and minimum displacements
     dis_min = max([np.linalg.norm(i) for i in w_molecule.geometry])  # remove 0.75
