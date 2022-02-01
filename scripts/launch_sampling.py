@@ -8,27 +8,33 @@ from pathlib import Path
 from beep.converge_sampling import sampling
 
 from optparse import OptionParser
-parser = OptionParser()
+usage ='''python %prog [options]
+
+A command line interface to sample the surface of a set of water clusters (stored in a 
+QCFractal DataSet)  with a small molecule or atom. This CLI is part
+of the Binding Energy Evaluation Platform (BEEP).
+'''
+parser = OptionParser(usage=usage)
 parser.add_option("--client_address",
-                  dest="client_add",
+                  dest="client_address",
                   help="The URL address and port of the QCFractal server (default: localhost:7777)"
 )
 parser.add_option("--molecule",
-                  dest="s_mol",
+                  dest="molecule",
                   help="The name of the molecule to be sampled (from a QCFractal OptimizationDataSet collection)"
 )
 parser.add_option("--surface_model_collection",
-                   dest="coll",
-                   help="The name of the collection with the water clusters (dafault: ASW_22)",
+                   dest="surface_model_collection",
+                   help="The name of the collection with the set of water clusters (dafault: ASW_22)",
                    default="ASW_12"
 )
 parser.add_option("--small_molecule_collection",
-                   dest="m_coll",
+                   dest="small_molecule_collection",
                    help="The name of the collection containing molecules or radicals (dafault: Small_molecules)",
                    default="Small_molecules"
 )
 parser.add_option("--molecules_per_round",
-                  dest="s_num",
+                  dest="molecule_per_round",
                   type = "int",
                   help="Number of molecules to be optimized each round (Default = 10)",
                   default=10
@@ -39,39 +45,34 @@ parser.add_option("--sampling_shell",
                   default=1.5,
                   help="The shell size of sampling space (Default = 1.5 Angstrom)"
 )
+parser.add_option("--maximal_binding_sites",
+                  dest="maximal_binding_sites",
+                  default= 21,
+                  help="The maximal number of binding sites per cluster (default: 21)"
+)
 parser.add_option("-l",
                   "--level_of_theory",
-                  dest="ltheory",
+                  dest="level_of_theory",
                   help=
                   "The level of theory in the format: method_basis (default: blyp_def2-svp)",
                   default="blyp_def2-svp"
                  )
 parser.add_option("--refinement_level_of_theory",
-                  dest="r_ltheory",
+                  dest="r_level_of_theory",
                   help=
                   "The level of theory for geometry refinement in the format: method_basis (default: hf3c_minix)",
                   default="hf3c_minix"
                  )
-parser.add_option("--print_out",
-                  action='store_true',
-                  dest="print_out",
-                  help="Print an output"
-)
-parser.add_option("--rmsd_symmetry",
-                  action='store_true',
-                  dest="symm",
-                  help="Consider the molecular symmetry for the rmsd calculation"
-                        )
 parser.add_option("--rmsd_value",
                   dest="rmsd_val",
                   default= 0.40,
                   help="Rmsd geometrical criteria, all structure below this value will not be considered as unique. (default: 0.40 angstrom)",
 )
-parser.add_option("--maximal_binding_sites",
-                  dest="max_structures",
-                  default= 21,
-                  help="The maximal number of binding sites per cluster (default: 21)"
-)
+parser.add_option("--rmsd_symmetry",
+                  action='store_true',
+                  dest="rmsd_symmetry",
+                  help="Consider the molecular symmetry for the rmsd calculation"
+                        )
 parser.add_option("-p",
                   "--program",
                   dest="program",
@@ -81,34 +82,38 @@ parser.add_option("-p",
 
 parser.add_option("-k",
                   "--keyword_id",
-                  dest="kw",
+                  dest="keyword_id",
                   help="ID of the QC keywords for the OptimizationDataSet specification (default: None)",
                   default=None)
+parser.add_option("--print_out",
+                  action='store_true',
+                  dest="print_out",
+                  help="Print an output"
+)
 
 
 def print_out(string, o_file):
     with open(o_file, 'a') as f:
         f.write(string)
 
-
 options = parser.parse_args()[0]
 
-method  = options.ltheory.split("_")[0]
-basis  = options.ltheory.split("_")[1]
+method  = options.level_of_theory.split("_")[0]
+basis  = options.level_of_theory.split("_")[1]
 program = options.program
-opt_lot = options.ltheory
-r_lot = options.r_ltheory
-kw_id   = options.kw
+opt_lot = options.level_of_theory
+r_lot = options.r_level_of_theory
+kw_id   = options.keyword_id
 s_shell = options.sampling_shell
-num_struct = options.s_num
-rmsd_symm = options.symm
-wat_collection = options.coll
-mol_collection = options.m_coll
-smol_name = options.s_mol
+num_struct = options.molecules_per_round
+rmsd_symm = options.rmsd_symmetry
+wat_collection = options.surface_model_collection
+mol_collection = options.small_molecule_collection
+smol_name = options.molecule
 rmsd_val = options.rmsd_val
-max_struct = options.max_structures 
+max_struct = options.maximal_binding_sites
 
-client = ptl.FractalClient(address=options.client_add, verify=False, username="svogt", password="7kyRT-Mrow3jH0Lg6b9YIhEjAcvU9EpFBb9ouMClU5g")
+client = ptl.FractalClient(address=options.client_add, verify=False)
 
 m = r_lot.split('_')[0]
 b = r_lot.split('_')[1]
