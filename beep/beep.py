@@ -1,12 +1,15 @@
-import qcportal as ptl
+try:
+    import qcportal as ptl
+except ModuleNotFoundError:
+    import qcfractal.interface as ptl
+
 import pandas as pd
 import numpy as np
 from .be_tools import zpve_correction
-from exceptions import *
+from .exceptions import *
 
 # Author: svogt, gbovolenta
 # Date: 15.06.2021
-
 
 class BindingParadise(object):
     """Data query QCPortal wrapper for the BEEP  database.
