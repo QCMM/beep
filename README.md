@@ -13,7 +13,7 @@ will need to install the  QCPortal python module:
 `conda install -c conda-forge qcportal`
 
 If you would like to create your own database using the BEEP protocol or if you would like 
-to contribuite to the BEEP database you will need to install the QCFractal module. 
+to contribute to the BEEP database you will need to install the QCFractal module. 
 
 `conda install -c conda-forge qcfractal`
 
