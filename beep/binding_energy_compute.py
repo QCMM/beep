@@ -118,7 +118,7 @@ def compute_be(
     lot,
     o_file,
     client,
-    program="psi4",
+    program=program,
 ):
     name_be = "be_" + str(database) + "_" + opt_lot.split("_")[0]
 
@@ -153,11 +153,8 @@ def compute_be(
     mol_id = ds_be.get_entries().loc[0].molecule
     mult = client.query_molecules(mol_id)[0].molecular_multiplicity
     if mult == 2:
-        ds_be.set_default_program("psi4")
         keywords = ptl.models.KeywordSet(values={"reference": "uks"})
-
         ds_be.add_keywords("rad_be", "psi4", keywords, default=True)
-
         ds_be.save()
 
         c = ds_be.compute(
@@ -165,7 +162,7 @@ def compute_be(
             lot.split("_")[1],
             keywords="rad_be",
             stoich="default",
-            tag="be_comp",
+            tag='comp_be',
             program=program,
         )
     else:
@@ -173,7 +170,7 @@ def compute_be(
             lot.split("_")[0],
             lot.split("_")[1],
             stoich="default",
-            tag="be_comp",
+            tag='comp_be',
             program=program,
         )
     print_out("Collection {}: {}, {}\n".format(name_be, c, c1), o_file)
@@ -191,3 +188,34 @@ def compute_be(
         id_str += i + " "
     f_w.write(id_str)
     f_w.close()
+
+def compute_hessian(
+    be_collection
+    opt_lot,
+    o_file,
+    client,
+    tag,
+    program="psi4",
+    ):
+
+    try:
+        ds_be = client.get_collection("ReactionDataset", be_collection)
+    except:
+        "KeyError"
+        print_out("Reaction  database {} does not exist\n".format(str(be_collection)))
+        return None
+
+    df_all = ds_be.get_entries()
+    mols = df_all[df_all['stoichiometry'] == 'be_nocp']['molecule'] 
+
+    mult = client.query_molecules(mols[2])[0].molecular_multiplicity
+    if mult == 2:
+        kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1},'reference': 'uhf'}})
+    else:
+        kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1}}})
+
+    kw_id = client.add_keywords([kw])[0]
+    r = client.add_compute(program, opt_lot.split("_")[0], opt_lot.split("_")[1], "hessian", kw_id, list(mols), tag='comp_hessian')
+    print_out("{} hessian computations have been sent.\n".format(r))
+
+
