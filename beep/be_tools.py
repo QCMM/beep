@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from tqdm import tqdm
+from typing import Union
 
 
 def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecule=None, energy=None, project_trans: bool = True, project_rot: bool = True, molden=False,name=None, lt=None):
@@ -86,7 +87,7 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
 
 
 
-def zpve_correction(name_be, be_method, lot_opt, scale_factor = 1.0, client):
+def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
     ds_be = client.get_collection("ReactionDataset", name_be)
     zpve_corr_dict = {}
     todelete = []
@@ -130,7 +131,7 @@ def zpve_correction(name_be, be_method, lot_opt, scale_factor = 1.0, client):
     df_all = pd.concat([df_be, df_zpve], axis=1)
     
     # The ZPVE correction values obtained using HF-3c/minix geometries need to be scaled by 0.86:
-    if lot_opt.split("_")[0] = 'hf3c':
+    if lot_opt.split("_")[0] == 'hf3c':
         scale_factor = 0.86
     
     df_all['Delta_ZPVE'] = scale_factor * df_all['Delta_ZPVE']
@@ -237,7 +238,7 @@ def gauss_fitting(nbins, data, p0, nboot = 10000):
     print("The best fit is: A: {} mu: {} sigma: {}".format(vbest[0], vbest[1], vbest[2]))
     return vbest
 
-zpve_dictonary = {'nh3_W22' : [0.7621480061870387,0.14224862969428917], 
+zpve_dictionary = {'nh3_W22' : [0.7621480061870387,0.14224862969428917], 
          'ch3oh_W22': [0.8185524741301762,0.17034213359299527], 
          'h2co_W22':[0.7584599636175994,-0.4461259341133827], 
          'hf_W22':[0.7982923884361879,0.], 

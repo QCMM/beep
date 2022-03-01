@@ -5,7 +5,7 @@ except ModuleNotFoundError:
 
 import pandas as pd
 import numpy as np
-from .be_tools import zpve_correction
+from .be_tools import zpve_dictionary
 from .exceptions import *
 
 # Author: svogt, gbovolenta
@@ -60,7 +60,8 @@ class BindingParadise(object):
         c = client.list_collections().loc["ReactionDataset"]
         molecules_list = []
         for row in c.index:
-            if "be_" and "W22" in row:
+            if "be_" in row:
+            #if "be_" and "W22" in row:
                 r = str(row.split("_")[1]) + "_" + str(row.split("_")[2])
                 if r not in molecules_list:
                     molecules_list.append(r)
@@ -143,21 +144,23 @@ class BindingParadise(object):
 
         ds_be_list = []
         for i in range(1, 20):
+            print(i)
             be_name = "be_" + self._mol + "_" + "%02d" % i + "_" + opt_lot
             try:
                 ds_be = client.get_collection("ReactionDataset", be_name)
             except KeyError:
                 continue
+            print(ds_be)
             ds_be_list.append(ds_be)
         self._ds_set = ds_be_list
         self._opt_lot = opt_lot
 
-    def get_methods(self):
+    def get_methods(self, print_out = True):
         """Gets the available binding energy methods:
 
         Parameters
         ----------
-        None
+        print_out: bool, prints out the available binding energy methods.
 
         Returns
         -------
@@ -174,18 +177,19 @@ class BindingParadise(object):
             method = m[2]
             stoich = m[-1]
             method_dict[method] = stoich
-        print(
-            "The available binding energy methods for {} geometries are : {}".format(
-                self._opt_lot, [x for x in method_dict.keys()]
+        if print_out:
+            print(
+                "The available binding energy methods for {} geometries are : {}".format(
+                    self._opt_lot, [x for x in method_dict.keys()]
+                )
             )
-        )
         return method_dict
 
-    def get_zpve_correction(self):
+    def get_zpve_dictionary(self):
         """Returns a list with Zero Point Vibrational Energy correction factors. These have been obtained at HF-3c/MINIX level of theory, using a linear model. In order to correct the binding energy (BE), use:
 
         ``bp = BindingParadise('username ','password')
-          BE = bp.get_zpve_correction()[0] * BE + bp.get_zpve_correction()[1]``
+          BE = bp.get_zpve_dictionary()[0] * BE + bp.get_zpve_correction()[1]``
 
         Parameters
         ----------
@@ -202,7 +206,7 @@ class BindingParadise(object):
         except AttributeError:
             raise MoleculeNotSetError()
 
-        return zpve_correction[self._mol]
+        return zpve_dictionary[self._mol]
 
     def get_values(self, method=None, zpve=False):
         """Gets binding energy values for a given method.
@@ -232,7 +236,7 @@ class BindingParadise(object):
             raise DataNotLoadedError()
 
         en_val_list = []
-        method_dict = self.get_methods()
+        method_dict = self.get_methods(print_out = False)
 
         if not method:
             method = list(method_dict.keys())[0]
@@ -244,70 +248,52 @@ class BindingParadise(object):
         df_be = pd.concat(en_val_list).dropna()
 
         if zpve:
-            m, b = zpve_correction[self._mol]
+            m, b = zpve_dictionary[self._mol]
             df_be[str(method.upper()) + " + ZPVE"] = m * df_be + b
 
         self._df_be = df_be
         return df_be
 
     def get_molecules(self, method=None):
-        """Help on method set_molecule in class BEEP:
+        """Help on method get_molecule in class BEEP:
 
         Parameters
         ----------
 
-        collection_type : str
-            The collection type to be accessed
-        name : str
-            The name of the collection to be accessed
-        full_return : bool, optional
-            Returns the full server response if True that contains additional metadata.
-        include : QueryListStr, optional
-            Return only these columns.
-        exclude : QueryListStr, optional
-            Return all but these columns.
+        method : str or list, optional
+            The methods used to compute the binding energies.  When ``method = None``, sets the first available level of theory. 
+
         Returns
         -------
-        Collection
-            A Collection object if the given collection was found otherwise returns `None`.
+        Pandas.DataFrame
+            A Pandas.DataFrame object containing the binding energy values and molecule objects.
         """
 
         mol_dict = {}
         mol_list = []
         name_list = []
-        method_dict = self.get_methods()
+
+        method_dict = self.get_methods(print_out=False)
 
         if not method:
             method = list(method_dict.keys())[0]
 
         stoich = method_dict[method]
 
-        method_base = method
-
-        # if isinstance(self._df_be, type(None)):
-        self._df_be = self.get_values()
-
-        if "D3BJ" in method.upper():
-            method_base = method.split("-")[0]
-
         for ds in self._ds_set:
-            rr = ds.get_records(method=method_base)
-            idx = rr.index
-            for i in range(len(idx)):
-                mol_frag = rr.index[i][2]
-                if mol_frag == 0:
-                    mol_name = idx[i][0]
-                    mol_id = rr.loc[idx[i]]["Molecule"]
-                    mol_list.append(mol_id)
-                    name_list.append(mol_name)
+            df = ds.get_entries()
+            df.drop_duplicates(subset = ['name'], keep = 'first', inplace = True)
+            mol_list.extend(df['molecule'].tolist())
+            name_list.extend(df['name'].tolist())
         mol_obj_list = self.client.query_molecules(mol_list)
         for i in range(len(mol_obj_list)):
-            mol_dict[name_list[i]] = {"Molecule": mol_obj_list[i]}
+            mol_dict[name_list[i]] = {"molecule": mol_obj_list[i]}
         df_mol = pd.DataFrame.from_dict(mol_dict, orient="index")
-        return pd.concat([self._df_be, df_mol], axis=1)
+        return pd.concat([self.get_values(method=method), df_mol], axis=1)
+
 
     def visualize(self, methods=None):  # bin como opcion (numero)
-        """Help on method set_molecule in class BEEP:
+        """Help on method visualize in class BEEP:
 
         Parameters
         ----------
