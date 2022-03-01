@@ -1,6 +1,6 @@
 import sys, time
 
-import qcfractal.interface as ptl
+import qcportal as ptl
 from pathlib import Path
 
 
@@ -118,13 +118,13 @@ def compute_be(
     lot,
     o_file,
     client,
-    program=program,
+    program='psi4',
 ):
     name_be = "be_" + str(database) + "_" + opt_lot.split("_")[0]
 
     try:
         ds_be = ptl.collections.ReactionDataset(
-            name_be, ds_type="rxn", client=client, default_program="psi4"
+            name_be, ds_type="rxn", client=client, default_program=program
         )
         ds_be.save()
 
@@ -190,12 +190,12 @@ def compute_be(
     f_w.close()
 
 def compute_hessian(
-    be_collection
+    be_collection,
     opt_lot,
     o_file,
     client,
     tag,
-    program="psi4",
+    program='psi4',
     ):
 
     try:
