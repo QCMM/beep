@@ -5,6 +5,7 @@ except ModuleNotFoundError:
 
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 from .be_tools import zpve_dictionary
 from .exceptions import *
 
@@ -112,7 +113,7 @@ class BindingParadise(object):
         print("List of optimization methods: {}".format(opt_lot))
         return opt_lot
 
-    def load_data(self, opt_lot=None):
+    def load_data(self, opt_lot=None, progress_bar=True):
         """Loads binding energy data for the selected molecule:
 
         Parameters
@@ -143,14 +144,18 @@ class BindingParadise(object):
             opt_lot = self._opt_lot_list[0]
 
         ds_be_list = []
-        for i in range(1, 20):
-            print(i)
+       
+        if progress_bar:
+            ran = tqdm(range(1,20))
+        else:
+            ran = range(1,20)
+
+        for i in ran:
             be_name = "be_" + self._mol + "_" + "%02d" % i + "_" + opt_lot
             try:
                 ds_be = client.get_collection("ReactionDataset", be_name)
             except KeyError:
                 continue
-            print(ds_be)
             ds_be_list.append(ds_be)
         self._ds_set = ds_be_list
         self._opt_lot = opt_lot
@@ -208,7 +213,7 @@ class BindingParadise(object):
 
         return zpve_dictionary[self._mol]
 
-    def get_values(self, method=None, zpve=False):
+    def get_values(self, method=None, zpve=False, progress_bar=True):
         """Gets binding energy values for a given method.
 
         Parameters
@@ -218,6 +223,8 @@ class BindingParadise(object):
             The methods used to compute the binding energies.  When ``method = None``, sets the first available level of theory. Use get_be_methods to list the available binding energy methods.
         zpve : bool, optional
             Returns the binding energy values corrected for Zero Point Vibrational Energy.
+        progress_bar : bool, optional
+            Display a progress bar while querying the data from the database.
 
         Returns
         -------
@@ -242,7 +249,12 @@ class BindingParadise(object):
             method = list(method_dict.keys())[0]
         stoich = method_dict[method]
 
-        for ds in self._ds_set:
+        if progress_bar:
+            ran = tqdm(self._ds_set)
+        else:
+            ran = self._ds_set
+
+        for ds in ran:
             en_val = ds.get_values(stoich=stoich, method=method)
             en_val_list.append(en_val)
         df_be = pd.concat(en_val_list).dropna()
@@ -254,14 +266,14 @@ class BindingParadise(object):
         self._df_be = df_be
         return df_be
 
-    def get_molecules(self, method=None):
+    def get_molecules(self, be_method=None):
         """Help on method get_molecule in class BEEP:
 
         Parameters
         ----------
 
-        method : str or list, optional
-            The methods used to compute the binding energies.  When ``method = None``, sets the first available level of theory. 
+        be_method : str or list, optional
+            The methods used to compute the binding energies, that are included in the return dataframe.  When ``method = None``, sets the first available level of theory. 
 
         Returns
         -------
@@ -289,7 +301,7 @@ class BindingParadise(object):
         for i in range(len(mol_obj_list)):
             mol_dict[name_list[i]] = {"molecule": mol_obj_list[i]}
         df_mol = pd.DataFrame.from_dict(mol_dict, orient="index")
-        return pd.concat([self.get_values(method=method), df_mol], axis=1)
+        return pd.concat([self.get_values(method=method), df_mol], axis=1).dropna()
 
 
     def visualize(self, methods=None):  # bin como opcion (numero)
