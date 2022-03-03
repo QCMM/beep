@@ -290,7 +290,7 @@ class BindingParadise(object):
         if not be_method:
             be_method = list(method_dict.keys())[0]
 
-        stoich = method_dict[method]
+        stoich = method_dict[be_method]
 
         for ds in self._ds_set:
             df = ds.get_entries()
