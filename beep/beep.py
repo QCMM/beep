@@ -220,7 +220,7 @@ class BindingParadise(object):
         ----------
 
         method : str or list, optional
-            The methods used to compute the binding energies.  When ``method = None``, sets the first available level of theory. Use get_be_methods to list the available binding energy methods.
+            The methods used to compute the binding energies.  When ``method = None``, sets the first available level of theory. Use get_methods to list the available binding energy methods.
         zpve : bool, optional
             Returns the binding energy values corrected for Zero Point Vibrational Energy.
         progress_bar : bool, optional
@@ -287,8 +287,8 @@ class BindingParadise(object):
 
         method_dict = self.get_methods(print_out=False)
 
-        if not method:
-            method = list(method_dict.keys())[0]
+        if not be_method:
+            be_method = list(method_dict.keys())[0]
 
         stoich = method_dict[method]
 
@@ -384,7 +384,7 @@ class BindingParadise(object):
         ----------
 
         method : str or list, optional
-            The methods used to compute the binding energies.  When ``method = None``, sets the first available level of theory. Use get_be_methods to list the available binding energy methods.
+            The methods used to compute the binding energies.  When ``method = None``, sets the first available level of theory. Use get_methods to list the available binding energy methods.
 
         Returns
         -------
