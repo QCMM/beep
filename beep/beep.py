@@ -301,7 +301,7 @@ class BindingParadise(object):
         for i in range(len(mol_obj_list)):
             mol_dict[name_list[i]] = {"molecule": mol_obj_list[i]}
         df_mol = pd.DataFrame.from_dict(mol_dict, orient="index")
-        return pd.concat([self.get_values(method=method), df_mol], axis=1).dropna()
+        return pd.concat([self.get_values(method=be_method), df_mol], axis=1).dropna()
 
 
     def visualize(self, methods=None):  # bin como opcion (numero)
