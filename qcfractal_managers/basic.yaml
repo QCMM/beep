@@ -1,0 +1,18 @@
+common:
+ tasks_per_worker: 1
+ cores_per_worker: 6
+ max_workers: 1
+ memory_per_worker: 12
+ scratch_directory: "/scratch"
+
+dask:
+ queue: normal
+
+server:
+ fractal_uri: "localhost:7777"
+ verify: "False"
+
+manager:
+    manager_name: basic
+    queue_tag: "basic"
+

@@ -16,17 +16,18 @@ def sampling(
     rmsd_symm,
     wat_collection,
     wat_cluster,
+    mol_collection,
     smol_name,
-    database,
+    opt_dset_name,
     sampling_shell,
     o_file,
-    client,
+    client
 ):
     def print_out(string):
         with open(o_file, "a") as f:
             f.write(string)
 
-    smpl_database = "pre_" + str(database)
+    smpl_opt_dset_name = "pre_" + str(opt_dset_name)
 
     w_opt = client.get_collection("OptimizationDataset", wat_collection)
     s_opt = client.get_collection("OptimizationDataset", mol_collection)
@@ -41,8 +42,8 @@ def sampling(
 
     # sampl_only = options.sampl
     # if sampl_only:
-    #     smpl_database = database
-    #     database = database
+    #     smpl_opt_dset_name = opt_dset_name
+    #     opt_dset_name = opt_dset_name
 
     # s_name = Path(options.s_mol).stem + '_' + Path(options.c_mol).stem
     s_name = smol_name + "_" + wat_cluster
@@ -53,31 +54,31 @@ def sampling(
     out_string = ""
 
     try:
-        smpl_ds_opt = client.get_collection("OptimizationDataset", smpl_database)
+        smpl_ds_opt = client.get_collection("OptimizationDataset", smpl_opt_dset_name)
         out_string += """OptimizationDateset {} already exists, new unique structures will be saved here.
         """.format(
-            smpl_database
+            smpl_opt_dset_name
         )
     except KeyError:
-        smpl_ds_opt = ptl.collections.OptimizationDataset(smpl_database, client=client)
+        smpl_ds_opt = ptl.collections.OptimizationDataset(smpl_opt_dset_name, client=client)
         smpl_ds_opt.save()
         out_string += """Creating new OptimizationDataset {} for optimizations from the sampling.
         """.format(
-            smpl_database
+            smpl_opt_dset_name
         )
 
     try:
-        ds_opt = client.get_collection("OptimizationDataset", database)
+        ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
         out_string += """OptimizationDateset {} already exists, new unique structures will be saved here.
         """.format(
-            database
+            opt_dset_name
         )
     except KeyError:
-        ds_opt = ptl.collections.OptimizationDataset(database, client=client)
+        ds_opt = ptl.collections.OptimizationDataset(opt_dset_name, client=client)
         ds_opt.save()
         out_string += """Creating new OptimizationDataset {}. New unique structures will be stored here.
         """.format(
-            database
+            opt_dset_name
         )
 
     if program == "terachem":
@@ -103,13 +104,13 @@ def sampling(
         out_string += """Adding the specification {} to the {} OptimizationData set.
     
         """.format(
-            spec["name"], smpl_database
+            spec["name"], smpl_opt_dset_name
         )
     except KeyError:
         out_string += """The specification {} is already present in the {} OptimizationData set! Nothing to do here.
     
         """.format(
-            spec["name"], smpl_database
+            spec["name"], smpl_opt_dset_name
         )
     out_string += """
     
@@ -188,7 +189,7 @@ def sampling(
         # Checks if no more jobs are running
         while not jobs_complete:
             # Initaial spec Query to avoid status bug
-            smpl_ds_opt = client.get_collection("OptimizationDataset", smpl_database)
+            smpl_ds_opt = client.get_collection("OptimizationDataset", smpl_opt_dset_name)
             smpl_ds_opt.query(opt_lot)
 
             if not smpl_ds_opt.status(status="INCOMPLETE", specs=opt_lot).empty:
@@ -205,14 +206,14 @@ def sampling(
                 complete_opt_name.append(n)
 
         new = 0
-        # Adding unique structures to database
+        # Adding unique structures to opt_dset_name
         print_out(
             """
     Starting to populate the OptimizationDataset: {}
     
     In the first run the dataset will be seeded with the first structures and from there one every additional
     structure will be compared with all of the existing structures""".format(
-                database
+                opt_dset_name
             )
         )
 
@@ -233,7 +234,7 @@ def sampling(
             record = client.query_procedures(id=i)[0]
             final_mol = record.get_final_molecule()
 
-            # Adding first optimized molecule to the database
+            # Adding first optimized molecule to the opt_dset_name
             if not ds_opt.data.records:
                 print_out(
                     "Seeding the OptimizationDataset with the first structure {} \n".format(
@@ -244,12 +245,12 @@ def sampling(
                 continue
 
             # print_out(out_string)
-            # Comparing molecules to already existing molecules in the Optdatabase, only adding them if RMSD > 0.25
+            # Comparing molecules to already existing molecules in the Optopt_dset_name, only adding them if RMSD > 0.25
             id_list = ds_opt.data.records.items()
             out_string += """
     
     --------------------------------------------------------------------------------------------------
-    Starting the comparison of molecule {} to the existing molecules in the database (unique molecules)
+    Starting the comparison of molecule {} to the existing molecules in the opt_dset_name (unique molecules)
     The RMSD criteria is: {}
     
     """.format(
@@ -299,7 +300,7 @@ def sampling(
             if all(unique):
                 out_string += """
     
-    Molecule {} was found to be unique, proceeding to database addition...
+    Molecule {} was found to be unique, proceeding to opt_dset_name addition...
     
     """.format(
                     n
@@ -318,14 +319,14 @@ def sampling(
                     n
                 )
             print_out(out_string)
-        ds_opt = client.get_collection("OptimizationDataset", database)
+        ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
         tot_mol = ""
         for i in ds_opt.df.index:
             tot_mol += i + " "
         out_string = """
     
     Number of structures processed: {}
-    Total Number of molecules in the database: {}
+    Total Number of molecules in the opt_dset_name: {}
     New molecules in round {}: {}
     Names of structures thus far: {}
     
