@@ -17,7 +17,8 @@ of the Binding Energy Evaluation Platform (BEEP).
 parser = OptionParser(usage=usage)
 parser.add_option("--client_address",
                   dest="client_address",
-                  help="The URL address and port of the QCFractal server (default: localhost:7777)"
+                  help="The URL address and port of the QCFractal server (default: localhost:7777)",
+                  default="localhost:7777"
 )
 parser.add_option("--molecule",
                   dest="molecule",
@@ -34,7 +35,7 @@ parser.add_option("--small_molecule_collection",
                    default="Small_molecules"
 )
 parser.add_option("--molecules_per_round",
-                  dest="molecule_per_round",
+                  dest="molecules_per_round",
                   type = "int",
                   help="Number of molecules to be optimized each round (Default = 10)",
                   default=10
@@ -113,7 +114,7 @@ smol_name = options.molecule
 rmsd_val = options.rmsd_val
 max_struct = options.maximal_binding_sites
 
-client = ptl.FractalClient(address=options.client_add, verify=False)
+client = ptl.FractalClient(address=options.client_address, verify=False)
 
 m = r_lot.split('_')[0]
 b = r_lot.split('_')[1]
@@ -135,17 +136,15 @@ count = 0
 
 for w in range(1,15):
     
-    frame = wat_collection+"_"+"%02d" %w
-    if w ==7 or w==8:
-        continue
-    database = str(smol_name)+ "_"+frame
+    cluster = wat_collection+"_"+"%02d" %w
+    opt_dset_name = str(smol_name)+ "_"+cluster
     try:
-        ds_opt = client.get_collection("OptimizationDataset", database)
+        ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
         c = len(ds_opt.status(collapse=False))
         count = count + int(c)
         continue
     except KeyError:
-        out_file = Path("./site_finder/"+str(smol_name)+"_w/"+ frame + "/out_sampl.dat")
+        out_file = Path("./site_finder/"+str(smol_name)+"_w/"+ cluster + "/out_sampl.dat")
 
     if not out_file.is_file():
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -163,10 +162,10 @@ for w in range(1,15):
     
     '''
         )
-    smpl_database = 'pre_'+str(database)
-    s_conv = sampling(method, basis, program, opt_lot, kw_id, num_struct, rmsd_symm, wat_collection, frame, smol_name, database, s_shell,  out_file, client=client)
+    smpl_opt_dset_name = 'pre_'+str(opt_dset_name)
+    s_conv = sampling(method, basis, program, opt_lot, kw_id, num_struct, rmsd_symm, wat_collection, cluster, mol_collection, smol_name, opt_dset_name, s_shell,  out_file, client)
     if s_conv:
-       ds_opt = client.get_collection("OptimizationDataset", database)
+       ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
        ds_opt.add_specification(**add_spec,overwrite=True)
        ds_opt.save()
        c=ds_opt.compute(m+"_"+b, tag=tag)
