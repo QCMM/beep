@@ -2,7 +2,7 @@ import sys, time
 #import qcfractal.interface as ptl
 import qcportal as ptl
 from pathlib import Path
-#from beep.binding_energy_compute import compute_be
+from beep.binding_energy_compute import compute_be, compute_hessian
 
 from optparse import OptionParser
 usage='''python %prog [options]
@@ -59,22 +59,42 @@ parser.add_option("-p",
 options = parser.parse_args()[0]
 
 wat_collection = options.cluster_collection
-small_collection = options.small_molecule_collection
+mol_collection = options.small_molecule_collection
 program = options.program
 opt_lot = options.opt_lot
 lot = options.level_of_theory
 kw_id   = options.keyword_id
 smol_name = options.molecule
 hessian = options.hessian
-size = wat_collection.split("_")[1]
+#size = wat_collection.split("_")[1]
 
-sys.exit(1)
 frequency =  600
 
 client = ptl.FractalClient(address="localhost:7777", verify=False, username="", password="")
 
 
-out_file = Path(str(smol_name)+"_en/W"+str(size)+"/out_sampl_"+str(opt_lot.split("_")[0])+".dat")
+try:
+    ds_sm = client.get_collection("OptimizationDataset", mol_collection)
+except KeyError:
+    print("""Collection {} with the target molecules does not exist, please create it first. Exiting...
+    """.format(mol_collection))
+    sys.exit(1)
+
+try:
+    target_mol = ds_sm.get_record(smol_name, opt_lot).get_final_molecule()
+except KeyError:
+    print("{} is not optimized at the requested level of theory, please optimize them first\n".format(smol_name))
+    sys.exit(1)
+
+try:
+    ds_soc = client.get_collection("OptimizationDataset", wat_collection)
+except KeyError:
+    print("""Collection with set of clusters that span the surface {} does not exist. Please create it first. Exiting...
+    """.format(wat_collection))
+    sys.exit(1)
+
+
+out_file = Path(str(smol_name)+"_en/"+ds_soc.name+"/out_en_"+str(opt_lot.split("_")[0])+".dat")
 
 def print_out(string):
     with open(out_file, 'a') as f:
@@ -96,14 +116,18 @@ version: 0.2.1
     )
 
 w_dict = {}
-
 w_cluster_list = []
 
 
-for w in range(1,20):
-    frame = "W"+str(size)+"_"+"%02d" %w
-    w_cluster_list.append(frame)
-    w_dict[frame] = False
+for w in ds_soc.data.records:
+    print(w)
+    try:
+        wat_cluster = ds_soc.get_record(w, opt_lot).get_final_molecule()
+    except KeyError:
+        print("{} is not optimized at the requested level of theory, please optimize it first\n".format(w))
+        sys.exit(1)
+    w_cluster_list.append(w)
+    w_dict[w] = False
 
 while not all(w_dict.values()):
     for w in w_cluster_list:
@@ -116,10 +140,16 @@ while not all(w_dict.values()):
             ds_opt = client.get_collection("OptimizationDataset", database)
         except:
             "KeyError"
-            print_out("Optimization database {} does not exist".format(str(database)))
+            print_out("Optimization database {} does not exist\n".format(str(database)))
             continue
 
-        ds_opt.query(opt_lot)
+        try:
+            ds_opt.query(opt_lot)
+        except:
+            "KeyError"
+            print_out("Optimization of {}  has not proceeded at the {} level of theory\n".format(str(database), opt_lot))
+            continue
+        
 
         if not ds_opt.status(status='INCOMPLETE', specs= opt_lot).empty:
             print_out("Collection {}: Some optimizations are still running\n".format(str(database)))
@@ -128,12 +158,13 @@ while not all(w_dict.values()):
             print_out("\n\nCollection {}: All optimizations finished!\n".format(str(database)))
             w_dict[w] = True
             print_out("Time to send the energies!\n")
-            compute_be(wat_collection, small_collection, database, opt_lot, lot, out_file, client=client, program=program)
+            compute_be(wat_collection, mol_collection, database, opt_lot, lot, out_file, client=client, program=program)
             time.sleep(30)
 
         if float(w.split('_')[1]) == float(hessian):
            name_be = "be_" + str(database) + "_" + opt_lot.split("_")[0]
            compute_hessian(name_be, opt_lot, out_file, client=client, program=program)
+           print_out("Sending Hessian computation for cluster {}\n".format(w))
 
     time.sleep(frequency)
 
