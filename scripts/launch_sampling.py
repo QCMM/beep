@@ -118,7 +118,6 @@ client = ptl.FractalClient(address=options.client_address, verify=False)
 
 m = r_lot.split('_')[0]
 b = r_lot.split('_')[1]
-tag = 'refinement'
 
 
 add_spec = {'name': m+'_'+b,
@@ -134,17 +133,43 @@ add_spec = {'name': m+'_'+b,
 
 count = 0
 
-for w in range(1,15):
-    
-    cluster = wat_collection+"_"+"%02d" %w
-    opt_dset_name = str(smol_name)+ "_"+cluster
+try:
+    ds_soc = client.get_collection("OptimizationDataset", wat_collection)
+except KeyError:
+    print("""Collection with set of clusters that span the surface {} does not exist. Please create it first. Exiting...
+    """.format(wat_collection))
+    sys.exit(1)
+
+try:
+    ds_sm = client.get_collection("OptimizationDataset", mol_collection)
+except KeyError:
+    print("""Collection {} with the target molecules does not exist, please create it first. Exiting...
+    """.format(mol_collection))
+    sys.exit(1)
+
+soc_list = ds_soc.data.records
+
+try:
+    target_mol = ds_sm.get_record(smol_name, opt_lot).get_final_molecule()
+except KeyError:
+    print("{} is not optimized at the requested level of theory, please optimize them first\n".format(smol_name))
+
+for w in ds_soc.data.records:
+    try:
+        wat_cluster = ds_soc.get_record(w, opt_lot).get_final_molecule()
+    except KeyError:
+        print("{} is not optimized at the requested level of theory, please optimize it first\n".format(w))
+        continue
+
+    opt_dset_name = smol_name+"_"+w
+
     try:
         ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
         c = len(ds_opt.status(collapse=False))
         count = count + int(c)
         continue
     except KeyError:
-        out_file = Path("./site_finder/"+str(smol_name)+"_w/"+ cluster + "/out_sampl.dat")
+        out_file = Path("./site_finder/"+str(smol_name)+"_w/"+ w + "/out_sampl.dat")
 
     if not out_file.is_file():
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -162,17 +187,19 @@ for w in range(1,15):
     
     '''
         )
-    smpl_opt_dset_name = 'pre_'+str(opt_dset_name)
-    s_conv = sampling(method, basis, program, opt_lot, kw_id, num_struct, rmsd_symm, wat_collection, cluster, mol_collection, smol_name, opt_dset_name, s_shell,  out_file, client)
+    s_conv = sampling(method, basis, program, opt_lot, kw_id, num_struct, rmsd_symm, rmsd_val, target_mol, wat_cluster,  opt_dset_name, s_shell,  out_file, client)
     if s_conv:
        ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
        ds_opt.add_specification(**add_spec,overwrite=True)
        ds_opt.save()
-       c=ds_opt.compute(m+"_"+b, tag=tag)
+       c=ds_opt.compute(m+"_"+b, tag=refinment)
        count = count + int(c)
        with open(out_file, 'a') as f:
            f.write('''
            Sending {} optimizations at {} level.'''.format(c,r_lot))
+    else: 
+        print("An error occured. Check the output in the site-finder folder")
+        sys.exit(1)
     if count > 220: 
        break
 

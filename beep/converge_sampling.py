@@ -14,10 +14,9 @@ def sampling(
     kw_id,
     num_struct,
     rmsd_symm,
-    wat_collection,
+    rmsd_val,
+    target_mol,
     wat_cluster,
-    mol_collection,
-    smol_name,
     opt_dset_name,
     sampling_shell,
     o_file,
@@ -29,33 +28,23 @@ def sampling(
 
     smpl_opt_dset_name = "pre_" + str(opt_dset_name)
 
-    w_opt = client.get_collection("OptimizationDataset", wat_collection)
-    s_opt = client.get_collection("OptimizationDataset", mol_collection)
 
-    try:
-        w_mol = w_opt.get_record(wat_cluster, opt_lot).get_final_molecule()
-        s_mol = s_opt.get_record(smol_name, opt_lot).get_final_molecule()
-    except KeyError:
-        print_out(
-            "Molecules to be sampled are not optimized at the requested level of theory, please optimize them first"
-        )
+    print_out('''
+    Water cluster: {}
+    Small molecule: {}
+    method: {}
+    basis:  {}
+    '''.format(wat_cluster, target_mol, method, basis)   
+    )
 
-    # sampl_only = options.sampl
-    # if sampl_only:
-    #     smpl_opt_dset_name = opt_dset_name
-    #     opt_dset_name = opt_dset_name
-
-    # s_name = Path(options.s_mol).stem + '_' + Path(options.c_mol).stem
-    s_name = smol_name + "_" + wat_cluster
     frequency = 600
-    # rmsd_val = 0.41
-    # max_struct = 21 # W22
+    max_struct = 23
 
     out_string = ""
 
     try:
         smpl_ds_opt = client.get_collection("OptimizationDataset", smpl_opt_dset_name)
-        out_string += """OptimizationDateset {} already exists, new unique structures will be saved here.
+        out_string += """OptimizationDateset {} already exists, new sampled structures will be saved here.
         """.format(
             smpl_opt_dset_name
         )
@@ -137,8 +126,8 @@ def sampling(
         complete_opt_name = []
 
         molecules = mol_sample(
-            w_mol,
-            s_mol,
+            wat_cluster,
+            target_mol,
             number_of_structures=num_struct,
             sampling_shell=sampling_shell,
             print_out=False,
@@ -146,7 +135,7 @@ def sampling(
 
         for m in molecules:
             nmol += 1
-            entry_name = s_name + "_" + str(nmol).zfill(4)
+            entry_name = opt_dset_name + "_" + str(nmol).zfill(4)
             entry_list.append(entry_name)
             try:
                 smpl_ds_opt.add_entry(entry_name, m, save=True)
@@ -264,12 +253,6 @@ def sampling(
                 )[0]
                 ref_mol = rj.get_molecule()
 
-                # Allign the molecules and compute RMSD
-                # if not rmsd_symm:
-                #    align_mols = final_mol.align(ref_mol, atoms_map=True)
-                # else:
-                #    #align_mols = final_mol.align(ref_mol, run_mirror=True, atoms_map=True)
-                #    align_mols = final_mol.align(ref_mol, run_mirror=True)
                 align_mols_map = final_mol.align(ref_mol, atoms_map=True)
                 rmsd_val_map = align_mols_map[1]["rmsd"]
                 rmsd_val_mirror = 1.0

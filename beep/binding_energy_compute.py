@@ -143,12 +143,12 @@ def compute_be(
 
         ds_be = client.get_collection("ReactionDataset", name_be)
 
-    if not ds_be.get_values(method=lot.split("_")[0], basis=lot.split("_")[1]).empty:
-        print_out(
-            "{} Be values already computed in {}\n".format(str(lot), str(database)),
-            o_file,
-        )
-        return None
+    #if not ds_be.get_values(method=lot.split("_")[0], basis=lot.split("_")[1]).empty:
+    #    print_out(
+    #        "{} Be values already computed in {}\n".format(str(lot), str(database)),
+    #        o_file,
+    #    )
+    #    return None
 
     mol_id = ds_be.get_entries().loc[0].molecule
     mult = client.query_molecules(mol_id)[0].molecular_multiplicity
@@ -173,28 +173,27 @@ def compute_be(
             tag='comp_be',
             program=program,
         )
-    print_out("Collection {}: {}, {}\n".format(name_be, c, c1), o_file)
+    print_out("Collection {}: {}\n".format(name_be, c), o_file)
 
-    ids_path = Path(
-        ".enregy_job_ids/" + ds_be.name + "_" + lot.split("_")[0] + "_idlist.dat"
-    )
+    #ids_path = Path(
+    #    ".enregy_job_ids/" + ds_be.name + "_" + lot.split("_")[0] + "_idlist.dat"
+    #)
 
-    if not ids_file.is_file():
-        out_file.parent.mkdir(parents=True, exist_ok=True)
+    #if not ids_file.is_file():
+    #    out_file.parent.mkdir(parents=True, exist_ok=True)
 
-    f_w = open(ids_path, "w")
-    id_str = ""
-    for i in c.ids:
-        id_str += i + " "
-    f_w.write(id_str)
-    f_w.close()
+    #f_w = open(ids_path, "w")
+    #id_str = ""
+    #for i in c.ids:
+    #    id_str += i + " "
+    #f_w.write(id_str)
+    #f_w.close()
 
 def compute_hessian(
     be_collection,
     opt_lot,
     o_file,
     client,
-    tag,
     program='psi4',
     ):
 
@@ -202,13 +201,13 @@ def compute_hessian(
         ds_be = client.get_collection("ReactionDataset", be_collection)
     except:
         "KeyError"
-        print_out("Reaction  database {} does not exist\n".format(str(be_collection)))
+        print_out("Reaction  database {} does not exist\n".format(str(be_collection)), o_file)
         return None
 
     df_all = ds_be.get_entries()
     mols = df_all[df_all['stoichiometry'] == 'be_nocp']['molecule'] 
+    mult = df_all.loc[0].molecule
 
-    mult = client.query_molecules(mols[2])[0].molecular_multiplicity
     if mult == 2:
         kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1},'reference': 'uhf'}})
     else:
@@ -216,6 +215,6 @@ def compute_hessian(
 
     kw_id = client.add_keywords([kw])[0]
     r = client.add_compute(program, opt_lot.split("_")[0], opt_lot.split("_")[1], "hessian", kw_id, list(mols), tag='comp_hessian')
-    print_out("{} hessian computations have been sent.\n".format(r))
+    print_out("{} hessian computations have been sent.\n".format(r), o_file)
 
 
