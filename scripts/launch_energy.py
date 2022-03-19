@@ -1,6 +1,5 @@
 import sys, time
-#import qcfractal.interface as ptl
-import qcportal as ptl
+import qcfractal.interface as ptl
 from pathlib import Path
 from beep.binding_energy_compute import compute_be, compute_hessian
 
@@ -66,7 +65,6 @@ lot = options.level_of_theory
 kw_id   = options.keyword_id
 smol_name = options.molecule
 hessian = options.hessian
-#size = wat_collection.split("_")[1]
 
 frequency =  600
 
@@ -120,7 +118,6 @@ w_cluster_list = []
 
 
 for w in ds_soc.data.records:
-    print(w)
     try:
         wat_cluster = ds_soc.get_record(w, opt_lot).get_final_molecule()
     except KeyError:
@@ -131,7 +128,7 @@ for w in ds_soc.data.records:
 
 while not all(w_dict.values()):
     for w in w_cluster_list:
-
+        print("Procesing cluster: {}".format(w))
         if w_dict[w] == True:
            continue
 

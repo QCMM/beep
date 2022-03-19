@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from tqdm import tqdm
 from typing import Union
+import pandas as pd
 
 
 def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecule=None, energy=None, project_trans: bool = True, project_rot: bool = True, molden=False,name=None, lt=None):
@@ -94,9 +95,14 @@ def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
     for i in ds_be.df.index:
         mols = []
         zpve_list = []
+
+        if 'D3BJ' in be_methods:
+            rec_be_method = be_method.split('-')[0]
+        else:
+            rec_be_method = be_method
     
         for j in range(3):
-            rr = ds_be.get_records(method, stoich= "be_nocp").loc[i]['record'][j]
+            rr = ds_be.get_records(rec_be_method, stoich= "be_nocp").loc[i]['record'][j]
     
             try:
                 m = rr.get_molecule()
@@ -129,6 +135,7 @@ def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
         df_be.drop(i,inplace=True)
     
     df_all = pd.concat([df_be, df_zpve], axis=1)
+    print(df_all.head())
     
     # The ZPVE correction values obtained using HF-3c/minix geometries need to be scaled by 0.86:
     if lot_opt.split("_")[0] == 'hf3c':
@@ -136,9 +143,10 @@ def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
     
     df_all['Delta_ZPVE'] = scale_factor * df_all['Delta_ZPVE']
     
-    df_all['Delta_Eb'] = df_all.loc[:,[method+'-D3BJ/def2-tzvp','Delta_ZPVE']].sum(axis=1)
+    df_all['Delta_Eb'] = df_all.loc[:,[be_method+'/def2-tzvp','Delta_ZPVE']].sum(axis=1)
+
     
-    x = df_all[method+'-D3BJ/def2-tzvp'].astype(str).astype(float)
+    x = df_all[be_method+'/def2-tzvp'].astype(str).astype(float)
     y = df_all['Eb_ZPVE'].astype(str).astype(float)
     
     coef = np.polyfit(x,y,1)
@@ -159,7 +167,7 @@ def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
     
     plt.xlabel('$E_b$ / $kcal$ $mol^{-1}$ ', size = 22)
     plt.ylabel('$E_b$ + $\Delta$ $ZPVE$ / $kcal$ $mol^{-1}$', size = 22)
-    plt.title("Linear Fit: {} + W22_{}, {}-D3BJ/def2-tzvp $E_b$ values".format(molecule.upper(),frame,method), size = 16)
+    plt.title("Linear Fit: {} + W22_{}, {}/def2-tzvp $E_b$ values".format(molecule.upper(),frame, be_method), size = 16)
     
     plt.tick_params(direction='in', which = 'both', labelsize = 20, pad = 15, length=6, width=2, colors='k',
                grid_color='k', grid_alpha=0.2)
