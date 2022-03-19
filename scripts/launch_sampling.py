@@ -1,10 +1,6 @@
 import sys, time
-#sys.path.append('/home/svogt/fractal/site_finder')
-#from molecule_sampler import molecule_sampler as  mol_sample
 import qcfractal.interface as ptl
-#import numpy as np
 from pathlib import Path
-#from converge_sampling import sampling
 from beep.converge_sampling import sampling
 
 from optparse import OptionParser
@@ -155,6 +151,7 @@ except KeyError:
     print("{} is not optimized at the requested level of theory, please optimize them first\n".format(smol_name))
 
 for w in ds_soc.data.records:
+    print("Processing cluster: {}".format(w)))
     try:
         wat_cluster = ds_soc.get_record(w, opt_lot).get_final_molecule()
     except KeyError:
@@ -167,9 +164,10 @@ for w in ds_soc.data.records:
         ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
         c = len(ds_opt.status(collapse=False))
         count = count + int(c)
-        continue
     except KeyError:
-        out_file = Path("./site_finder/"+str(smol_name)+"_w/"+ w + "/out_sampl.dat")
+        pass
+    
+    out_file = Path("./site_finder/"+str(smol_name)+"_w/"+ w + "/out_sampl.dat")
 
     if not out_file.is_file():
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -188,11 +186,12 @@ for w in ds_soc.data.records:
     '''
         )
     s_conv = sampling(method, basis, program, opt_lot, kw_id, num_struct, rmsd_symm, rmsd_val, target_mol, wat_cluster,  opt_dset_name, s_shell,  out_file, client)
+    print("Total number of binding sites so far: {} ".format(count))
     if s_conv:
        ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
        ds_opt.add_specification(**add_spec,overwrite=True)
        ds_opt.save()
-       c=ds_opt.compute(m+"_"+b, tag=refinment)
+       c=ds_opt.compute(m+"_"+b, tag="refinement")
        count = count + int(c)
        with open(out_file, 'a') as f:
            f.write('''
