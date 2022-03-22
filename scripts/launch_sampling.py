@@ -151,7 +151,7 @@ except KeyError:
     print("{} is not optimized at the requested level of theory, please optimize them first\n".format(smol_name))
 
 for w in ds_soc.data.records:
-    print("Processing cluster: {}".format(w)))
+    print("Processing cluster: {}".format(w))
     try:
         wat_cluster = ds_soc.get_record(w, opt_lot).get_final_molecule()
     except KeyError:

@@ -128,7 +128,7 @@ for w in ds_soc.data.records:
 
 while not all(w_dict.values()):
     for w in w_cluster_list:
-        print("Procesing cluster: {}".format(w))
+        print("Processing cluster: {}".format(w))
         if w_dict[w] == True:
            continue
 
