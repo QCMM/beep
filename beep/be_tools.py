@@ -32,6 +32,11 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
     vibinfo : dict
         A dictionary of vibrational information. See :py:func:`~psi4.driver.qcdb.vib.harmonic_analysis`
     """
+
+    from psi4.driver import qcdb
+    from psi4 import core, geometry
+    
+
     
     if hess is None:
         print("no hessian")
@@ -41,7 +46,7 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
     
  
     m=molecule.to_string('xyz')
-    mol = psi4.geometry(m)
+    mol = geometry(m)
     geom = np.asarray(mol.geometry())
     symbols = [mol.symbol(at) for at in range(mol.natom())]
     vibrec = {'molecule': mol.to_dict(np_out=False), 'hessian': nmwhess.tolist()}
@@ -81,7 +86,6 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
         core.set_variable("ENTHALPY", therminfo['H_tot'].data)  # P::e THERMO
         core.set_variable("GIBBS FREE ENERGY", therminfo['G_tot'].data)  # P::e THERMO
 
-        #core.print_out(thermtext)
     else:
         core.print_out('  Thermochemical analysis skipped for partial frequency calculation.\n')
     return vibinfo, therminfo
@@ -89,35 +93,36 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
 
 
 def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
+    import qcelemental as qcel
+
     ds_be = client.get_collection("ReactionDataset", name_be)
+    df_all = ds_be.get_entries()
+    df_nocp = df_all[df_all['stoichiometry'] == 'be_nocp']
+
     zpve_corr_dict = {}
     todelete = []
-    for i in ds_be.df.index:
+
+    for i in ds_be.get_index():
         mols = []
         zpve_list = []
 
-        if 'D3BJ' in be_methods:
-            rec_be_method = be_method.split('-')[0]
-        else:
-            rec_be_method = be_method
+        #if 'D3BJ' in be_method:
+        #    rec_be_method = be_method.split('-')[0]
+        #else:
+        #    rec_be_method = be_method
     
-        for j in range(3):
-            rr = ds_be.get_records(rec_be_method, stoich= "be_nocp").loc[i]['record'][j]
-    
+        mol_list = df_nocp[df_nocp['name'] == i]['molecule']
+
+        for mol in mol_list:
             try:
-                m = rr.get_molecule()
-            except AttributeError:
-                continue
-    
-            try:
-                r = client.query_results(driver='hessian', molecule=m.id, method=lot_opt.split("_")[0], basis=lot_opt.split("_")[1], keywords = None )[0]
+                r = client.query_results(driver='hessian', molecule=mol, method=lot_opt.split("_")[0], basis=lot_opt.split("_")[1], keywords = None )[0]
             except IndexError:
                 print("Molecule {} does not have hessian yet".format(str(i)))
                 continue
     
             h = r.dict()['return_result']
             e = r.dict()['extras']['qcvars']['CURRENT ENERGY']
-            vib,therm = _vibanal_wfn(hess=h, molecule=m, name=i, energy=e, lt=lot_opt)
+            vib,therm = _vibanal_wfn(hess=h, molecule=r.get_molecule(), name=i, energy=e, lt=lot_opt)
             zpve_list.append(therm['ZPE_vib'].data)
     
         if len(zpve_list) != 3:
@@ -135,19 +140,22 @@ def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
         df_be.drop(i,inplace=True)
     
     df_all = pd.concat([df_be, df_zpve], axis=1)
-    print(df_all.head())
     
     # The ZPVE correction values obtained using HF-3c/minix geometries need to be scaled by 0.86:
     if lot_opt.split("_")[0] == 'hf3c':
         scale_factor = 0.86
     
     df_all['Delta_ZPVE'] = scale_factor * df_all['Delta_ZPVE']
-    
-    df_all['Delta_Eb'] = df_all.loc[:,[be_method+'/def2-tzvp','Delta_ZPVE']].sum(axis=1)
+
+
+    # Calculate ZPVE corrected binding energies
+    df_all['Eb_ZPVE'] = df_all.loc[:,[be_method+'/def2-tzvp','Delta_ZPVE']].sum(axis=1)
 
     
     x = df_all[be_method+'/def2-tzvp'].astype(str).astype(float)
     y = df_all['Eb_ZPVE'].astype(str).astype(float)
+
+    mol_name = "_".join(name_be.split("_")[1:4])
     
     coef = np.polyfit(x,y,1)
     poly1d_fn = np.poly1d(coef)
@@ -163,11 +171,11 @@ def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
     
     plt.plot(x,y, 's', markersize = 13)
     plt.plot(x, poly1d_fn(x), '--k', label= '''y = {0:.3g}x +{1:.3g}
-    $R^2$ = {2:.2g}'''.format(m,b,r_squared))
+    $R^2$ = {2:.2g}'''.format(m,b,r_sq))
     
     plt.xlabel('$E_b$ / $kcal$ $mol^{-1}$ ', size = 22)
     plt.ylabel('$E_b$ + $\Delta$ $ZPVE$ / $kcal$ $mol^{-1}$', size = 22)
-    plt.title("Linear Fit: {} + W22_{}, {}/def2-tzvp $E_b$ values".format(molecule.upper(),frame, be_method), size = 16)
+    plt.title("Linear Fit: {} , {}/def2-tzvp $E_b$ values".format(mol_name, be_method), size = 16)
     
     plt.tick_params(direction='in', which = 'both', labelsize = 20, pad = 15, length=6, width=2, colors='k',
                grid_color='k', grid_alpha=0.2)
@@ -184,7 +192,6 @@ def gauss_fitting(nbins, data, p0, nboot = 10000):
 
     # do histogram of experimental data
     ydata, bin_edges = np.histogram(data, bins=nbins)
-    #print(ydata)
     
     # error is Poisson
     err = np.sqrt(ydata)
@@ -230,7 +237,7 @@ def gauss_fitting(nbins, data, p0, nboot = 10000):
     
         # plot the distribiution of the coeficients
         xdata = np.linspace(min(vxbin), max(vxbin), 100)
-        zdata = _gauss(xdata, *vcoef)
+        zdata = gauss(xdata, *vcoef)
         plt.subplot(1, 4, i+1)
         plt.hist(vdata, bins=30)
         plt.plot(xdata, zdata)
@@ -238,11 +245,10 @@ def gauss_fitting(nbins, data, p0, nboot = 10000):
    
     # check if bootstrap fit original data properly
     xdata = np.linspace(min(xbin), max(xbin), 100)
-    #p0 = [50., 5e3, 2e3]
     plt.subplot(1, 4, 4)
     plt.hist(data, bins=nbins, color='g', alpha = 0.6)
     plt.bar(xbin, ydata, width=0, yerr=err, color='b')
-    plt.plot(xdata, _gauss(xdata, *vbest), color='k')
+    plt.plot(xdata, gauss(xdata, *vbest), color='k')
     print("The best fit is: A: {} mu: {} sigma: {}".format(vbest[0], vbest[1], vbest[2]))
     return vbest
 
