@@ -14,6 +14,8 @@ your base directory.
 
 `conda install mamba -n base -c conda-forge`
 
+Then you can install QCPortal by running. 
+
 `mamba install -c conda-forge qcportal`
 
 If you would like to create your own database using the BEEP protocol or if you would like 
