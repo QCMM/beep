@@ -7,10 +7,10 @@ BEEP (Binding Energy Evaluation Platform)
 
 A binding energy evaluation platform and database for molecules on interstellar ice-grain mantels.
 
-If you would like to Query the platform using the BindingParadies class or QCPortal you 
-will need to install the  QCPortal python module. The easiest way to install it it is using the 
-[Mamba Python pacakge manager](https://mamba.readthedocs.io/en/latest/index.html). First install mamba using conda into
-your base directory.
+If you would like to query the platform using the BindingParadies class or QCPortal you 
+will need to install the  QCPortal Python module. The easiest way to install it it is using the 
+[Mamba Python pacakge manager](https://mamba.readthedocs.io/en/latest/index.html). First install mamba, inside
+your anaconda base directory.
 
 `conda install mamba -n base -c conda-forge`
 
