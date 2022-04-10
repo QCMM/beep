@@ -19,10 +19,14 @@ Then you can install QCPortal by running.
 `mamba install -c conda-forge qcportal`
 
 If you would like to create your own database using the BEEP protocol or if you would like 
-to contribute to the BEEP database you will need to install the QCFractal module. It is best to create 
-a new qcfractal conda environmente before installing QCFractal.
+to contribute to the BEEP database you will need to install the QCFractal module. It is best intall
+QCFractal into a fresh environment.
 
-`mamba install  -c conda-forge -c psi4 qcfractal psi4`
+`mamba install --name qcfrc -c conda-forge -c psi4 qcfractal psi4`
+
+Once you installed QCFractal or QCPortal, to install the BEEP libraries run:
+
+python setup.py install
 
 For examples of data query and data generation head to the tutorials folder in this repository.
 
