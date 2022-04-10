@@ -26,7 +26,7 @@ QCFractal into a fresh environment.
 
 Once you installed QCFractal or QCPortal, to install the BEEP libraries run:
 
-python setup.py install
+`python setup.py install`
 
 For examples of data query and data generation head to the tutorials folder in this repository.
 
