@@ -13,6 +13,7 @@ def sampling(
     opt_lot,
     kw_id,
     num_struct,
+    max_struct,
     rmsd_symm,
     rmsd_val,
     target_mol,
@@ -38,7 +39,7 @@ def sampling(
     )
 
     frequency = 600
-    max_struct = 23
+    #max_struct = 23
 
     out_string = ""
 
