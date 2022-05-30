@@ -1,6 +1,6 @@
 import sys, time
 from .molecule_sampler import molecule_sampler as mol_sample
-import qcportal as ptl
+import qcfractal.interface as ptl
 import numpy as np
 from pathlib import Path
 from optparse import OptionParser
