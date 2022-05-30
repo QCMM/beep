@@ -16,14 +16,19 @@ parser.add_option("--client_address",
                   help="The URL address and port of the QCFractal server (default: localhost:7777)",
                   default="localhost:7777"
 )
+parser.add_option("--client_address",
+                  dest="client_address",
+                  help="The URL address and port of the QCFractal server (default: localhost:7777)",
+                  default="localhost:7777"
+)
 parser.add_option("--molecule",
                   dest="molecule",
                   help="The name of the molecule to be sampled (from a QCFractal OptimizationDataSet collection)"
 )
 parser.add_option("--surface_model_collection",
                    dest="surface_model_collection",
-                   help="The name of the collection with the set of water clusters (dafault: ASW_22)",
-                   default="ASW_12"
+                   help="The name of the collection with the set of water clusters (dafault: Water_22)",
+                   default="Water_22"
 )
 parser.add_option("--small_molecule_collection",
                    dest="small_molecule_collection",
@@ -185,7 +190,7 @@ for w in ds_soc.data.records:
     
     '''
         )
-    s_conv = sampling(method, basis, program, opt_lot, kw_id, num_struct, rmsd_symm, rmsd_val, target_mol, wat_cluster,  opt_dset_name, s_shell,  out_file, client)
+    s_conv = sampling(method, basis, program, opt_lot, kw_id, num_struct, max_struct, rmsd_symm, rmsd_val, target_mol, wat_cluster,  opt_dset_name, s_shell,  out_file, client)
     print("Total number of binding sites so far: {} ".format(count))
     if s_conv:
        ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
