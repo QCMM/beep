@@ -1,6 +1,6 @@
 import sys, time
 
-import qcportal as ptl
+import qcfractal.interface as ptl
 from pathlib import Path
 
 
