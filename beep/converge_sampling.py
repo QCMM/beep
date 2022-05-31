@@ -40,7 +40,6 @@ def sampling(
     )
 
     frequency = 600
-    #max_struct = 23
 
     out_string = ""
 
@@ -109,11 +108,12 @@ def sampling(
     Program: {}
     Method: {}
     Basis:  {}
+    Maximum number of structures to look for:  {}
     
     Starting Convergence procedure....
     
     """.format(
-        program, method, basis
+        program, method, basis, max_struct
     )
 
     print_out(out_string)
@@ -321,7 +321,7 @@ def sampling(
             len(complete_opt_name), len(ds_opt.df.index), c, new, tot_mol
         )
         print_out(out_string)
-        c = c + 1
+        c += 1
         if len(ds_opt.df.index) <= 13:
             continue
         if (len(ds_opt.df.index) >= max_struct) or c >= 7 or (new <= 1):
