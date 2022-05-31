@@ -16,10 +16,14 @@ parser.add_option("--client_address",
                   help="The URL address and port of the QCFractal server (default: localhost:7777)",
                   default="localhost:7777"
 )
-parser.add_option("--client_address",
-                  dest="client_address",
-                  help="The URL address and port of the QCFractal server (default: localhost:7777)",
-                  default="localhost:7777"
+parser.add_option("--username",
+                  dest="usern",
+                  help="The username for the database client (Default = None)",
+                  default=None
+parser.add_option("--password",
+                  dest="passwd",
+                  help="The password for the database client (Default = None)",
+                  default=None
 )
 parser.add_option("--molecule",
                   dest="molecule",
@@ -100,6 +104,8 @@ def print_out(string, o_file):
 
 options = parser.parse_args()[0]
 
+username = options.usern
+password = options.passwd
 method  = options.level_of_theory.split("_")[0]
 basis  = options.level_of_theory.split("_")[1]
 program = options.program
@@ -115,7 +121,7 @@ smol_name = options.molecule
 rmsd_val = options.rmsd_val
 max_struct = options.maximal_binding_sites
 
-client = ptl.FractalClient(address=options.client_address, verify=False)
+client = ptl.FractalClient(address=options.client_address, verify=False, username = username, password=password)
 
 m = r_lot.split('_')[0]
 b = r_lot.split('_')[1]

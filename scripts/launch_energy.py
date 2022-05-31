@@ -12,6 +12,20 @@ QCFractal DataSet). This CLI is part of the Binding Energy Evaluation Platform (
 '''
 parser = OptionParser(usage=usage)
 
+parser.add_option("--client_address",
+                  dest="client_address",
+                  help="The URL address and port of the QCFractal server (default: localhost:7777)",
+                  default="localhost:7777"
+)
+parser.add_option("--username",
+                  dest="usern",
+                  help="The username for the database client (Default = None)",
+                  default=None
+parser.add_option("--password",
+                  dest="passwd",
+                  help="The password for the database client (Default = None)",
+                  default=None
+)
 parser.add_option("--cluster_collection",
                    dest="cluster_collection",
                    help="The name of the collection with the water clusters (default: Water_22)",
@@ -57,6 +71,8 @@ parser.add_option("-p",
 
 options = parser.parse_args()[0]
 
+username = options.usern
+password = options.passwd
 wat_collection = options.cluster_collection
 mol_collection = options.small_molecule_collection
 program = options.program
@@ -68,8 +84,8 @@ hessian = options.hessian
 
 frequency =  600
 
-client = ptl.FractalClient(address="localhost:7777", verify=False, username="", password="")
 
+client = ptl.FractalClient(address=options.client_address, verify=False, username = username, password=password)
 
 try:
     ds_sm = client.get_collection("OptimizationDataset", mol_collection)
