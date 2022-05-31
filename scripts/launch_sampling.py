@@ -20,6 +20,7 @@ parser.add_option("--username",
                   dest="usern",
                   help="The username for the database client (Default = None)",
                   default=None
+)
 parser.add_option("--password",
                   dest="passwd",
                   help="The password for the database client (Default = None)",
@@ -48,8 +49,8 @@ parser.add_option("--molecules_per_round",
 parser.add_option("--sampling_shell",
                   dest="sampling_shell",
                   type = "float",
-                  default=1.5,
-                  help="The shell size of sampling space (Default = 1.5 Angstrom)"
+                  default=2.0,
+                  help="The shell size of sampling space in Angstrom (Default = 2.0) "
 )
 parser.add_option("--maximal_binding_sites",
                   dest="maximal_binding_sites",
@@ -85,17 +86,22 @@ parser.add_option("-p",
                   default="psi4",
                   help="The program to use for this calculation (default: psi4)",
                   )
+parser.add_option("--sampling_tag",
+                  dest="tag",
+                  default="sampling",
+                  help="The tag to used to specify the qcfractal-manager for the sampling optimization  (default: sampling)",
+                  )
 
 parser.add_option("-k",
                   "--keyword_id",
                   dest="keyword_id",
                   help="ID of the QC keywords for the OptimizationDataSet specification (default: None)",
                   default=None)
-parser.add_option("--print_out",
-                  action='store_true',
-                  dest="print_out",
-                  help="Print an output"
-)
+#parser.add_option("--print_out",
+#                  action='store_true',
+#                  dest="print_out",
+#                  help="Print an output"
+#)
 
 
 def print_out(string, o_file):
@@ -109,6 +115,7 @@ password = options.passwd
 method  = options.level_of_theory.split("_")[0]
 basis  = options.level_of_theory.split("_")[1]
 program = options.program
+tag = options.tag
 opt_lot = options.level_of_theory
 r_lot = options.r_level_of_theory
 kw_id   = options.keyword_id
@@ -196,7 +203,7 @@ for w in ds_soc.data.records:
     
     '''
         )
-    s_conv = sampling(method, basis, program, opt_lot, kw_id, num_struct, max_struct, rmsd_symm, rmsd_val, target_mol, wat_cluster,  opt_dset_name, s_shell,  out_file, client)
+    s_conv = sampling(method, basis, program, opt_lot, tag, kw_id, num_struct, max_struct, rmsd_symm, rmsd_val, target_mol, wat_cluster,  opt_dset_name, s_shell,  out_file, client)
     print("Total number of binding sites so far: {} ".format(count))
     if s_conv:
        ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)

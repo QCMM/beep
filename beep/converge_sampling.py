@@ -11,6 +11,7 @@ def sampling(
     basis,
     program,
     opt_lot,
+    tag,
     kw_id,
     num_struct,
     max_struct,
@@ -155,7 +156,7 @@ def sampling(
             )
         )
 
-        smpl_ds_opt.compute(opt_lot, tag="sampling")
+        smpl_ds_opt.compute(opt_lot, tag=tag)
         print_out("The optimization procedures were submitted!")
         pid = ""
         for n in entry_list:

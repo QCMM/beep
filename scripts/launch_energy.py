@@ -21,6 +21,7 @@ parser.add_option("--username",
                   dest="usern",
                   help="The username for the database client (Default = None)",
                   default=None
+)
 parser.add_option("--password",
                   dest="passwd",
                   help="The password for the database client (Default = None)",
