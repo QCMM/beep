@@ -54,6 +54,7 @@ parser.add_option("--sampling_shell",
 )
 parser.add_option("--maximal_binding_sites",
                   dest="maximal_binding_sites",
+                  type = "int",
                   default= 21,
                   help="The maximal number of binding sites per cluster (default: 21)"
 )
@@ -72,6 +73,7 @@ parser.add_option("--refinement_level_of_theory",
                  )
 parser.add_option("--rmsd_value",
                   dest="rmsd_val",
+                  type = "float",
                   default= 0.40,
                   help="Rmsd geometrical criteria, all structure below this value will not be considered as unique. (default: 0.40 angstrom)",
 )
