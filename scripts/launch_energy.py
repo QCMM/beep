@@ -27,7 +27,7 @@ parser.add_option("--password",
                   help="The password for the database client (Default = None)",
                   default=None
 )
-parser.add_option("--surface-model-collection",
+parser.add_option("--surface_model_collection",
                    dest="surface_model_collection",
                    help="The name of the collection with the water clusters (default: Water_22)",
                    default="Water_22"
