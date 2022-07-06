@@ -74,7 +74,7 @@ parser.add_option("-p",
 parser.add_option("--energy_tag",
                   dest="energy_tag",
                   default="energies",
-                  help="The tag to used to specify the qcfractal-manager for the BE computations  (default: energies)",
+                  help="The tag to used to specify the qcfractal-manager for the BE computations  (default: energies)")
 parser.add_option("--hessian_tag",
                   dest="hess_tag",
                   default="hessian",
