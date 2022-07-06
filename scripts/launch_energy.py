@@ -71,6 +71,15 @@ parser.add_option("-p",
                   help="The program to use for this calculation (default: psi4)",
                   )
 
+parser.add_option("--energy_tag",
+                  dest="energy_tag",
+                  default="energies",
+                  help="The tag to used to specify the qcfractal-manager for the BE computations  (default: energies)",
+parser.add_option("--hessian_tag",
+                  dest="hess_tag",
+                  default="hessian",
+                  help="The tag to used to specify the qcfractal-manager for the hessian  (default: hessian)",
+
 options = parser.parse_args()[0]
 
 username = options.usern
@@ -83,6 +92,8 @@ lot = options.level_of_theory
 kw_id   = options.keyword_id
 smol_name = options.molecule
 hessian = options.hessian
+be_tag= options.energy_tag
+hess_tag= options.hess_tag
 
 frequency =  600
 
@@ -173,12 +184,12 @@ while not all(w_dict.values()):
             print_out("\n\nCollection {}: All optimizations finished!\n".format(str(database)))
             w_dict[w] = True
             print_out("Time to send the energies!\n")
-            compute_be(wat_collection, mol_collection, database, opt_lot, lot, out_file, client=client, program=program)
+            compute_be(wat_collection, mol_collection, database, opt_lot, lot, out_file, energy_tag, client=client, program=program)
             time.sleep(30)
 
         if float(w.split('_')[1]) == float(hessian):
            name_be = "be_" + str(database) + "_" + opt_lot.split("_")[0]
-           compute_hessian(name_be, opt_lot, out_file, client=client, program=program)
+           compute_hessian(name_be, opt_lot, out_file, hess_tag, client=client, program=program)
            print_out("Sending Hessian computation for cluster {}\n".format(w))
 
     time.sleep(frequency)

@@ -117,6 +117,7 @@ def compute_be(
     opt_lot,
     lot,
     o_file,
+    be_tag,
     client,
     program='psi4',
 ):
@@ -162,7 +163,7 @@ def compute_be(
             lot.split("_")[1],
             keywords="rad_be",
             stoich="default",
-            tag='comp_be',
+            tag=be_tag,
             program=program,
         )
     else:
@@ -170,7 +171,7 @@ def compute_be(
             lot.split("_")[0],
             lot.split("_")[1],
             stoich="default",
-            tag='comp_be',
+            tag=be_tag,
             program=program,
         )
     print_out("Collection {}: {}\n".format(name_be, c), o_file)
@@ -193,6 +194,7 @@ def compute_hessian(
     be_collection,
     opt_lot,
     o_file,
+    hess_tag,
     client,
     program='psi4',
     ):
@@ -214,7 +216,7 @@ def compute_hessian(
         kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1}}})
 
     kw_id = client.add_keywords([kw])[0]
-    r = client.add_compute(program, opt_lot.split("_")[0], opt_lot.split("_")[1], "hessian", kw_id, list(mols), tag='comp_hessian')
+    r = client.add_compute(program, opt_lot.split("_")[0], opt_lot.split("_")[1], "hessian", kw_id, list(mols), tag=hess_tag)
     print_out("{} hessian computations have been sent.\n".format(r), o_file)
 
 
