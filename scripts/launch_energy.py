@@ -27,13 +27,13 @@ parser.add_option("--password",
                   help="The password for the database client (Default = None)",
                   default=None
 )
-parser.add_option("--cluster_collection",
-                   dest="cluster_collection",
+parser.add_option("--surface-model-collection",
+                   dest="surface-model-collection",
                    help="The name of the collection with the water clusters (default: Water_22)",
                    default="Water_22"
                    )
 
-parser.add_option("--small_mol_collection",
+parser.add_option("--small_molecule_collection",
                    dest="small_molecule_collection",
                    help="The name of the collection with small molecules or radicals (default: Small_molecules)",
                    default="Small_molecules"
@@ -50,7 +50,7 @@ parser.add_option("--level_of_theory",
 parser.add_option("--opt_level_of_theory",
                   dest="opt_lot",
                   help=
-                  "The level of theory of for the optimization of the binding sites in the format: method_basis (default: hf3c_minix)",
+                  "The level of theory  of the binding sites optimization in the format: method_basis (default: hf3c_minix)",
                   default="hf3c_minix"
                  )
 
@@ -58,9 +58,10 @@ parser.add_option("--keyword_id",
                   dest="keyword_id",
                   help="ID of the QCfractal for the single point computations keywords (default: None)",
                   default=None)
+
 parser.add_option("--hessian_compute",
                   dest="hessian",
-                  help="Computes the hessian for the molecules comprising the binding sites of model cluster X. If 0 is specified, no Hessian is computed (defualt = 1)",
+                  help="Computes the hessian for the molecules comprising the binding sites of model cluster X. If 0 is specified, no Hessian is computed (default = 1)",
                   default=1)
 
 parser.add_option("-p",
@@ -74,7 +75,7 @@ options = parser.parse_args()[0]
 
 username = options.usern
 password = options.passwd
-wat_collection = options.cluster_collection
+wat_collection = options.surface_model_collection
 mol_collection = options.small_molecule_collection
 program = options.program
 opt_lot = options.opt_lot
