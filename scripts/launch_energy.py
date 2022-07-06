@@ -79,7 +79,7 @@ parser.add_option("--hessian_tag",
                   dest="hess_tag",
                   default="hessian",
                   help="The tag to used to specify the qcfractal-manager for the hessian  (default: hessian)",
-
+                 )
 options = parser.parse_args()[0]
 
 username = options.usern
