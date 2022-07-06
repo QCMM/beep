@@ -92,7 +92,7 @@ lot = options.level_of_theory
 kw_id   = options.keyword_id
 smol_name = options.molecule
 hessian = options.hessian
-be_tag= options.energy_tag
+energy_tag= options.energy_tag
 hess_tag= options.hess_tag
 
 frequency =  600
