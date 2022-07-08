@@ -1,5 +1,6 @@
+![logo_BEEP](https://user-images.githubusercontent.com/7481702/178007641-1f4260b3-dd34-4e39-9a51-286b076c5ea8.png)
 
-![logo_BEEP](https://user-images.githubusercontent.com/7481702/177996659-c3bba391-e779-42e3-9bad-52201b022770.png)
+
 
 [//]: # (Badges)
 [![codecov](https://codecov.io/gh/REPLACE_WITH_OWNER_ACCOUNT/BEEP/branch/master/graph/badge.svg)](https://codecov.io/gh/REPLACE_WITH_OWNER_ACCOUNT/BEEP/branch/master)
