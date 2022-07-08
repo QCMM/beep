@@ -35,7 +35,7 @@ For examples of data query and data generation head to the tutorials folder in t
 
 ### Copyright
 
-Copyright (c) 2022, Stefan Vogt-Geisse, Giulia Bovolenta
+Copyright (c) 2022, Stefan Vogt-Geisse, Giulia M. Bovolenta
 
 
 #### Acknowledgements
