@@ -1,8 +1,13 @@
+
+![logo_BEEP](https://user-images.githubusercontent.com/7481702/177996659-c3bba391-e779-42e3-9bad-52201b022770.png)
+
+
 BEEP (Binding Energy Evaluation Platform)
 ==============================
 [//]: # (Badges)
 [![GitHub Actions Build Status](https://github.com/REPLACE_WITH_OWNER_ACCOUNT/beep/workflows/CI/badge.svg)](https://github.com/REPLACE_WITH_OWNER_ACCOUNT/beep/actions?query=workflow%3ACI)
 [![codecov](https://codecov.io/gh/REPLACE_WITH_OWNER_ACCOUNT/BEEP/branch/master/graph/badge.svg)](https://codecov.io/gh/REPLACE_WITH_OWNER_ACCOUNT/BEEP/branch/master)
+
 
 
 A binding energy evaluation platform and database for molecules on interstellar ice-grain mantels.
