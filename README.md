@@ -6,7 +6,7 @@
 
 
 
-A binding energy evaluation platform and database for molecules on interstellar ice-grain mantels.
+BEEP is a binding energy evaluation platform and database for molecules on interstellar ice-grain mantels.
 
 If you would like to query the platform using the BindingParadies class or QCPortal you 
 will need to install the  QCPortal Python module. The easiest way to install it it is using the 
