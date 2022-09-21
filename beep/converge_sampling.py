@@ -182,7 +182,7 @@ def sampling(
         status = []
 
         while not jobs_complete:
-            for i in ids:
+            for i in pid:
                 rr = client.query_procedures(i)[0]
                 status.append(rr.status)
 
