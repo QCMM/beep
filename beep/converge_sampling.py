@@ -182,10 +182,8 @@ def sampling(
         status = []
 
         while not jobs_complete:
-            for i in pid:
-                print(i)
-                print(type(i))
-                rr = client.query_procedures(float(i))[0]
+            for i in pid.split():
+                rr = client.query_procedures(int(i))[0]
                 status.append(rr.status)
 
             # Initaial spec Query to avoid status bug
