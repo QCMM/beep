@@ -179,7 +179,7 @@ def sampling(
 
         # Checks if no more jobs are running
 
-       status = []
+        status = []
 
         while not jobs_complete:
             for i in ids:
