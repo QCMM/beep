@@ -178,14 +178,25 @@ def sampling(
         print_out("Waiting for optimizations to complete\n\n")
 
         # Checks if no more jobs are running
+
+       status = []
+
         while not jobs_complete:
+            for i in ids:
+                rr = client.query_procedures(i)[0]
+                status.append(rr.status)
+
             # Initaial spec Query to avoid status bug
             smpl_ds_opt = client.get_collection("OptimizationDataset", smpl_opt_dset_name)
             smpl_ds_opt.query(opt_lot)
 
-            if not smpl_ds_opt.status(status="INCOMPLETE", specs=opt_lot).empty:
+            #if not smpl_ds_opt.status(status="INCOMPLETE", specs=opt_lot).empty:
+            #    print_out("Some jobs are still running, will sleep now\n")
+            #    time.sleep(frequency)
+            if "INCOMPLETE" in status:
                 print_out("Some jobs are still running, will sleep now\n")
                 time.sleep(frequency)
+
             else:
                 print_out("All jobs finished!\n")
                 jobs_complete = True
