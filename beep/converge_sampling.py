@@ -179,9 +179,9 @@ def sampling(
 
         # Checks if no more jobs are running
 
-        status = []
 
         while not jobs_complete:
+            status = []
             for i in pid.split():
                 rr = client.query_procedures(int(i))[0]
                 status.append(rr.status)
@@ -193,11 +193,15 @@ def sampling(
             #if not smpl_ds_opt.status(status="INCOMPLETE", specs=opt_lot).empty:
             #    print_out("Some jobs are still running, will sleep now\n")
             #    time.sleep(frequency)
+            
+            #print_out("Current status of jobs\n")
+            #print_out(str(status))
+            #print_out("\n")
             if "INCOMPLETE" in status:
                 print_out("Some jobs are still running, will sleep now\n")
                 time.sleep(frequency)
 
-            else:
+            if not "INCOMPLETE" in status:
                 print_out("All jobs finished!\n")
                 jobs_complete = True
 
@@ -333,7 +337,7 @@ def sampling(
         )
         print_out(out_string)
         c += 1
-        if len(ds_opt.df.index) <= 13:
+        if len(ds_opt.df.index) <= 16:
             continue
         if (len(ds_opt.df.index) >= max_struct) or c >= 7 or (new <= 1):
             converged = True
