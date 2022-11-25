@@ -4,7 +4,7 @@ import qcelemental as qcel
 from pathlib import Path
 
 
-def molecule_sampler(
+def random_molecule_sampler(
     w_molecule,
     s_molecule,
     number_of_structures=10,
@@ -176,6 +176,8 @@ def main():
 
     return
 
+def single_mol_spherical_sampling():
+    pass
 
 if __name__ == "__main__":
     main()
