@@ -11,14 +11,14 @@ def sampling(
     method,
     basis,
     program,
-    opt_lot,
     tag,
     kw_id,
     opt_dset_name,
+    opt_lot,
     rmsd_symm,
     rmsd_val,
     target_mol,
-    wat_cluster,
+    cluster,
     o_file,
     max_round = None
     water_cluster_size=22
@@ -43,7 +43,7 @@ def sampling(
     Small molecule: {}
     method: {}
     basis:  {}
-    '''.format(wat_cluster, target_mol, method, basis)   
+    '''.format(cluster, target_mol, method, basis)   
     )
 
     frequency = 600
@@ -136,7 +136,7 @@ def sampling(
 
         if not single_site:
            molecules = mol_sample(
-               wat_cluster,
+               cluster,
                target_mol,
                number_of_structures=num_struct,
                sampling_shell=sampling_shell,
