@@ -1,5 +1,6 @@
 import sys, time
-from .molecule_sampler import molecule_sampler as mol_sample
+from .molecule_sampler import random_molecule_sampler as mol_sample
+from .molecule_sampler import single_mol_spherical_sampling as single_site_mol_sample
 import qcfractal.interface as ptl
 import numpy as np
 from pathlib import Path
@@ -13,16 +14,22 @@ def sampling(
     opt_lot,
     tag,
     kw_id,
-    num_struct,
-    max_struct,
+    opt_dset_name,
     rmsd_symm,
     rmsd_val,
     target_mol,
     wat_cluster,
-    opt_dset_name,
-    sampling_shell,
     o_file,
-    client
+    max_round = None
+    water_cluster_size=22
+    max_struct=25,
+    num_struct=10,
+    sampling_shell=2.5,
+    gird_size = "normal"
+    purge = 0.01
+    noise = True
+    single_site=None
+    client,
 ):
     def print_out(string):
         with open(o_file, "a") as f:
@@ -127,13 +134,26 @@ def sampling(
         entry_list = []
         complete_opt_name = []
 
-        molecules = mol_sample(
-            wat_cluster,
-            target_mol,
-            number_of_structures=num_struct,
-            sampling_shell=sampling_shell,
-            print_out=False,
-        )
+        if not single_site:
+           molecules = mol_sample(
+               wat_cluster,
+               target_mol,
+               number_of_structures=num_struct,
+               sampling_shell=sampling_shell,
+               print_out=False,
+           )
+        else:
+           molecules = single_site_mol_sample(
+               cluster=single_site,
+               target_mol=target_mol,
+               water_cluster_size=water_cluster_size
+               number_of_structures=num_struct,
+               sampling_radius=sampling_shell,
+               purge=purge
+               gird_size = grid_size
+               noise = noise
+               print_out=False,
+           )
 
         for m in molecules:
             nmol += 1
@@ -337,9 +357,21 @@ def sampling(
         )
         print_out(out_string)
         c += 1
+
+        if max_rounds:
+            if c == max_rounds:
+                converged = True
+                print_out(
+                    "Reached the maximum number of {}  binding sites searching rounds. Exiting...".format(
+                        max_rounds
+                    )
+                )
+                return converged
+
         if len(ds_opt.df.index) <= 16:
             continue
-        if (len(ds_opt.df.index) >= max_struct) or c >= 7 or (new <= 1):
+
+        if (len(ds_opt.df.index) >= max_struct) or (c >= 7) or (new <= 1):
             converged = True
             print_out(
                 "All or at least {} binding sites were found! Exiting...".format(
