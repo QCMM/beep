@@ -126,15 +126,14 @@ def random_molecule_sampler(
 
 
 def single_site_spherical_sampling(
-    cluster_id,  # cluster + target_molecule
-    sampled_id,  # sampled_molecule
-    target_molecule,  # number of atoms
+    cluster,  # cluster + target_molecule
+    sampling_mol,  # sampled_molecule
+    sampled_mol_size,  # number of atoms of target molecule
     sampling_shell=2.5,
     grid_size="normal",
     save_xyz=[],
-    purge=0.5,  # None if no purging is desired
-    theta_rot=None,
-    noise=True,
+    purge=0.5,  
+    noise=False,
     zenith_angle=np.pi / 2,
     print_out=False,
 ):
@@ -189,7 +188,7 @@ def single_site_spherical_sampling(
     if grid_size == "normal":
         grid = (4, 12)
     if grid_size == "sparse":
-        grid = (4, 8)
+        grid = (3, 6)
     if grid_size == "tight":
         grid = (5, 16)
 
@@ -252,8 +251,8 @@ def single_site_spherical_sampling(
 
     print("Total grid points: ", len(grid_xyz))
 
-    cluster = client.query_molecules(cluster_id)[0]
-    sampled = client.query_molecules(sampled_id)[0]
+    #cluster = client.query_molecules(cluster_id)[0]
+    #sampled = client.query_molecules(sampled_id)[0]
 
     # target
 
@@ -263,7 +262,7 @@ def single_site_spherical_sampling(
     vx = np.array([1.0, 0.0, 0.0])
 
     # Get center of mass of target molecule
-    len_target = int(target_molecule)
+    len_target = int(sampled_mol_size)
     target_mol_geom = cluster.geometry[-len_target:, :]
     target_mol_symb = cluster.symbols[-len_target:]
     com_target = _com(target_mol_geom, target_mol_symb)
@@ -323,14 +322,10 @@ def single_site_spherical_sampling(
     theta_check = np.arccos(np.dot(com_final, vz) / np.linalg.norm(com_final))
     print("Final angle: ", theta_check * 180.0 / np.pi)
 
-    # return None
-
-    # prepare sampled molecule
-    sampled_molecule_len = len(sampled.geometry)
-    sampled_com = _com(sampled.geometry, sampled.symbols)
-    # print(sampled_com)
-    sampled_mol = sampled.scramble(
-        do_shift=-1 * sampled_com, do_rotate=False, do_resort=False
+    # prepare sampling molecule (molecule that will sample the target binding site)
+    sampling_mol_com = _com(sampling_mol.geometry, sampling_mol.symbols)
+    sampling_mol = sampling_mol.scramble(
+        do_shift=-1 * sampling_mol_com, do_rotate=False, do_resort=False
     )[0]
 
     # generated estructures
@@ -344,22 +339,22 @@ def single_site_spherical_sampling(
 
         # move the center of mass of sampled molecule to the point i in grid
         shift_vector = np.array(i) * angst2bohr
-        sampled_final_mol = sampled_mol.scramble(
+        sampling_final_mol = sampling_mol.scramble(
             do_shift=shift_vector, do_rotate=True, do_resort=False
         )[0]
 
-        sampled_geom = sampled_final_mol.geometry
-        sampled_symb = sampled_final_mol.symbols
+        sampling_geom = sampling_final_mol.geometry
+        sampling_symb = sampling_final_mol.symbols
 
         # create the new structure
         atms = list(cluster_symb)
-        sampled_atms = list(sampled_symb)
-        atms.extend(sampled_atms)
+        sampling_atms = list(sampling_symb)
+        atms.extend(sampling_atms)
         vis_mol_atms.extend("H")
 
         geom = list(np.array(cluster_rot_geom).flatten())
-        sampled_geom = list(np.array(sampled_geom).flatten())
-        geom.extend(sampled_geom)
+        sampling_geom = list(np.array(sampling_geom).flatten())
+        geom.extend(sampling_geom)
         vis_mol_geom.extend(list(i))
 
         molecule = qcel.models.Molecule(
@@ -376,7 +371,7 @@ def single_site_spherical_sampling(
         symbols=vis_mol_atms, geometry=vis_mol_geom, fix_com=True, fix_orientation=True
     )
 
-    return molecules, all_mols
+    return molecules#, all_mols
 
 
 if __name__ == "__main__":

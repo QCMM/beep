@@ -1,6 +1,6 @@
 import sys, time
 from .molecule_sampler import random_molecule_sampler as mol_sample
-from .molecule_sampler import single_mol_spherical_sampling as single_site_mol_sample
+from .molecule_sampler import single_site_spherical_sampling as single_site_mol_sample
 import qcfractal.interface as ptl
 import numpy as np
 from pathlib import Path
@@ -20,16 +20,18 @@ def sampling(
     target_mol,
     cluster,
     o_file,
-    max_round = None
-    water_cluster_size=22
+    client,
+    max_round = None,
+    sampled_mol_size=None,
+    water_cluster_size=22,
     max_struct=25,
     num_struct=10,
     sampling_shell=2.5,
-    gird_size = "normal"
-    purge = 0.01
-    noise = True
-    single_site=None
-    client,
+    grid_size = "sparse",
+    purge = 0.5,
+    noise = True,
+    zenith_angle=np.pi / 2,
+    single_site=None,
 ):
     def print_out(string):
         with open(o_file, "a") as f:
@@ -124,6 +126,7 @@ def sampling(
     )
 
     print_out(out_string)
+    print(out_string)
 
     c = 1
     converged = False
@@ -144,16 +147,16 @@ def sampling(
            )
         else:
            molecules = single_site_mol_sample(
-               cluster=single_site,
-               target_mol=target_mol,
-               water_cluster_size=water_cluster_size
-               number_of_structures=num_struct,
-               sampling_radius=sampling_shell,
-               purge=purge
-               gird_size = grid_size
-               noise = noise
+               cluster=cluster,
+               sampling_mol=target_mol,
+               sampled_mol_size = sampled_mol_size,
+               grid_size=grid_size,
+               purge=purge,
+               noise=noise,
+               zenith_angle=zenith_angle,
                print_out=False,
            )
+
 
         for m in molecules:
             nmol += 1
