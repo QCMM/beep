@@ -21,7 +21,7 @@ def sampling(
     cluster,
     o_file,
     client,
-    max_round = None,
+    max_rounds = None,
     sampled_mol_size=None,
     water_cluster_size=22,
     max_struct=25,
