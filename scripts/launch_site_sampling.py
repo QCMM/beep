@@ -134,7 +134,7 @@ molecule_size = options.molecule_size
 s_shell = options.sampling_shell
 zenith_angle = options.zenith_angle
 max_struct = options.maximal_binding_sites
-max_round = options.number_of_rounds
+max_rounds = options.number_of_rounds
 
 #grid_size = options.grid_size
 #purge = options.purge
@@ -213,7 +213,7 @@ version: 0.1.2
 s_conv = sampling(method, basis, program, tag, kw_id, opt_dset_name, opt_lot, rmsd_symm,
                   rmsd_val, sampling_mol, cluster, out_file, client,
                   max_struct=max_struct, sampled_mol_size = sampled_mol_size, 
-                  zenith_angle=zenith_angle, max_round=max_round,
+                  zenith_angle=zenith_angle, max_rounds=max_rounds,
                   single_site=single_site, sampling_shell = s_shell)
 
 print("Total number of binding sites so far: {} ".format(count))
