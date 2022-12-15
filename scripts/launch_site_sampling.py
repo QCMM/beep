@@ -26,37 +26,41 @@ parser.add_option("--password",
                   help="The password for the database client (Default = None)",
                   default=None
 )
-parser.add_option("--molecule",
-                  dest="molecule",
-                  help="The name of the molecule to be sampled (from a QCFractal OptimizationDataSet collection)"
+parser.add_option("--cluster-name",
+                  dest="cluster_name",
+                  help="The QCFractal name of the cluster to be sampled, as it appears in the OptimizationDataset (e.g co_W22_02_0009)",
 )
-parser.add_option("--surface_model_collection",
-                   dest="surface_model_collection",
-                   help="The name of the collection with the set of water clusters (dafault: Water_22)",
-                   default="Water_22"
+parser.add_option("--sampling-molecule-id",
+                   dest="sampling_mol_id",
+                   help="The QCFractal ID of the molecule that samples the cluster",
 )
-parser.add_option("--small_molecule_collection",
-                   dest="small_molecule_collection",
-                   help="The name of the collection containing molecules or radicals (dafault: Small_molecules)",
-                   default="Small_molecules"
-)
-parser.add_option("--molecules_per_round",
-                  dest="molecules_per_round",
-                  type = "int",
-                  help="Number of molecules to be optimized each round (Default = 10)",
-                  default=10
+parser.add_option("--molecule-size",
+                  dest="molecule_size",
+                  help="The size of the molecule bound to the cluster to be sampled"
 )
 parser.add_option("--sampling_shell",
                   dest="sampling_shell",
                   type = "float",
-                  default=2.0,
-                  help="The shell size of sampling space in Angstrom (Default = 2.0) "
+                  default=2.5,
+                  help="Distance where the sampling molecule should be set (Default = 2.5 angstrom) "
+)
+parser.add_option("--zenith-angle",
+                  dest="zenith_angle",
+                  type = "float",
+                  default=3.14159/2,
+                  help="The angle with respect to the zenith to construct the sampling shell (Default: pi/2)",
 )
 parser.add_option("--maximal_binding_sites",
                   dest="maximal_binding_sites",
                   type = "int",
-                  default= 21,
+                  default= 15,
                   help="The maximal number of binding sites per cluster (default: 21)"
+)
+parser.add_option("--number-of-rounds",
+                  dest="number_of_rounds",
+                  type = "int",
+                  default= 1,
+                  help="The maximal number of rounds a cluster should be sampled (default: 1)"
 )
 parser.add_option("-l",
                   "--level_of_theory",
@@ -74,7 +78,7 @@ parser.add_option("--refinement_level_of_theory",
 parser.add_option("--rmsd_value",
                   dest="rmsd_val",
                   type = "float",
-                  default= 0.40,
+                  default= 0.10,
                   help="Rmsd geometrical criteria, all structure below this value will not be considered as unique. (default: 0.40 angstrom)",
 )
 parser.add_option("--rmsd_symmetry",
@@ -122,21 +126,39 @@ kw_id   = options.keyword_id
 opt_lot = options.level_of_theory
 rmsd_symm = options.rmsd_symmetry
 rmsd_val = options.rmsd_val
-cluster_id = options.cluster_id
-target_mol_id = options.molecule
+
+cluster_name = options.cluster_name
+sampling_mol_id = options.sampling_mol_id
+sampled_mol_size = options.molecule_size
+molecule_size = options.molecule_size
 s_shell = options.sampling_shell
-max_rounds = options.max_rounds
-water_cluster_size = options.water_cluster_size
-num_struct = options.molecules_per_round
+zenith_angle = options.zenith_angle
 max_struct = options.maximal_binding_sites
-grid_size = options.grid_size
-purge = options.purge
-noise = options.noise
+max_round = options.number_of_rounds
+
+#grid_size = options.grid_size
+#purge = options.purge
+#noise = options.noise
 
 
 r_lot = options.r_level_of_theory
 single_site = True
+
 client = ptl.FractalClient(address=options.client_address, verify=False, username = username, password=password)
+
+try:
+    ds_opt = client.get_collection("OptimizationDataset", "_".join(cluster_name.split('_')[:-1]))
+except KeyError:
+    print("""Collection with structure to be sampled  {} does not exist. Please check name. Exiting...
+    """.format(wat_collection))
+    sys.exit(1)
+
+try:
+    cluster = ds_opt.get_record(cluster_name, opt_lot).get_final_molecule()
+except KeyError:
+    print("{} is not optimized at the requested level of theory or does not exist. \n".format(cluster_name))
+    sys.exit(1)
+
 
 m = r_lot.split('_')[0]
 b = r_lot.split('_')[1]
@@ -151,20 +173,17 @@ add_spec = {'name': m+'_'+b,
         'keywords': None,
         'program': 'psi4'}}
 
+count = 0
 
-target_mol =  client.query_molecules(int(target_mol_id))[0]
-cluster    =  client.query_molecules(int(cluster_id))[0]
+sampling_mol =  client.query_molecules(int(sampling_mol_id))[0]
 
-if not (target_mol):
+if not (sampling_mol):
     print("Target molecule does not exist, check your id\n")
     sys.exit(1)
-if not cluster:
-    print("Cluster molecule does not exist, check your id\n")
-    sys.exit(1)
 
-print("Processing cluster: {}".format(cluster_id))
+print("Processing cluster: {}".format(cluster_name))
 
-opt_dset_name = target_mol_name+"_"+w
+opt_dset_name = cluster_name+"+"+sampling_mol.name
 
 try:
     ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
@@ -173,16 +192,16 @@ try:
 except KeyError:
     pass
 
-out_file = Path("./site_finder/"+str(target_mol_name)+"_w/"+ w + "/out_sampl.dat")
+out_file = Path("./site_finder/"+str(sampling_mol.name)+"_w/"+ cluster_name + "/out_sampl.dat")
 
 if not out_file.is_file():
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
 with open(out_file, 'w') as f:
-    f.write('''        Welcome to the Molecular Sampler Converger! 
+    f.write('''        Welcome to the Single site sampler ! 
 
-Description: The molecular sampler converger optimizes random initial configurations 
-of a small molecule around a  center molecule until no more unique stationary 
+Description: The molecular sampler converger optimizes configurations 
+of a small molecule around a  binding site target  molecule until no more unique stationary
 points are found.
 
 Author: svogt, gbovolenta
@@ -191,10 +210,12 @@ version: 0.1.2
 
 '''
     )
-s_conv = sampling(method, basis, program, tag, kw_id, opt_dset_name, opt_lot, rmsd_symm, 
-                  rmsd_val, target_mol, cluster, out_file, max_round, water_cluster_size, 
-                  max_struct, num_struct,
-                  s_shell,   client)
+s_conv = sampling(method, basis, program, tag, kw_id, opt_dset_name, opt_lot, rmsd_symm,
+                  rmsd_val, sampling_mol, cluster, out_file, client,
+                  max_struct=max_struct, sampled_mol_size = sampled_mol_size, 
+                  zenith_angle=zenith_angle, max_round=max_round,
+                  single_site=single_site, sampling_shell = s_shell)
+
 print("Total number of binding sites so far: {} ".format(count))
 if s_conv:
    ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
@@ -208,7 +229,3 @@ if s_conv:
 else: 
     print("An error occured. Check the output in the site-finder folder")
     sys.exit(1)
-if count > 220: 
-   break
-
-                                            
