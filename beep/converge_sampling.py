@@ -359,7 +359,6 @@ def sampling(
             len(complete_opt_name), len(ds_opt.df.index), c, new, tot_mol
         )
         print_out(out_string)
-        c += 1
 
         if max_rounds:
             if c == max_rounds:
@@ -370,6 +369,8 @@ def sampling(
                     )
                 )
                 return converged
+
+        c += 1
 
         if len(ds_opt.df.index) <= 16:
             continue
