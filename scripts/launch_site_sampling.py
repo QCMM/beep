@@ -135,10 +135,10 @@ s_shell = options.sampling_shell
 zenith_angle = options.zenith_angle
 max_struct = options.maximal_binding_sites
 max_rounds = options.number_of_rounds
+noise = options.noise
+purge = options.purge
 
 #grid_size = options.grid_size
-#purge = options.purge
-#noise = options.noise
 
 
 r_lot = options.r_level_of_theory

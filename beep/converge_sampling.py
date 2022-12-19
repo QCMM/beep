@@ -28,7 +28,7 @@ def sampling(
     num_struct=10,
     sampling_shell=2.5,
     grid_size = "sparse",
-    purge = 0.5,
+    purge = 1.0,
     noise = True,
     zenith_angle=np.pi / 2,
     single_site=None,
