@@ -192,29 +192,23 @@ def single_site_spherical_sampling(
     if grid_size == "tight":
         grid = (5, 16)
 
-    # Generate the grid
+    # Generate the spherical grid
     radio = sampling_shell * angst2bohr
 
     phi_end = zenith_angle
     phi_interval = phi_end / (2 * grid[0])
-    phi_noise = []
 
     theta_end = 2 * np.pi
     theta_interval = theta_end / (1.5 * grid[1])
-    theta_noise = []
 
     theta = np.linspace(0, theta_end, grid[0])
     phi = np.linspace(0, phi_end, grid[1])
 
-    for i in range(grid[0]):
-        phi_noise.append(random.uniform(-phi_interval, phi_interval))
-    for i in range(grid[1]):
-        theta_noise.append(random.uniform(-theta_interval, theta_interval))
 
-    phi = np.linspace(0, phi_end, grid[0], endpoint=False)  # + np.array(phi_noise)
+    phi = np.linspace(0, phi_end, grid[0], endpoint=False)
     theta = np.linspace(
         0, theta_end, grid[1], endpoint=False
-    )  # + np.array(theta_noise)
+    )
 
     # Grid
     grid_xyz_i = [[0, 0, radio]]
@@ -224,7 +218,11 @@ def single_site_spherical_sampling(
             grid_p = []
 
             r = radio
-            r += r * random.random() / 7.0
+
+            if noise:
+               r += r * random.random() / 2.0
+               n += random.uniform(-phi_interval, phi_interval)
+               i += random.uniform(-theta_interval, theta_interval)
 
             x = r * np.sin(n) * np.cos(i)
             y = r * np.sin(n) * np.sin(i)
@@ -240,14 +238,15 @@ def single_site_spherical_sampling(
 
     grid_xyz = grid_xyz_i.copy()
     if purge:
+        remove_list = []
         for i in range(0, len(grid_xyz)):
-            for j in range(i + 1, len(grid_xyz)):
-                if (
-                    np.linalg.norm(np.array(grid_xyz_i[i]) - np.array(grid_xyz_i[j]))
-                    <= purge
-                ):
-                    grid_xyz.remove(grid_xyz_i[j])
+            for j in range(i+1, len(grid_xyz)):
+                gridp_dis = np.linalg.norm(np.array(grid_xyz_i[i]) - np.array(grid_xyz_i[j]))
+                if gridp_dis < purge:
+                    remove_list.append(grid_xyz_i[j])
                     print("removing point")
+        for n in remove_list:
+            grid_xyz.remove(n)
 
     print("Total grid points: ", len(grid_xyz))
 
