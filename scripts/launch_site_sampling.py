@@ -30,13 +30,18 @@ parser.add_option("--cluster-name",
                   dest="cluster_name",
                   help="The QCFractal name of the cluster to be sampled, as it appears in the OptimizationDataset (e.g co_W22_02_0009)",
 )
-parser.add_option("--sampling-molecule-id",
-                   dest="sampling_mol_id",
-                   help="The QCFractal ID of the molecule that samples the cluster",
+parser.add_option("--sampling-molecule-name",
+                   dest="sampling_mol_name",
+                   help="The name of the molecule that samples the cluster as it appears in the sampling molecule collection",
+)
+parser.add_option("--sampling-molecule-collection",
+                   dest="sampling_molecule_collection",
+                   help="The name of the QCArchive collection containing molecules or radicals (dafault: Small_molecules)",
+                   default="Small_molecules"
 )
 parser.add_option("--molecule-size",
                   dest="molecule_size",
-                  help="The size of the molecule bound to the cluster to be sampled"
+                  help="The size of the molecule bound to the cluster that will be sampled"
 )
 parser.add_option("--sampling_shell",
                   dest="sampling_shell",
@@ -103,6 +108,17 @@ parser.add_option("-k",
                   dest="keyword_id",
                   help="ID of the QC keywords for the OptimizationDataSet specification (default: None)",
                   default=None)
+parser.add_option("--purge",
+                  dest="purge",
+                  type = "float",
+                  help="Eliminate points that are to close to each other. Value should be given in Angstrom (default: None)",
+                  default=None)
+
+parser.add_option("--noise",
+                  action='store_true',
+                  dest="noise",
+                  help="Add some randomness to the positions of the points."
+)
 #parser.add_option("--print_out",
 #                  action='store_true',
 #                  dest="print_out",
@@ -128,7 +144,8 @@ rmsd_symm = options.rmsd_symmetry
 rmsd_val = options.rmsd_val
 
 cluster_name = options.cluster_name
-sampling_mol_id = options.sampling_mol_id
+sampling_mol_collection = options.sampling_molecule_collection
+sampling_mol_name = options.sampling_mol_name
 sampled_mol_size = options.molecule_size
 molecule_size = options.molecule_size
 s_shell = options.sampling_shell
@@ -146,6 +163,7 @@ single_site = True
 
 client = ptl.FractalClient(address=options.client_address, verify=False, username = username, password=password)
 
+# Getting OptimizationDataset of the cluster with the molecule to be sampled.
 try:
     ds_opt = client.get_collection("OptimizationDataset", "_".join(cluster_name.split('_')[:-1]))
 except KeyError:
@@ -153,12 +171,27 @@ except KeyError:
     """.format(wat_collection))
     sys.exit(1)
 
+# Retriving the cluster molecule object from the dataset
 try:
     cluster = ds_opt.get_record(cluster_name, opt_lot).get_final_molecule()
 except KeyError:
     print("{} is not optimized at the requested level of theory or does not exist. \n".format(cluster_name))
     sys.exit(1)
 
+# Getting OptimizationDataset of the sampling molecule.
+try:
+    ds_opt = client.get_collection("OptimizationDataset", sampling_mol_collection )
+except KeyError:
+    print("""Collection with sampling molecule  {} does not exist. Please check name. Exiting...
+    """.format(sampling_mol_collection))
+    sys.exit(1)
+
+# Retriving the sampling molecule object from the OptimizationDataset
+try:
+    sampling_mol = ds_opt.get_record(sampling_mol_name, opt_lot).get_final_molecule()
+except KeyError:
+    print("{} is not optimized at the requested level of theory or does not exist. \n".format(cluster_name))
+    sys.exit(1)
 
 m = r_lot.split('_')[0]
 b = r_lot.split('_')[1]
@@ -175,15 +208,9 @@ add_spec = {'name': m+'_'+b,
 
 count = 0
 
-sampling_mol =  client.query_molecules(int(sampling_mol_id))[0]
-
-if not (sampling_mol):
-    print("Target molecule does not exist, check your id\n")
-    sys.exit(1)
-
 print("Processing cluster: {}".format(cluster_name))
 
-opt_dset_name = cluster_name+"+"+sampling_mol.name
+opt_dset_name = cluster_name+"+"+sampling_mol_name
 
 try:
     ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
@@ -214,7 +241,7 @@ s_conv = sampling(method, basis, program, tag, kw_id, opt_dset_name, opt_lot, rm
                   rmsd_val, sampling_mol, cluster, out_file, client,
                   max_struct=max_struct, sampled_mol_size = sampled_mol_size, 
                   zenith_angle=zenith_angle, max_rounds=max_rounds,
-                  single_site=single_site, sampling_shell = s_shell)
+                  single_site=single_site, sampling_shell = s_shell, noise = noise, purge = purge)
 
 print("Total number of binding sites so far: {} ".format(count))
 if s_conv:

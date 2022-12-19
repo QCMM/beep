@@ -28,8 +28,8 @@ def sampling(
     num_struct=10,
     sampling_shell=2.5,
     grid_size = "sparse",
-    purge = 1.0,
-    noise = True,
+    purge = None,
+    noise = False,
     zenith_angle=np.pi / 2,
     single_site=None,
 ):
@@ -150,6 +150,7 @@ def sampling(
                cluster=cluster,
                sampling_mol=target_mol,
                sampled_mol_size = sampled_mol_size,
+               sampling_shell = sampling_shell,
                grid_size=grid_size,
                purge=purge,
                noise=noise,
