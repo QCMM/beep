@@ -129,13 +129,12 @@ def single_site_spherical_sampling(
     cluster,  # cluster + target_molecule
     sampling_mol,  # sampled_molecule
     sampled_mol_size,  # number of atoms of target molecule
-    sampling_shell=2.5,
-    grid_size="normal",
-    save_xyz=[],
-    purge=0.5,  
-    noise=False,
-    zenith_angle=np.pi / 2,
-    print_out=False,
+    sampling_shell,
+    grid_size,
+    purge,
+    noise,
+    zenith_angle,
+    print_out,
 ):
 
     bohr2angst = constants.conversion_factor("bohr", "angstrom")
@@ -194,6 +193,9 @@ def single_site_spherical_sampling(
 
     # Generate the spherical grid
     radio = sampling_shell * angst2bohr
+
+    if purge:
+        purge = purge * angst2bohr
 
     phi_end = zenith_angle
     phi_interval = phi_end / (2 * grid[0])
