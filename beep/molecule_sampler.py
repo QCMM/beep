@@ -91,8 +91,8 @@ def random_molecule_sampler(
             fix_com=False,
             fix_orientation=False,
         )
-        if save_xyz:
-            molecule.to_file(save_xyz + "/st_" + str(new_s_num) + ".xyz")
+        #if save_xyz:
+        #    molecule.to_file(save_xyz + "/st_" + str(new_s_num) + ".xyz")
         molecules.append(molecule)
         # Creating molecule with all the displaced molecules
         atms_sm.extend(list(mol_shift.symbols))
@@ -119,23 +119,38 @@ def random_molecule_sampler(
     )
     # if save_xyz:
     #    molecules_shifted.to_file(save_xyz + "/all.xyz")
-    # out_string += """ Thank you for using Molecule sampling! """
-    # if print_out:
-    #    print(out_string)
+    out_string += """ Thank you for using Molecule sampling! Goodbye"""
+    if print_out:
+        print(out_string)
     return molecules
 
 
 def single_site_spherical_sampling(
-    cluster,  # cluster + target_molecule
-    sampling_mol,  # sampled_molecule
-    sampled_mol_size,  # number of atoms of target molecule
+    cluster,
+    sampling_mol,
+    sampled_mol_size,
     sampling_shell,
     grid_size,
     purge,
     noise,
     zenith_angle,
-    print_out,
+    print_out=True,
 ):
+    out_string = """
+                   Welcome to the single site molecule sampler!
+
+    Author: svogt
+    Date:   12/12/2022
+    Version: 0.1.0
+
+    Cluster to sampled: {}
+    Sampling molecule : {}
+    Grid to be used: {}
+    Size of the sampling shell: {}
+
+    """.format(
+        cluster, sampling_mol.name, grid_size, sampling_shell
+    )
 
     bohr2angst = constants.conversion_factor("bohr", "angstrom")
     angst2bohr = constants.conversion_factor("angstrom", "bohr")
@@ -188,14 +203,12 @@ def single_site_spherical_sampling(
         grid = (4, 12)
     if grid_size == "sparse":
         grid = (3, 6)
-    if grid_size == "tight":
+    if grid_size == "dense":
         grid = (5, 16)
 
     # Generate the spherical grid
     radio = sampling_shell * angst2bohr
 
-    if purge:
-        purge = purge * angst2bohr
 
     phi_end = zenith_angle
     phi_interval = phi_end / (2 * grid[0])
@@ -206,11 +219,8 @@ def single_site_spherical_sampling(
     theta = np.linspace(0, theta_end, grid[0])
     phi = np.linspace(0, phi_end, grid[1])
 
-
     phi = np.linspace(0, phi_end, grid[0], endpoint=False)
-    theta = np.linspace(
-        0, theta_end, grid[1], endpoint=False
-    )
+    theta = np.linspace(0, theta_end, grid[1], endpoint=False)
 
     # Grid
     grid_xyz_i = [[0, 0, radio]]
@@ -222,9 +232,9 @@ def single_site_spherical_sampling(
             r = radio
 
             if noise:
-               r += r * random.random() / 2.0
-               n += random.uniform(-phi_interval, phi_interval)
-               i += random.uniform(-theta_interval, theta_interval)
+                r += r * random.random() / 2.0
+                n += random.uniform(-phi_interval, phi_interval)
+                i += random.uniform(-theta_interval, theta_interval)
 
             x = r * np.sin(n) * np.cos(i)
             y = r * np.sin(n) * np.sin(i)
@@ -240,20 +250,26 @@ def single_site_spherical_sampling(
 
     grid_xyz = grid_xyz_i.copy()
     if purge:
+        purge = purge * angst2bohr
         remove_list = []
         for i in range(0, len(grid_xyz)):
-            for j in range(i+1, len(grid_xyz)):
-                gridp_dis = np.linalg.norm(np.array(grid_xyz_i[i]) - np.array(grid_xyz_i[j]))
+            for j in range(i + 1, len(grid_xyz)):
+                gridp_dis = np.linalg.norm(
+                    np.array(grid_xyz_i[i]) - np.array(grid_xyz_i[j])
+                )
                 if gridp_dis < purge:
                     remove_list.append(grid_xyz_i[j])
                     print("removing point")
         for n in remove_list:
-            grid_xyz.remove(n)
+            try:
+                 grid_xyz.remove(n)
+            except ValueError:
+                continue
 
-    print("Total grid points: ", len(grid_xyz))
-
-    #cluster = client.query_molecules(cluster_id)[0]
-    #sampled = client.query_molecules(sampled_id)[0]
+    out_string += """Total grid points: {}
+""".format(
+        str(len(grid_xyz))
+    )
 
     # target
 
@@ -268,7 +284,6 @@ def single_site_spherical_sampling(
     target_mol_symb = cluster.symbols[-len_target:]
     com_target = _com(target_mol_geom, target_mol_symb)
 
-    print("Original center of mass of  cluster:  ", -com_target)
     # Shift to set the origin at the center of mass of target molecule
     cluster_tras = cluster.scramble(
         do_shift=-com_target, do_rotate=False, do_resort=False
@@ -278,6 +293,7 @@ def single_site_spherical_sampling(
     cluster_geom = cluster_tras.geometry
     cluster_symb = cluster_tras.symbols
 
+    # Ensure that the COM is in the first quadrant
     cluster_geom_s = []
     for i in cluster_geom:
         new_coords = np.multiply(i, np.sign(-com_target))
@@ -285,13 +301,14 @@ def single_site_spherical_sampling(
 
     com_refl = _com(cluster_geom_s, cluster_symb)
 
-    print("center of mass of adjusted cluster: ", com_refl)
-
     # Define rotation angles
     theta_rot_rz = np.arccos(
         np.dot(com_refl[:-1], vy[:-1]) / np.linalg.norm(com_refl[:-1])
     )
-    print("Rotation angle around the z axis (xy plane)", theta_rot_rz * 180.0 / np.pi)
+    out_string += """Rotation angle around the z axis (xy plane): {}
+""".format(
+        str(theta_rot_rz * 180.0 / np.pi)
+    )
 
     cluster_rot_geom_rz = []
     for i in cluster_geom_s:
@@ -299,14 +316,15 @@ def single_site_spherical_sampling(
 
     v_check_1 = np.dot(_Rz(theta_rot_rz), -com_target)
 
-    print("Rotation check: ", v_check_1)
+    out_string += """Rotation check around the z axis: {}
+""".format(
+        v_check_1
+    )
 
     com_int = _com(cluster_rot_geom_rz, cluster_symb)
-    print("Intermediate center of mass:", com_int)
 
     # Define rotation angle around x axis
     theta_rot_rx = np.arccos(np.dot(com_int[1:], vz[1:]) / np.linalg.norm(com_int[1:]))
-    print("Rotation angle around the x axis (yz plane)", theta_rot_rx * 180.0 / np.pi)
 
     cluster_rot_geom = []
     for i in cluster_rot_geom_rz:
@@ -315,13 +333,18 @@ def single_site_spherical_sampling(
 
     v_check_2 = np.dot(_Rx(theta_rot_rx), v_check_1)
 
-    print("Rotation check: ", v_check_2)
+    out_string += """Rotation check for rotation around the x axis: {}
+""".format(
+        v_check_2
+    )
 
     com_final = _com(cluster_rot_geom, cluster_symb)
-    print("Final center of mass:", com_final)
 
     theta_check = np.arccos(np.dot(com_final, vz) / np.linalg.norm(com_final))
-    print("Final angle: ", theta_check * 180.0 / np.pi)
+    out_string += """Final angle check (should be 180.0): {}
+""".format(
+        str(theta_check * 180.0 / np.pi)
+    )
 
     # prepare sampling molecule (molecule that will sample the target binding site)
     sampling_mol_com = _com(sampling_mol.geometry, sampling_mol.symbols)
@@ -372,7 +395,10 @@ def single_site_spherical_sampling(
         symbols=vis_mol_atms, geometry=vis_mol_geom, fix_com=True, fix_orientation=True
     )
 
-    return molecules#, all_mols
+    if print_out:
+        print(out_string)
+
+    return molecules  # , all_mols
 
 
 if __name__ == "__main__":
