@@ -121,7 +121,7 @@ tag = options.tag
 opt_lot = options.level_of_theory
 r_lot = options.r_level_of_theory
 kw_id   = options.keyword_id
-s_shell = options.sampling_shell
+sampling_shell = options.sampling_shell
 num_struct = options.molecules_per_round
 rmsd_symm = options.rmsd_symmetry
 wat_collection = options.surface_model_collection
@@ -206,7 +206,7 @@ for w in ds_soc.data.records:
     
     '''
         )
-    s_conv = sampling(method, basis, program, opt_lot, tag, kw_id, num_struct, max_struct, rmsd_symm, rmsd_val, target_mol, wat_cluster,  opt_dset_name, s_shell,  out_file, client)
+    s_conv = sampling(method, basis, program, tag, kw_id, opt_dset_name, opt_lot, rmsd_symm, rmsd_val, target_mol, wat_cluster, out_file, client, num_struct, max_struct, sampling_shell)
     print("Total number of binding sites so far: {} ".format(count))
     if s_conv:
        ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
