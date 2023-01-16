@@ -1,5 +1,6 @@
 import sys, time
-from .molecule_sampler import molecule_sampler as mol_sample
+from .molecule_sampler import random_molecule_sampler as mol_sample
+from .molecule_sampler import single_site_spherical_sampling as single_site_mol_sample
 import qcfractal.interface as ptl
 import numpy as np
 from pathlib import Path
@@ -10,19 +11,27 @@ def sampling(
     method,
     basis,
     program,
-    opt_lot,
     tag,
     kw_id,
-    num_struct,
-    max_struct,
+    opt_dset_name,
+    opt_lot,
     rmsd_symm,
     rmsd_val,
     target_mol,
-    wat_cluster,
-    opt_dset_name,
-    sampling_shell,
+    cluster,
     o_file,
-    client
+    client,
+    max_rounds=None,
+    sampled_mol_size=None,
+    water_cluster_size=22,
+    max_struct=25,
+    num_struct=10,
+    sampling_shell=2.5,
+    grid_size="sparse",
+    purge=None,
+    noise=False,
+    zenith_angle=np.pi / 2,
+    single_site=None,
 ):
     def print_out(string):
         with open(o_file, "a") as f:
@@ -30,13 +39,15 @@ def sampling(
 
     smpl_opt_dset_name = "pre_" + str(opt_dset_name)
 
-
-    print_out('''
+    print_out(
+        """
     Water cluster: {}
     Small molecule: {}
     method: {}
     basis:  {}
-    '''.format(wat_cluster, target_mol, method, basis)   
+    """.format(
+            cluster, target_mol, method, basis
+        )
     )
 
     frequency = 600
@@ -50,7 +61,9 @@ def sampling(
             smpl_opt_dset_name
         )
     except KeyError:
-        smpl_ds_opt = ptl.collections.OptimizationDataset(smpl_opt_dset_name, client=client)
+        smpl_ds_opt = ptl.collections.OptimizationDataset(
+            smpl_opt_dset_name, client=client
+        )
         smpl_ds_opt.save()
         out_string += """Creating new OptimizationDataset {} for optimizations from the sampling.
         """.format(
@@ -79,7 +92,7 @@ def sampling(
     spec = {
         "name": opt_lot,
         "description": "Geometric Optimziation ",
-        "optimization_spec": {"program": "geometric", "keywords": None},
+        "optimization_spec": {"program": "geometric", "keywords": {'maxiter': 150}},
         "qc_spec": {
             "driver": "gradient",
             "method": method,
@@ -92,31 +105,32 @@ def sampling(
     try:
         smpl_ds_opt.add_specification(**spec)
         out_string += """Adding the specification {} to the {} OptimizationData set.
-    
+
         """.format(
             spec["name"], smpl_opt_dset_name
         )
     except KeyError:
         out_string += """The specification {} is already present in the {} OptimizationData set! Nothing to do here.
-    
+
         """.format(
             spec["name"], smpl_opt_dset_name
         )
     out_string += """
-    
+
     QC data:
     Program: {}
     Method: {}
     Basis:  {}
     Maximum number of structures to look for:  {}
-    
+
     Starting Convergence procedure....
-    
+
     """.format(
         program, method, basis, max_struct
     )
 
     print_out(out_string)
+    print(out_string)
 
     c = 1
     converged = False
@@ -127,13 +141,26 @@ def sampling(
         entry_list = []
         complete_opt_name = []
 
-        molecules = mol_sample(
-            wat_cluster,
-            target_mol,
-            number_of_structures=num_struct,
-            sampling_shell=sampling_shell,
-            print_out=False,
-        )
+        if not single_site:
+            molecules = mol_sample(
+                cluster,
+                target_mol,
+                number_of_structures=num_struct,
+                sampling_shell=sampling_shell,
+                print_out=False,
+            )
+        else:
+            molecules = single_site_mol_sample(
+                cluster=cluster,
+                sampling_mol=target_mol,
+                sampled_mol_size=sampled_mol_size,
+                sampling_shell=sampling_shell,
+                grid_size=grid_size,
+                purge=purge,
+                noise=noise,
+                zenith_angle=zenith_angle,
+                print_out=True,
+            )
 
         for m in molecules:
             nmol += 1
@@ -152,7 +179,7 @@ def sampling(
     {}
     
         """.format(
-                c, num_struct, mol_l
+                c, len(molecules), mol_l
             )
         )
 
@@ -172,13 +199,9 @@ def sampling(
             )
         )
         jobs_complete = False
-        # if sampl_only:
-        #    print_out(str(num_struct)+" molecules where sampled and are optimizing. Thank you for using molecule sampler!")
-        #    break
         print_out("Waiting for optimizations to complete\n\n")
 
         # Checks if no more jobs are running
-
 
         while not jobs_complete:
             status = []
@@ -187,16 +210,11 @@ def sampling(
                 status.append(rr.status)
 
             # Initaial spec Query to avoid status bug
-            smpl_ds_opt = client.get_collection("OptimizationDataset", smpl_opt_dset_name)
+            smpl_ds_opt = client.get_collection(
+                "OptimizationDataset", smpl_opt_dset_name
+            )
             smpl_ds_opt.query(opt_lot)
 
-            #if not smpl_ds_opt.status(status="INCOMPLETE", specs=opt_lot).empty:
-            #    print_out("Some jobs are still running, will sleep now\n")
-            #    time.sleep(frequency)
-            
-            #print_out("Current status of jobs\n")
-            #print_out(str(status))
-            #print_out("\n")
             if "INCOMPLETE" in status:
                 print_out("Some jobs are still running, will sleep now\n")
                 time.sleep(frequency)
@@ -336,10 +354,23 @@ def sampling(
             len(complete_opt_name), len(ds_opt.df.index), c, new, tot_mol
         )
         print_out(out_string)
+
+        if max_rounds:
+            if c == max_rounds:
+                converged = True
+                print_out(
+                    "Reached the maximum number of {}  binding sites searching rounds. Exiting...".format(
+                        max_rounds
+                    )
+                )
+                return converged
+
         c += 1
+
         if len(ds_opt.df.index) <= 16:
             continue
-        if (len(ds_opt.df.index) >= max_struct) or c >= 7 or (new <= 1):
+
+        if (len(ds_opt.df.index) >= max_struct) or (c >= 7) or (new <= 1):
             converged = True
             print_out(
                 "All or at least {} binding sites were found! Exiting...".format(
