@@ -204,7 +204,7 @@ except KeyError:
 try:
     sampling_mol = ds_opt.get_record(sampling_mol_name, opt_lot).get_final_molecule()
 except KeyError:
-    print("{} is not optimized at the requested level of theory or does not exist. \n".format(cluster_name))
+    print("{} is not optimized at the requested level of theory or does not exist. \n".format(sampling_mol))
     sys.exit(1)
 
 m = r_lot.split('_')[0]
