@@ -255,7 +255,10 @@ class BindingParadise(object):
             ran = self._ds_set
 
         for ds in ran:
-            en_val = ds.get_values(stoich=stoich, method=method)
+            try:
+                en_val = ds.get_values(stoich=stoich, method=method)
+            except KeyError:
+                continue
             en_val_list.append(en_val)
         df_be = pd.concat(en_val_list).dropna()
 
