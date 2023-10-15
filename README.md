@@ -18,7 +18,7 @@ your anaconda base directory.
 
 Then you can install QCPortal by running. 
 
-`mamba install -c conda-forge qcportal`
+`mamba install -c conda-forge qcportal=0.15`
 
 If you would like to create your own database using the BEEP protocol or if you would like 
 to contribute to the BEEP database you will need to install the QCFractal module. It is best intall
