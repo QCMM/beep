@@ -167,6 +167,8 @@ soc_list = ds_soc.data.records
 
 try:
     target_mol = ds_sm.get_record(smol_name, opt_lot).get_final_molecule()
+    if target_mol is None:
+                raise ValueError("The molecule is still being optimized. Please try again when the staus in complete.")
 except KeyError:
     print("{} is not optimized at the requested level of theory, please optimize them first\n".format(smol_name))
     sys.exit(1)

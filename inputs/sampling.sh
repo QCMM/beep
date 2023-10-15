@@ -17,7 +17,7 @@ python ../scripts/launch_sampling.py \
     --client_address 152.74.10.245:7777 \
     --username '' \
     --password "" \
-    --molecule HF \
+    --molecule nh2ch2oh \
     --surface_model_collection Water_22 \
     --small_molecule_collection Small_molecules \
     --molecules_per_round 10 \
