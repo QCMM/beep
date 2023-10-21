@@ -92,7 +92,7 @@ def sampling(
     spec = {
         "name": opt_lot,
         "description": "Geometric Optimziation ",
-        "optimization_spec": {"program": "geometric", "keywords": {'maxiter': 150}},
+        "optimization_spec": {"program": "geometric", "keywords": {"maxiter": 150}},
         "qc_spec": {
             "driver": "gradient",
             "method": method,
@@ -142,12 +142,12 @@ def sampling(
         complete_opt_name = []
 
         if not single_site:
-            molecules = mol_sample(
+            molecules, _ = mol_sample(
                 cluster,
                 target_mol,
                 number_of_structures=num_struct,
                 sampling_shell=sampling_shell,
-                print_out=False,
+                debug=True,
             )
         else:
             molecules = single_site_mol_sample(
