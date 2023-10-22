@@ -4,6 +4,7 @@ import logging
 from ..molecule_sampler import (
     generate_shift_vector,
     calculate_displacements,
+    calculate_diameter,
     create_molecule,
     random_molecule_sampler,
     com,
@@ -56,20 +57,22 @@ def generate_mock_shift(MAX_DISPLACEMENT: float) -> np.ndarray:
 
 
 # Loading the molecules for testing and saving them in a list
+clusters_sw = load_molecules("ws*.xyz")
 clusters_22 = load_molecules("w22_*.xyz")
 clusters_60 = load_molecules("w60_*.xyz")
 small_mols = load_molecules("sm*.xyz")
 
 # Data for calculate displacements test
+MAX_DISPLACEMENT_ws = 10.0
 MAX_DISPLACEMENT_22 = 15.0
 MAX_DISPLACEMENT_60 = 20.0
 SAMPLING_SHELL = 2.0
-NUMBER_OF_STRUCTURES = 10
 
+water_clusters_ws = build_test_dictionary(clusters_sw, MAX_DISPLACEMENT_ws)
 water_clusters_22 = build_test_dictionary(clusters_22, MAX_DISPLACEMENT_22)
 water_clusters_60 = build_test_dictionary(clusters_60, MAX_DISPLACEMENT_60)
 
-water_clusters = water_clusters_22 | water_clusters_60
+water_clusters = water_clusters_ws | water_clusters_22 | water_clusters_60
 
 
 @pytest.mark.parametrize(
@@ -109,18 +112,20 @@ def test_vector_randomness():
     ), f"Expected two different vectors, but got {vector1} and {vector2}"
 
 
+diameters_dict = {"sm_ch3oh": 5.2948, "sm_nh2ch2cn" : 8.2534, "sm_h2" : 1.3974}
 test_data_create_molecule = {}
 test_data_create_shifted_molecule = {}
+test_data_create_molecule_diameters = {}
 for key, vals in water_clusters.items():
     cluster, max_disp = vals
     mock_shift_vect = generate_mock_shift(max_disp)
     for n, sm in small_mols.items():
+        test_data_create_molecule_diameters[n] = (sm, diameters_dict[n])
         mol_shift = sm.scramble(
             do_shift=mock_shift_vect, do_rotate=True, do_resort=False, deflection=1.0
         )[0]
         test_data_create_shifted_molecule[key + "_" + n] = (cluster, mol_shift)
         test_data_create_molecule[key + "_" + n] = (cluster, sm)
-
 
 @pytest.mark.parametrize(
     "cluster, shifted_mol",
@@ -133,20 +138,11 @@ def test_create_molecules(cluster, shifted_mol, request):
     mol.to_file("test_data_output/" + test_id + ".xyz", dtype="xyz")
     assert len(mol.symbols) == len(cluster.symbols) + len(shifted_mol.symbols)
 
-
-#@pytest.mark.parametrize(
-#    "cluster, target_mol",
-#    test_data_create_molecule.values(),
-#    ids=test_data_create_molecule.keys(),
-#)
-#def test_random_molecule_sampler(cluster, target_mol, request):
-#    test_id = request.node.name.split("[")[1].split("]")[0]
-#    mol_list, debug_mol = random_molecule_sampler(
-#        cluster, target_mol, NUMBER_OF_STRUCTURES, SAMPLING_SHELL,
-#    debug=True)
-#    assert len(mol_list) == NUMBER_OF_STRUCTURES
-#    assert all(isinstance(item, Molecule) for item in mol_list)
-#    debug_mol.to_file("test_data_output/sampling_mol_" + test_id + ".xyz", dtype="xyz")
+print(test_data_create_molecule_diameters)
+@pytest.mark.parametrize("target_mol, diam", test_data_create_molecule_diameters.values())
+def test_calculate__diameter(target_mol, diam):
+    result = calculate_diameter(target_mol.geometry)
+    assert round(result,3) == round(diam,3)
 
 @pytest.mark.parametrize(
     "cluster, target_mol",
@@ -159,16 +155,14 @@ def test_random_molecule_sampler(cluster, target_mol, request, caplog):
     caplog.set_level(logging.DEBUG)  # or logging.INFO, as per your requirements
 
     mol_list, debug_mol = random_molecule_sampler(
-        cluster, target_mol, NUMBER_OF_STRUCTURES, SAMPLING_SHELL,
+        cluster, target_mol, SAMPLING_SHELL,
     debug=True)
     
     # Log assertions
     log_messages = [record.message for record in caplog.records]
     assert "Welcome to the molecule sampler!" in log_messages
-    assert "Thank you for using Molecule sampling! Goodbye" in log_messages
 
     # Other assertions
-    assert len(mol_list) == NUMBER_OF_STRUCTURES
     assert all(isinstance(item, Molecule) for item in mol_list)
     debug_mol.to_file("test_data_output/sampling_mol_" + test_id + ".xyz", dtype="xyz")
 
