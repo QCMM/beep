@@ -35,6 +35,32 @@ def com(geometry: np.ndarray, symbols: list) -> np.ndarray:
     return com
 
 
+def calculate_diameter(cluster_xyz: np.ndarray) -> float:
+    """
+    Calculate the diameter of a molecule based on its XYZ coordinates.
+
+    Args:
+    cluster_xyz (numpy.ndarray): A NumPy array where each row represents an atom and each column represents X, Y, and Z values.
+
+    Returns:
+    float: The diameter of the cluster in angstroms.
+    """
+    # Check if there's only one water molecule in the cluster
+    if cluster_xyz.shape == (3, 3):
+        return 0.0
+
+    # Calculate pairwise distances between all pairs of atoms in the cluster
+    distances = np.linalg.norm(cluster_xyz[:, np.newaxis, :] - cluster_xyz, axis=-1)
+
+    # Set the diagonal elements (self-distances) to a large value to avoid selecting them
+    np.fill_diagonal(distances, 0)
+
+    # Find the maximum distance, which represents the diameter of the cluster
+    diameter = np.max(distances)
+
+    return diameter
+
+
 def surface_distance_check(
     cluster: Molecule, mol: Molecule, cut_distance: float
 ) -> bool:
@@ -132,10 +158,12 @@ def create_molecule(cluster: Molecule, mol_shift: Molecule) -> Molecule:
     return Molecule(symbols=atms, geometry=geom, fix_com=False, fix_orientation=False)
 
 
+attempts = 0
+
+
 def random_molecule_sampler(
     cluster: Molecule,
     target_molecule: Molecule,
-    number_of_structures: int,
     sampling_shell: float,
     debug: bool = False,
 ) -> Tuple[List[Molecule], Molecule]:
@@ -168,31 +196,35 @@ def random_molecule_sampler(
     logger.info(f"Version: 0.2.1")
     logger.info(f"Cluster to be sampled: {cluster}")
     logger.info(f"Sampled molecule: {target_molecule}")
-    logger.info(f"Number of structures to be generated: {number_of_structures}")
     logger.info(f"Size of the sampling shell: {sampling_shell}")
-    logger.info(f"Total number of structures to be generated: {number_of_structures}")
 
     dis_min, dis_max = calculate_displacements(cluster, sampling_shell)
-
-    fill_num = len(str(number_of_structures))
+    target_mol_diam = calculate_diameter(target_molecule.geometry)
+    cluster_diam = calculate_diameter(cluster.geometry)
 
     # initialize variables
     cluster_with_sampled_mol = []
     sampled_mol = []
     debug_molecule = None
     c = 0
+    attempts = 0
+    binding_site_size = 3
+    atoms_per_cluster_mol = 3
+    total_attempts = 500
+    surface_closness_cutoff = 1.52  # Angstrom vdW radius of Oxygen
 
-    while c < number_of_structures:
+    max_structures = max(3, (len(cluster.symbols) / atoms_per_cluster_mol) // 3)
+    logger.info(f"Maximum number of structures to be sampled: {max_structures }")
+    fill_num = len(str(max_structures))
+
+    while c < max_structures:
+        attempts += 1
+        if attempts == total_attempts:
+            break
+
         new_s_num = str(c).zfill(fill_num)
         shift_vect = generate_shift_vector(dis_min, dis_max)
         norm = np.linalg.norm(np.array(shift_vect))
-
-        logger.debug(f"Generated the molecule {new_s_num}:")
-        logger.debug(f"Displacement vector: {shift_vect * bohr2angst}")
-        logger.debug(f"Norm of the displacement vector: {norm * bohr2angst}")
-
-        # if not ((norm < dis_max) and (norm > dis_min)):
-        #    continue
 
         mol_shift = target_molecule.scramble(
             do_shift=shift_vect, do_rotate=True, do_resort=False, deflection=1.0
@@ -202,20 +234,28 @@ def random_molecule_sampler(
 
         # Making sure initial structures are not too close to each other
         if sampled_mol:
-            close_condition = 4.0  # Angstrom
+            close_condition = target_mol_diam
+            logger.debug(f"The closesness cutoff is: {close_condition * bohr2angst}")
             for m in sampled_mol:
                 dis_vec = com(mol_shift.geometry, mol_shift.symbols) - com(
                     m.geometry, m.symbols
                 )
-                if np.linalg.norm(dis_vec) < close_condition * angst2bohr:
+                if np.linalg.norm(dis_vec) < close_condition:  # * angst2bohr:
                     skip_remaining = True
                     break
             if skip_remaining == True:
                 continue
 
         # Check if any two atoms of the sampled molecule and cluster are not closer than a given distance
-        if not surface_distance_check(cluster, mol_shift, 1.2):
+        logger.debug(
+            f"The closesness to the surface cutoff is: {surface_closness_cutoff * bohr2angst}"
+        )
+        if not surface_distance_check(cluster, mol_shift, surface_closness_cutoff):
             continue
+
+        logger.debug(f"Generated the molecule {new_s_num}:")
+        logger.debug(f"Displacement vector: {shift_vect * bohr2angst}")
+        logger.debug(f"Norm of the displacement vector: {norm * bohr2angst}")
 
         # create new sampled molecule + cluster
         sampled_mol.append(mol_shift)
@@ -229,8 +269,8 @@ def random_molecule_sampler(
                 debug_molecule = create_molecule(debug_molecule, mol_shift)
         c += 1
 
-    # logger.debug("Generat")
-    logger.info("Thank you for using Molecule sampling! Goodbye")
+    final_num_struc = len(cluster_with_sampled_mol)
+    logger.info(f"Number of generated initial structures: {final_num_struc} ")
 
     return cluster_with_sampled_mol, debug_molecule
 
