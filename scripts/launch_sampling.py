@@ -227,7 +227,6 @@ for w in ds_soc.data.records:
     
     Author: svogt, gbovolenta
     Data: 10/24/2020
-    version: 0.2.0
     
     """
         )
