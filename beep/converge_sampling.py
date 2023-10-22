@@ -6,6 +6,22 @@ import numpy as np
 from pathlib import Path
 from optparse import OptionParser
 
+def generate_shell_list(sampling_shell, condition):
+    # For sparse
+    if condition == 'sparse':
+        return [sampling_shell]
+
+    # For normal
+    elif condition == 'normal':
+        return [sampling_shell, sampling_shell * 0.8, sampling_shell * 1.2]
+
+    # For fine
+    elif condition == 'fine':
+        return [sampling_shell, sampling_shell * 0.75, sampling_shell * 0.9, sampling_shell * 1.1, sampling_shell * 1.5]
+
+    else:
+        raise ValueError("Condition should be one of ['sparse', 'normal', 'fine']")
+
 
 def sampling(
     method,
@@ -22,6 +38,7 @@ def sampling(
     o_file,
     client,
     sampling_shell,
+    sampling_condition,
     sampled_mol_size=None,
     water_cluster_size=22,
     grid_size="sparse",
@@ -129,7 +146,7 @@ def sampling(
 
     c = 1
     converged = False
-    shell_list = [sampling_shell, sampling_shell * 0.8, sampling_shell * 1.2]
+    shell_list = generate_shell_list(sampling_shell, sampling_condition)
     nmol = 0
     # while not converged:
     for shell in shell_list:
@@ -357,6 +374,7 @@ def sampling(
                 "Found 1 or less new binding sites, so convergence will be declared.\n"
             )
             break
+        c += 1
     print_out(
         "Finished sampling the cluster, found a total of  {}  binding sites.".format(
             len(ds_opt.df.index)
