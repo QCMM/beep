@@ -55,6 +55,13 @@ parser.add_option(
     help="The shell size of sampling space in Angstrom (Default = 2.0) ",
 )
 parser.add_option(
+    "--sampling_condition",
+    dest="sampling_condition",
+    type="string",
+    default='normal',
+    help="How tight the sampling should be done for each surface. Options: sparse, normal, fine (Default: normal)",
+)
+parser.add_option(
     "-l",
     "--level_of_theory",
     dest="level_of_theory",
@@ -120,6 +127,7 @@ opt_lot = options.level_of_theory
 r_lot = options.r_level_of_theory
 kw_id = options.keyword_id
 sampling_shell = options.sampling_shell
+sampling_condition = options.sampling_condition
 rmsd_symm = options.rmsd_symmetry
 cluster_collection = options.surface_model_collection
 mol_collection = options.small_molecule_collection
@@ -238,6 +246,7 @@ for w in ds_soc.data.records:
         out_file,
         client,
         sampling_shell,
+        sampling_condition,
     )
     print("Total number of binding sites so far: {} ".format(count))
     ds_opt = client.get_collection("OptimizationDataset", opt_dset_name)
