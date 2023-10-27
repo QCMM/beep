@@ -2,120 +2,100 @@ import sys, time
 import qcfractal.interface as ptl
 from pathlib import Path
 from beep.converge_sampling import sampling
+import argparse
 
-from optparse import OptionParser
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="""
+    A command line interface to sample the surface of a set of water clusters (stored in a 
+    QCFractal DataSet) with a small molecule or atom. This CLI is part
+    of the Binding Energy Evaluation Platform (BEEP).
+    """
+    )
 
-usage = """python %prog [options]
+    parser.add_argument(
+        "--client_address",
+        default="localhost:7777",
+        help="The URL address and port of the QCFractal server (default: localhost:7777)",
+    )
+    parser.add_argument(
+        "--username",
+        default=None,
+        help="The username for the database client (Default = None)",
+    )
+    parser.add_argument(
+        "--password",
+        default=None,
+        help="The password for the database client (Default = None)",
+    )
+    parser.add_argument(
+        "--molecule",
+        required=True,
+        help="The name of the molecule to be sampled (from a QCFractal OptimizationDataSet collection)",
+    )
+    parser.add_argument(
+        "--surface_model_collection",
+        default="Water_22",
+        help="The name of the collection with the set of water clusters (default: Water_22)",
+    )
+    parser.add_argument(
+        "--small_molecule_collection",
+        default="Small_molecules",
+        help="The name of the collection containing molecules or radicals (default: Small_molecules)",
+    )
+    parser.add_argument(
+        "--sampling_shell",
+        type=float,
+        default=2.0,
+        help="The shell size of sampling space in Angstrom (Default = 2.0)",
+    )
+    parser.add_argument(
+        "--sampling_condition",
+        type=str,
+        default="normal",
+        help="How tight the sampling should be done for each surface. Options: sparse, normal, fine (Default: normal)",
+    )
+    parser.add_argument(
+        "--level_of_theory",
+        default="blyp_def2-svp",
+        help="The level of theory in the format: method_basis (default: blyp_def2-svp)",
+    )
+    parser.add_argument(
+        "--refinement_level_of_theory",
+        default="hf3c_minix",
+        help="The level of theory for geometry refinement in the format: method_basis (default: hf3c_minix)",
+    )
+    parser.add_argument(
+        "--rmsd_value",
+        type=float,
+        default=0.40,
+        help="Rmsd geometrical criteria, all structures below this value will not be considered as unique. (default: 0.40 angstrom)",
+    )
+    parser.add_argument(
+        "--rmsd_symmetry",
+        action="store_true",
+        help="Consider the molecular symmetry for the rmsd calculation",
+    )
+    parser.add_argument(
+        "--program",
+        default="psi4",
+        help="The program to use for this calculation (default: psi4)",
+    )
+    parser.add_argument(
+        "--sampling_tag",
+        default="sampling",
+        help="The tag to use to specify the qcfractal-manager for the sampling optimization (default: sampling)",
+    )
+    parser.add_argument(
+        "--keyword_id",
+        default=None,
+        help="ID of the QC keywords for the OptimizationDataSet specification (default: None)",
+    )
 
-A command line interface to sample the surface of a set of water clusters (stored in a 
-QCFractal DataSet) with a small molecule or atom. This CLI is part
-of the Binding Energy Evaluation Platform (BEEP).
-"""
-parser = OptionParser(usage=usage)
-parser.add_option(
-    "--client_address",
-    dest="client_address",
-    help="The URL address and port of the QCFractal server (default: localhost:7777)",
-    default="localhost:7777",
-)
-parser.add_option(
-    "--username",
-    dest="usern",
-    help="The username for the database client (Default = None)",
-    default=None,
-)
-parser.add_option(
-    "--password",
-    dest="passwd",
-    help="The password for the database client (Default = None)",
-    default=None,
-)
-parser.add_option(
-    "--molecule",
-    dest="molecule",
-    help="The name of the molecule to be sampled (from a QCFractal OptimizationDataSet collection)",
-)
-parser.add_option(
-    "--surface_model_collection",
-    dest="surface_model_collection",
-    help="The name of the collection with the set of water clusters (dafault: Water_22)",
-    default="Water_22",
-)
-parser.add_option(
-    "--small_molecule_collection",
-    dest="small_molecule_collection",
-    help="The name of the collection containing molecules or radicals (dafault: Small_molecules)",
-    default="Small_molecules",
-)
-parser.add_option(
-    "--sampling_shell",
-    dest="sampling_shell",
-    type="float",
-    default=2.0,
-    help="The shell size of sampling space in Angstrom (Default = 2.0) ",
-)
-parser.add_option(
-    "--sampling_condition",
-    dest="sampling_condition",
-    type="string",
-    default='normal',
-    help="How tight the sampling should be done for each surface. Options: sparse, normal, fine (Default: normal)",
-)
-parser.add_option(
-    "-l",
-    "--level_of_theory",
-    dest="level_of_theory",
-    help="The level of theory in the format: method_basis (default: blyp_def2-svp)",
-    default="blyp_def2-svp",
-)
-parser.add_option(
-    "--refinement_level_of_theory",
-    dest="r_level_of_theory",
-    help="The level of theory for geometry refinement in the format: method_basis (default: hf3c_minix)",
-    default="hf3c_minix",
-)
-parser.add_option(
-    "--rmsd_value",
-    dest="rmsd_val",
-    type="float",
-    default=0.40,
-    help="Rmsd geometrical criteria, all structure below this value will not be considered as unique. (default: 0.40 angstrom)",
-)
-parser.add_option(
-    "--rmsd_symmetry",
-    action="store_true",
-    dest="rmsd_symmetry",
-    help="Consider the molecular symmetry for the rmsd calculation",
-)
-parser.add_option(
-    "-p",
-    "--program",
-    dest="program",
-    default="psi4",
-    help="The program to use for this calculation (default: psi4)",
-)
-parser.add_option(
-    "--sampling_tag",
-    dest="tag",
-    default="sampling",
-    help="The tag to used to specify the qcfractal-manager for the sampling optimization  (default: sampling)",
-)
-
-parser.add_option(
-    "-k",
-    "--keyword_id",
-    dest="keyword_id",
-    help="ID of the QC keywords for the OptimizationDataSet specification (default: None)",
-    default=None,
-)
+    return parser.parse_args()
 
 
-def print_out(string, o_file):
-    with open(o_file, "a") as f:
-        f.write(string)
-
-
-options = parser.parse_args()[0]
+options = parse_arguments()
 
 username = options.usern
 password = options.passwd
