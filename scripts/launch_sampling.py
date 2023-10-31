@@ -1,7 +1,7 @@
 import sys, time, argparse, logging
 from pathlib import Path
 import qcfractal.interface as ptl
-from beep.converge_sampling import sampling
+from beep.sampling import run_sampling
 from beep.errors import DatasetNotFound, LevelOfTheoryNotFound
 
 welcome_msg = """       
@@ -122,11 +122,13 @@ of the Binding Energy Evaluation Platform (BEEP).
     )
     parser.add_argument(
         "--sampling-tag",
+        type=str,
         default="sampling",
         help="The tag to use to specify the qcfractal-manager for the sampling optimization (default: sampling)",
     )
     parser.add_argument(
         "--keyword-id",
+        type=int,
         default=None,
         help="ID of the QC keywords for the OptimizationDataSet specification of the sampling (default: None)",
     )
@@ -187,12 +189,6 @@ def check_optimized_molecule(ds, opt_lot, mol_names):
             raise ValueError(f" Optimization has status {rr.status} restart it or wait")
 
 
-# def get_dataset_entry_num(ds):
-#    #df = ds.status(opt_lot, collapse=False)
-#    #num = len(df[df[opt_lot] == "COMPLETE"])
-#    return len(
-
-
 def get_or_create_opt_collection(client, dset_name):
     try:
         ds_opt = client.get_collection("OptimizationDataset", dset_name)
@@ -205,7 +201,8 @@ def get_or_create_opt_collection(client, dset_name):
     return ds_opt
 
 
-def process_refinement(client, refine_lot, ds_opt, logger):
+def process_refinement(client, refine_lot, ds_opt):
+    logger = logging.getLogger("beep_logger")
     method, basis, program = refine_lot
     spec = {
         "name": method + "_" + basis,
@@ -296,11 +293,12 @@ def main():
         smol_name = args.molecule
         ref_opt_dset_name = smol_name + "_" + w
         smplg_opt_dset_name = "pre_" + ref_opt_dset_name
-        args_dict["opt_dset_name"] = ref_opt_dset_name
 
         # Retrieve or create the Sampling collection
         ds_smplg = get_or_create_opt_collection(client, smplg_opt_dset_name)
         ds_ref = get_or_create_opt_collection(client, ref_opt_dset_name)
+        args_dict["sampling_opt_dset"] = ds_smplg
+        args_dict["refinement_opt_dset"] = ds_ref
 
         ## logging info for sampling cluster
         logger.info(sampling_round_msg(w, smplg_opt_dset_name, ref_opt_dset_name))
@@ -324,11 +322,11 @@ def main():
             f.write(welcome_msg)
         args_dict["o_file"] = out_file
 
-        sampling(**args_dict)
+        run_sampling(**args_dict)
 
-        logger.info(f"Total number of binding sites so far: {count}")
+        logger.info(f"\n\nTotal number of binding sites so far: {count}")
         r_lot = args.refinement_level_of_theory
-        process_refinement(client, r_lot, ds_ref, logger)
+        process_refinement(client, r_lot, ds_ref)
         count = count + int(c)
         if count > args.total_binding_sites:
             logger.info(
