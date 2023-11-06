@@ -18,13 +18,15 @@ python ../scripts/launch_sampling.py \
     --username '' \
     --password "" \
     --molecule HF \
-    --surface_model_collection Small_water \
-    --small_molecule_collection Small_molecules \
-    --sampling_shell 2.5 \
-    --sampling_condition normal \
-    --level_of_theory pbeh3c_def2-msvp \
-    --refinement_level_of_theory bhandhlyp_def2-tzvp \
-    --rmsd_value 0.4 \
-    --program psi4 \
-    --sampling_tag test_sampling \
-    --rmsd_symmetry \
+    --surface-model-collection water_22 \
+    --small-molecule-collection small_molecules \
+    --sampling-shell 3.0 \
+    --sampling-condition normal \
+    --sampling-level-of-theory blyp-d3 def2-svp terachem\
+    --refinement-level-of-theory bhandhlyp def2-svp psi4\
+    --rmsd-value 0.4 \
+    --rmsd-symmetry \
+    --store-initial-structures \
+    --sampling-tag sampling \
+    --total-binding-sites 250 \
+    --keyword-id 1
