@@ -6,6 +6,22 @@ import numpy as np
 from pathlib import Path
 from optparse import OptionParser
 
+def generate_shell_list(sampling_shell, condition):
+    # For sparse
+    if condition == 'sparse':
+        return [sampling_shell]
+
+    # For normal
+    elif condition == 'normal':
+        return [sampling_shell, sampling_shell * 0.8, sampling_shell * 1.2]
+
+    # For fine
+    elif condition == 'fine':
+        return [sampling_shell, sampling_shell * 0.75, sampling_shell * 0.9, sampling_shell * 1.1, sampling_shell * 1.5]
+
+    else:
+        raise ValueError("Condition should be one of ['sparse', 'normal', 'fine']")
+
 
 def sampling(
     method,
@@ -21,17 +37,15 @@ def sampling(
     cluster,
     o_file,
     client,
-    max_rounds=None,
+    sampling_shell,
+    sampling_condition,
     sampled_mol_size=None,
     water_cluster_size=22,
-    max_struct=25,
-    num_struct=10,
-    sampling_shell=2.5,
     grid_size="sparse",
     purge=None,
     noise=False,
     zenith_angle=np.pi / 2,
-    single_site=None,
+    single_site=False,
 ):
     def print_out(string):
         with open(o_file, "a") as f:
@@ -50,8 +64,7 @@ def sampling(
         )
     )
 
-    frequency = 600
-
+    frequency = 200
     out_string = ""
 
     try:
@@ -92,7 +105,7 @@ def sampling(
     spec = {
         "name": opt_lot,
         "description": "Geometric Optimziation ",
-        "optimization_spec": {"program": "geometric", "keywords": {'maxiter': 150}},
+        "optimization_spec": {"program": "geometric", "keywords": {"maxiter": 150}},
         "qc_spec": {
             "driver": "gradient",
             "method": method,
@@ -121,12 +134,11 @@ def sampling(
     Program: {}
     Method: {}
     Basis:  {}
-    Maximum number of structures to look for:  {}
 
     Starting Convergence procedure....
 
     """.format(
-        program, method, basis, max_struct
+        program, method, basis
     )
 
     print_out(out_string)
@@ -134,27 +146,28 @@ def sampling(
 
     c = 1
     converged = False
+    shell_list = generate_shell_list(sampling_shell, sampling_condition)
     nmol = 0
-    while not converged:
+    # while not converged:
+    for shell in shell_list:
         out_string = ""
         mol_l = " "
         entry_list = []
         complete_opt_name = []
 
         if not single_site:
-            molecules = mol_sample(
+            molecules, _ = mol_sample(
                 cluster,
                 target_mol,
-                number_of_structures=num_struct,
-                sampling_shell=sampling_shell,
-                print_out=False,
+                sampling_shell=shell,
+                debug=True,
             )
         else:
             molecules = single_site_mol_sample(
                 cluster=cluster,
                 sampling_mol=target_mol,
                 sampled_mol_size=sampled_mol_size,
-                sampling_shell=sampling_shell,
+                sampling_shell=shell,
                 grid_size=grid_size,
                 purge=purge,
                 noise=noise,
@@ -269,7 +282,7 @@ def sampling(
                 continue
 
             # print_out(out_string)
-            # Comparing molecules to already existing molecules in the Optopt_dset_name, only adding them if RMSD > 0.25
+            # Comparing molecules to already existing molecules in the Optopt_dset_name, only adding them if RMSD > X
             id_list = ds_opt.data.records.items()
             out_string += """
     
@@ -354,27 +367,40 @@ def sampling(
             len(complete_opt_name), len(ds_opt.df.index), c, new, tot_mol
         )
         print_out(out_string)
-
-        if max_rounds:
-            if c == max_rounds:
-                converged = True
-                print_out(
-                    "Reached the maximum number of {}  binding sites searching rounds. Exiting...".format(
-                        max_rounds
-                    )
-                )
-                return converged
-
-        c += 1
-
-        if len(ds_opt.df.index) <= 16:
-            continue
-
-        if (len(ds_opt.df.index) >= max_struct) or (c >= 7) or (new <= 1):
-            converged = True
+        if single_site:
+            break
+        if new <= 1:
             print_out(
-                "All or at least {} binding sites were found! Exiting...".format(
-                    max_struct
-                )
+                "Found 1 or less new binding sites, so convergence will be declared.\n"
             )
-            return converged
+            break
+        c += 1
+    print_out(
+        "Finished sampling the cluster, found a total of  {}  binding sites.".format(
+            len(ds_opt.df.index)
+        )
+    )
+
+    # if max_rounds:
+    #    if c == max_rounds:
+    #        converged = True
+    #        print_out(
+    #            "Reached the maximum number of {}  binding sites searching rounds. Exiting...".format(
+    #                max_rounds
+    #            )
+    #        )
+    #        return converged
+
+    # c += 1
+
+    # if len(ds_opt.df.index) <= 16:
+    #    continue
+
+    # if (len(ds_opt.df.index) >= max_struct) or (c >= 7) or (new <= 1):
+    #    converged = True
+    #    print_out(
+    #        "All or at least {} binding sites were found! Exiting...".format(
+    #            max_struct
+    #        )
+    #    )
+    #    return converged
