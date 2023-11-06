@@ -1,6 +1,9 @@
 import sys, time, argparse, logging
 from pathlib import Path
+from typing import Dict, Tuple, List
 import qcfractal.interface as ptl
+from qcfractal.interface.collections.optimization_dataset import OptimizationDataset
+from qcfractal.interface.client import FractalClient
 from beep.sampling import run_sampling
 from beep.errors import DatasetNotFound, LevelOfTheoryNotFound
 
@@ -12,35 +15,59 @@ of a small molecule around a set-of-clusters surface model,  until a default of 
 sites are found..
 
 Author: svogt, gbovolenta
-
             """
 
 
-def sampling_model_msg(surface_model, target_mol, method, basis, program):
-    return """
-------------------------------------------------------------------------------
-Starting the sampling of the surface model {0} with the molecule {1}
-The sampling level of theory is method : {2} basis: {3} program {4}
-------------------------------------------------------------------------------
+def sampling_model_msg(
+    surface_model: str, target_mol: str, method: str, basis: str, program: str
+) -> str:
+    """
+    Format a message for the start of sampling of a surface model.
 
-    """.format(
-        surface_model, target_mol, method, basis, program
-    )
+    Args:
+    - surface_model: Name of the surface model.
+    - target_mol: Name of the target molecule.
+    - method: Computational method used.
+    - basis: Basis set used.
+    - program: Program used for computation.
+
+    Returns:
+    - Formatted message string.
+    """
+    return f"""
+-----------------------------------------------------------------------------------------
+Starting the sampling of the surface model {surface_model} with the molecule {target_mol}
+The sampling level of theory is method: {method} basis: {basis} program: {program}
+-----------------------------------------------------------------------------------------
+    """
 
 
-def sampling_round_msg(name_cluster, opt_smplg, opt_refine):
-    return """
-##############################################################################
-Processing cluster: {}
-The OptimizationDataset for the sampling results: {}
-The OptimiztionDataset for the unique structures for refinement: {}
+def sampling_round_msg(name_cluster: str, opt_smplg: str, opt_refine: str) -> str:
+    """
+    Format a message for the processing of a cluster round.
 
-    """.format(
-        name_cluster, opt_smplg, opt_refine
-    )
+    Args:
+    - name_cluster: Name of the cluster being processed.
+    - opt_smplg: Name of the OptimizationDataset for sampling results.
+    - opt_refine: Name of the OptimizationDataset for unique structures for refinement.
+
+    Returns:
+    - Formatted message string.
+    """
+    return f"""##############################################################################
+Processing cluster: {name_cluster}
+The OptimizationDataset for the sampling results: {opt_smplg}
+The OptimizationDataset for the unique structures for refinement: {opt_refine}
+    """
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command line arguments for the script.
+
+    Returns:
+    - Namespace containing the parsed command line arguments.
+    """
     parser = argparse.ArgumentParser(
         description="""
 A command line interface to sample the surface of a set of water clusters (stored in a 
@@ -121,6 +148,11 @@ of the Binding Energy Evaluation Platform (BEEP).
         help="Consider the molecular symmetry for the RMSD calculation",
     )
     parser.add_argument(
+        "--store-initial-structures",
+        action="store_true",
+        help="Save the initial structures of the sampling procedure in the site_finder folder for visualization",
+    )
+    parser.add_argument(
         "--sampling-tag",
         type=str,
         default="sampling",
@@ -136,7 +168,16 @@ of the Binding Energy Evaluation Platform (BEEP).
     return parser.parse_args()
 
 
-def sampling_args(args):
+def sampling_args(args: argparse.Namespace) -> Dict[str, any]:
+    """
+    Create a dictionary of sampling arguments.
+
+    Args:
+    - args: Parsed command line arguments.
+
+    Returns:
+    - Dictionary of arguments for sampling.
+    """
     return {
         "method": args.sampling_level_of_theory[0],
         "basis": args.sampling_level_of_theory[1],
@@ -147,6 +188,7 @@ def sampling_args(args):
         + "_"
         + args.sampling_level_of_theory[1],
         "rmsd_symm": args.rmsd_symmetry,
+        "store_initial": args.store_initial_structures,
         "rmsd_val": args.rmsd_value,
         "sampling_shell": args.sampling_shell,
         "sampling_condition": args.sampling_condition,
@@ -154,14 +196,17 @@ def sampling_args(args):
 
 
 def check_collection_existence(
-    client, *collections, collection_type="OptimizationDataset"
+    client: FractalClient,
+    *collections: List,
+    collection_type: str = "OptimizationDataset",
 ):
     """
     Check the existence of collections and raise DatasetNotFound error if not found.
 
     Args:
-    - client: The client used for collection retrieval.
-    - *collections: Variable number of collection names to check for existence.
+    - client: QCFractal client object
+    - *collections: List of QCFractal Datasets.
+    - collection_type: type of Optimization Dataset
 
     Raises:
     - DatasetNotFound: If any of the specified collections do not exist.
@@ -175,7 +220,21 @@ def check_collection_existence(
             )
 
 
-def check_optimized_molecule(ds, opt_lot, mol_names):
+def check_optimized_molecule(
+    ds: OptimizationDataset, opt_lot: str, mol_names: List[str]
+) -> None:
+    """
+    Check if all molecules are optimized at the requested level of theory.
+
+    Args:
+    - ds: OptimizationDataset containing the optimization records.
+    - opt_lot: Level of theory string.
+    - mol_names: List of molecule names to check.
+
+    Raises:
+    - LevelOfTheoryNotFound: If the level of theory for a molecule or the entry itself does not exist.
+    - ValueError: If optimizations are incomplete or encountered an error.
+    """
     for mol in list(mol_names):
         try:
             rr = ds.get_record(mol, opt_lot)
@@ -189,7 +248,19 @@ def check_optimized_molecule(ds, opt_lot, mol_names):
             raise ValueError(f" Optimization has status {rr.status} restart it or wait")
 
 
-def get_or_create_opt_collection(client, dset_name):
+def get_or_create_opt_collection(
+    client: FractalClient, dset_name: str
+) -> OptimizationDataset:
+    """
+    Get or create an optimization dataset collection.
+
+    Args:
+    - client: Fractal client instance to use.
+    - dset_name: Name of the OptimizationDataset.
+
+    Returns:
+    - An instance of the OptimizationDataset.
+    """
     try:
         ds_opt = client.get_collection("OptimizationDataset", dset_name)
         out_string = f"OptimizationDataset {dset_name} already exists, new sampled structures will be saved here."
@@ -201,7 +272,23 @@ def get_or_create_opt_collection(client, dset_name):
     return ds_opt
 
 
-def process_refinement(client, refine_lot, ds_opt):
+def process_refinement(
+    client: FractalClient, refine_lot: Tuple[str, str, str], ds_opt: OptimizationDataset
+) -> None:
+    """
+    Process the refinement optimization at a given level of theory.
+
+    Args:
+    - client: Fractal client instance to use.
+    - refine_lot: A tuple containing the refinement level of theory as (method, basis, program).
+    - ds_opt: Optimizationdataset to contain the refinement optimizations.
+
+    Other considerations:
+    - Assumes all optimization entries in ds_opt are unique.
+
+    Returns:
+    - None, no return value, this function is expected to execute a procedure that does not need a return.
+    """
     logger = logging.getLogger("beep_logger")
     method, basis, program = refine_lot
     spec = {
@@ -218,10 +305,9 @@ def process_refinement(client, refine_lot, ds_opt):
     }
     ds_opt.add_specification(**spec, overwrite=True)
     ds_opt.save()
-    num_of_bs = len(ds_opt.data.records)
-    logger.info(f"{num_of_bs} unique binding sites found in this round.")
     c = ds_opt.compute(method + "_" + basis, tag="refinement")
-    logger.info(f"Sending {c} optimizations at {refine_lot} level.")
+    logger.info(f"Sending {c} refinement optimizations at {refine_lot} level.")
+    return None
 
 
 def main():
@@ -229,9 +315,8 @@ def main():
     args = parse_arguments()
 
     # Create a logger
-    logger = logging.getLogger("beep_logger")
-    # logger.setLevel(logging.INFO)
-    logger.setLevel(logging.DEBUG)
+    logger = logging.getLogger("beep_sampling")
+    logger.setLevel(logging.INFO)
 
     # File handler for logging to a file
     log_file = (
@@ -303,31 +388,28 @@ def main():
         ## logging info for sampling cluster
         logger.info(sampling_round_msg(w, smplg_opt_dset_name, ref_opt_dset_name))
 
-        try:
-            old_opt_num = len(ds_ref.data.records)
-            logger.debug(
-                f"Number of existing binding sites for this cluster: {old_opt_num}"
-            )
-            count = count + old_opt_num
-        except KeyError:
-            pass
+        # Path for debugging
+        debug_path = Path("./site_finder/" + str(smol_name) + "_w/" + w)
+        if not debug_path.exists() and args.store_initial_structures:
+            debug_path.parent.mkdir(parents=True, exist_ok=True)
+        args_dict["debug_path"] = debug_path
 
-        # Logging
-        out_file = Path(
-            "./site_finder/" + str(smol_name) + "_w/" + w + "/out_sampl.dat"
-        )
-        if not out_file.is_file():
-            out_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_file, "w") as f:
-            f.write(welcome_msg)
-        args_dict["o_file"] = out_file
-
+        # Calling run sampling function
         run_sampling(**args_dict)
 
-        logger.info(f"\n\nTotal number of binding sites so far: {count}")
+        # Do the geometry refinement optimizations
         r_lot = args.refinement_level_of_theory
         process_refinement(client, r_lot, ds_ref)
-        count = count + int(c)
+
+        # Count number of structures for this model
+        ds_ref = get_or_create_opt_collection(client, ref_opt_dset_name)
+        count += len(ds_ref.data.records)
+
+        logger.info(
+            f"\nFinished sampling of cluster {w} number of binding sites: {len(ds_ref.data.records)}"
+        )
+        logger.info(f"\nTotal number of binding sites thus far: {count}\n\n")
+
         if count > args.total_binding_sites:
             logger.info(
                 f"Thank you for using BEEP binding site sampler. Total binding sites : {count}\n"
