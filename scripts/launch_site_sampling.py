@@ -60,12 +60,6 @@ parser.add_option("--zenith-angle",
                   default=3.14159/2,
                   help="The angle with respect to the zenith to construct the sampling shell (Default: pi/2)",
 )
-parser.add_option("--maximal-binding-sites",
-                  dest="maximal_binding_sites",
-                  type = "int",
-                  default= 15,
-                  help="The maximal number of binding sites per cluster (default: 21)"
-)
 parser.add_option("--number-of-rounds",
                   dest="number_of_rounds",
                   type = "int",
@@ -162,7 +156,6 @@ sampled_mol_size = options.molecule_size
 molecule_size = options.molecule_size
 s_shell = options.sampling_shell
 zenith_angle = options.zenith_angle
-max_struct = options.maximal_binding_sites
 max_rounds = options.number_of_rounds
 noise = options.noise
 purge = options.purge
