@@ -1,128 +1,273 @@
-import numpy as np
-from qcelemental.physical_constants import constants
-import qcelemental as qcel
 from pathlib import Path
-import random
+import numpy as np
+import random, logging
+from typing import List, Tuple
+from qcelemental.physical_constants import constants
+from qcelemental.models.molecule import Molecule
+import qcelemental as qcel
+
+
+bohr2angst = constants.conversion_factor("bohr", "angstrom")
+angst2bohr = constants.conversion_factor("angstrom", "bohr")
+
+
+def com(geometry: np.ndarray, symbols: list) -> np.ndarray:
+    """
+    Compute the center of mass for a molecule.
+
+    Parameters:
+    - geometry: np.ndarray of shape (N, 3) representing the atomic positions.
+    - symbols: list of strings representing the atomic symbols.
+
+    Returns:
+    A np.ndarray of shape (3,) representing the center of mass.
+    """
+    total_mass = 0.0
+    com = np.zeros(3)
+
+    for i, symbol in enumerate(symbols):
+        atom_mass = qcel.periodictable.to_mass(symbol)
+        com += atom_mass * geometry[i]
+        total_mass += atom_mass
+
+    com /= total_mass
+
+    return com
+
+
+def calculate_diameter(cluster_xyz: np.ndarray) -> float:
+    """
+    Calculate the diameter of a molecule based on its XYZ coordinates.
+
+    Args:
+    cluster_xyz (numpy.ndarray): A NumPy array where each row represents an atom and each column represents X, Y, and Z values.
+
+    Returns:
+    float: The diameter of the cluster in angstroms.
+    """
+    # Check if there's only one water molecule in the cluster
+    if cluster_xyz.shape == (3, 3):
+        return 0.0
+
+    # Calculate pairwise distances between all pairs of atoms in the cluster
+    distances = np.linalg.norm(cluster_xyz[:, np.newaxis, :] - cluster_xyz, axis=-1)
+
+    # Set the diagonal elements (self-distances) to a large value to avoid selecting them
+    np.fill_diagonal(distances, 0)
+
+    # Find the maximum distance, which represents the diameter of the cluster
+    diameter = np.max(distances)
+
+    return diameter
+
+
+def surface_distance_check(
+    cluster: Molecule, mol: Molecule, cut_distance: float
+) -> bool:
+    """
+    Check if any atom in the molecule (mol) is too close to any atom in the cluster based on a specified cutoff distance.
+
+    Parameters:
+    - cluster : qcelemental.models.molecule.Molecule
+    - mol : qcelemental.models.molecule.Molecule
+    - cut_distance : float
+        The cutoff distance to determine if atoms are too close. This value is multiplied
+        by the global constant 'angst2bohr' to get the actual distance threshold.
+
+    Returns:
+    - bool : False if any atom in the molecule is too close to the cluster based on the cutoff distance,
+             None otherwise (which evaluates to False in a boolean context).
+    """
+    for a1 in mol.geometry:
+        for a2 in cluster.geometry:
+            dis = np.linalg.norm(a1 - a2)
+            if dis < cut_distance * angst2bohr:
+                return False
+    return True
+
+
+def calculate_displacements(cluster: Molecule, sampling_shell: float) -> (float, float):
+    """
+    Calculate the minimal and maximal displacements based on the cluster's geometry and a sampling shell.
+    The 20%  most distance atoms from the origin are considered for calculating the minimum distance.
+
+    Parameters:
+    - cluster : qcelemental.models.molecule.Molecule
+        Molecular cluster for which displacements are calculated.
+    - sampling_shell : float
+        Size of the shell to use for sampling.
+
+    Returns:
+    - tuple(float, float) : Minimum and maximum displacements.
+    """
+    atms_prctg = 20
+    norms = [np.linalg.norm(i) for i in cluster.geometry]
+    # Get the top 20% distances and use the average as minimal sampling distance
+    num_top = max(1, int(len(norms) * atms_prctg / 100))
+    top_norms = np.partition(norms, -num_top)[-num_top:]
+    dis_min = np.mean(top_norms)
+    dis_max = dis_min + sampling_shell * angst2bohr
+
+    return dis_min, dis_max
+
+
+def generate_shift_vector(dis_min: float, dis_max: float) -> np.ndarray:
+    """
+    Generate a random shift vector with a magnitude between the given minimum and maximum distances.
+
+    Parameters:
+    - dis_min : float
+        Minimum distance for the shift vector.
+    - dis_max : float
+        Maximum distance for the shift vector.
+
+    Returns:
+    - np.ndarray : Randomly generated shift vector.
+    """
+    vector = (
+        np.random.random_sample((3,)) - 0.5
+    )  # shift to [-0.5, 0.5) for better isotropy
+    unit_vector = vector / np.linalg.norm(vector)
+    random_radius = np.random.uniform(dis_min, dis_max)
+    shift_vector = unit_vector * random_radius
+    return shift_vector
+
+
+def create_molecule(cluster: Molecule, mol_shift: Molecule) -> Molecule:
+    """
+    Create a new molecule by combining a cluster and a shifted molecule.
+
+    Parameters:
+    - cluster : qcelemental.models.molecule.Molecule
+        Molecular cluster to be combined.
+    - mol_shift : qcelemental.models.molecule.Molecule
+        Shifted molecule to be combined with the cluster.
+
+    Returns:
+    - qcelemental.models.molecule.Molecule : Combined molecule.
+    """
+    atms = []
+    atms.extend(list(cluster.symbols))
+    atms.extend(list(mol_shift.symbols))
+
+    geom = []
+    geom.extend(list(cluster.geometry.flatten()))
+    geom.extend(list(mol_shift.geometry.flatten()))
+
+    return Molecule(symbols=atms, geometry=geom, fix_com=False, fix_orientation=False)
+
+
+attempts = 0
 
 
 def random_molecule_sampler(
-    cluster,
-    target_molecule,
-    number_of_structures=10,
-    sampling_shell=2.5,
-    # save_xyz=[],
-    print_out=False,
-):
-    out_string = """
-                   Welcome to the molecule sampler!
-
-    Author: svogt
-    Date:   10/24/2020
-    Version: 0.1.2
-
-    Cluster to sampled: {}
-    Sampled molecule : {}
-    Number of structures to be generated: {}
-    Size of the sampling shell: {}
-
-    """.format(
-        cluster, target_molecule, number_of_structures, sampling_shell
-    )
-
-    bohr2angst = constants.conversion_factor("bohr", "angstrom")
-    angst2bohr = constants.conversion_factor("angstrom", "bohr")
-
-    fill_num = len(str(number_of_structures))
-
-    # Define the maximum  and minimum displacements
-    dis_min = max([np.linalg.norm(i) for i in cluster.geometry])  # remove 0.75
-    dis_max = dis_min + sampling_shell * angst2bohr
-
-    out_string += """
-    Fixing the maximum and minimums distances for the sampling space:
-
-    Minimum distance = {} Angstrom
-    Maximum distance = {} Angstrom
-
-    """.format(
-        dis_min * bohr2angst, dis_max * bohr2angst
-    )
-
-    # Creating the total geomtry sampling list
-    molecules = []
-    atms_sm = []
-    atms_sm.extend(list(cluster.symbols))
-    geom_sm = []
-    geom_sm.extend(list(cluster.geometry.flatten()))
-
-    c = 0
-
-    out_string += """Commencing the creation of the new structures... 
+    cluster: Molecule,
+    target_molecule: Molecule,
+    sampling_shell: float,
+    max_structures: int,
+    debug: bool = False,
+) -> Tuple[List[Molecule], Molecule]:
     """
-    while c < number_of_structures:
-        # Sample between:  a<dis<b (b - a) * random_sample() + a
-        # Generate random shift vector
-        shift_vect = (dis_max + dis_max) * np.random.random_sample((3,)) - dis_max
+    Sample random molecule placements around a given molecular cluster.
+
+    Parameters:
+    - cluster : qcelemental.models.molecule.Molecule
+        Molecular cluster around which the target molecule will be sampled.
+    - target_molecule : qcelemental.models.molecule.Molecule
+        Molecule to be sampled around the cluster.
+    - number_of_structures : int (default=10)
+        Number of sampled structures to generate.
+    - sampling_shell : float (default=2.0)
+        Size of the shell to use for sampling.
+    - debug : bool (default=False)
+        If True, additional debugging information is provided.
+
+    Returns:
+    - list of qcelemental.models.molecule.Molecule : List of sampled molecular structures.
+    - qcelemental.models.molecule.Molecule : Debug molecule (if debug=True).
+    """
+    logger = logging.getLogger("beep_sampling")
+
+    logger.info("\n%%%%%%%%%%%%%% Welcome to the molecule sampler! %%%%%%%%%%%%%%%%%%")
+    logger.debug(f"Cluster to be sampled: {cluster}")
+    logger.debug(f"Sampled molecule: {target_molecule}")
+    logger.debug(f"Size of the sampling shell: {sampling_shell}\n")
+
+    dis_min, dis_max = calculate_displacements(cluster, sampling_shell)
+    target_mol_diam = calculate_diameter(target_molecule.geometry)
+    cluster_diam = calculate_diameter(cluster.geometry)
+
+    # initialize variables
+    cluster_with_sampled_mol = []
+    sampled_mol = []
+    debug_molecule = None
+    c = 0
+    attempts = 0
+    binding_site_size = 3
+    atoms_per_cluster_mol = 3
+    total_attempts = 500
+    surface_closness_cutoff = 1.52  # Angstrom vdW radius of Oxygen
+
+    logger.debug(f"Maximum number of structures to be sampled: {max_structures }")
+    fill_num = len(str(max_structures))
+
+    while c < max_structures:
+        attempts += 1
+        if attempts == total_attempts:
+            break
+
+        new_s_num = str(c).zfill(fill_num)
+        shift_vect = generate_shift_vector(dis_min, dis_max)
         norm = np.linalg.norm(np.array(shift_vect))
 
-        # Check if shift vector is within the defined range
-        if not ((norm < dis_max) and (norm > dis_min)):
-            continue
-
-        # Shift, rotate and
         mol_shift = target_molecule.scramble(
             do_shift=shift_vect, do_rotate=True, do_resort=False, deflection=1.0
         )[0]
 
-        new_s_num = str(c).zfill(fill_num)
+        skip_remaining = False
 
-        # Creating list with atoms of the joined molecule
-        atms = []
-        atms.extend(list(cluster.symbols))
-        atms.extend(list(mol_shift.symbols))
-        # Creating list with geometry of the joined molecule
-        geom = []
-        geom.extend(list(cluster.geometry.flatten()))
-        geom.extend(list(mol_shift.geometry.flatten()))
-        # Creating the new molecule
-        molecule = qcel.models.Molecule(
-            symbols=atms,
-            geometry=geom,
-            fix_com=False,
-            fix_orientation=False,
+        # Making sure initial structures are not too close to each other
+        if sampled_mol:
+            close_condition = target_mol_diam
+            logger.debug(f"The closesness cutoff is: {close_condition * bohr2angst}")
+            for m in sampled_mol:
+                dis_vec = com(mol_shift.geometry, mol_shift.symbols) - com(
+                    m.geometry, m.symbols
+                )
+                if np.linalg.norm(dis_vec) < close_condition:  # * angst2bohr:
+                    skip_remaining = True
+                    break
+            if skip_remaining == True:
+                continue
+
+        # Check if any two atoms of the sampled molecule and cluster are not closer than a given distance
+        logger.debug(
+            f"The closesness to the surface cutoff is: {surface_closness_cutoff * bohr2angst}"
         )
-        #if save_xyz:
-        #    molecule.to_file(save_xyz + "/st_" + str(new_s_num) + ".xyz")
-        molecules.append(molecule)
-        # Creating molecule with all the displaced molecules
-        atms_sm.extend(list(mol_shift.symbols))
-        geom_sm.extend(list(mol_shift.geometry.flatten()))
+        if not surface_distance_check(cluster, mol_shift, surface_closness_cutoff):
+            continue
+
+        logger.debug(f"Generated the molecule {new_s_num}:")
+        logger.debug(f"Displacement vector: {shift_vect * bohr2angst}")
+        logger.debug(f"Norm of the displacement vector: {norm * bohr2angst}")
+
+        # create new sampled molecule + cluster
+        sampled_mol.append(mol_shift)
+        molecule = create_molecule(cluster, mol_shift)
+        cluster_with_sampled_mol.append(molecule)
+
+        if debug:
+            if not debug_molecule:
+                debug_molecule = molecule
+            else:
+                debug_molecule = create_molecule(debug_molecule, mol_shift)
         c += 1
-        out_string += """
-        ---------------------------------------------------------------------- 
-        Generated the molecule {}: 
 
-        Displacement vector: {}
-        Norm of the displacement vector: {}
-        ----------------------------------------------------------------------        
+    final_num_struc = len(cluster_with_sampled_mol)
+    logger.info(f"Number of generated initial structures: {final_num_struc} ")
+    logger.info(f"%%%%%%%%%%%%%% Exiting molecule sampler. Adios. %%%%%%%%%%%%%%%%\n")
 
-        """.format(
-            new_s_num, shift_vect * bohr2angst, norm * bohr2angst
-        )
-
-    molecules_shifted = qcel.models.Molecule(
-        symbols=atms_sm,
-        geometry=geom_sm,
-        fix_com=False,
-        fix_orientation=False,
-        validated=False,
-    )
-    # if save_xyz:
-    #    molecules_shifted.to_file(save_xyz + "/all.xyz")
-    out_string += """ Thank you for using Molecule sampling! Goodbye"""
-    if print_out:
-        print(out_string)
-    return molecules
+    return cluster_with_sampled_mol, debug_molecule
 
 
 def single_site_spherical_sampling(
@@ -137,18 +282,18 @@ def single_site_spherical_sampling(
     print_out=True,
 ):
     out_string = """
-                   Welcome to the single site molecule sampler!
+                  Welcome to the single site molecule sampler!
 
-    Author: svogt
-    Date:   12/12/2022
-    Version: 0.1.0
+   Author: svera, svogt
+   Date:   12/12/2022
+   Version: 0.1.0
 
-    Cluster to sampled: {}
-    Sampling molecule : {}
-    Grid to be used: {}
-    Size of the sampling shell: {}
+   Cluster to sampled: {}
+   Sampling molecule : {}
+   Grid to be used: {}
+   Size of the sampling shell: {}
 
-    """.format(
+   """.format(
         cluster, sampling_mol.name, grid_size, sampling_shell
     )
 
@@ -209,7 +354,6 @@ def single_site_spherical_sampling(
     # Generate the spherical grid
     radio = sampling_shell * angst2bohr
 
-
     phi_end = zenith_angle
     phi_interval = phi_end / (2 * grid[0])
 
@@ -262,7 +406,7 @@ def single_site_spherical_sampling(
                     print("removing point")
         for n in remove_list:
             try:
-                 grid_xyz.remove(n)
+                grid_xyz.remove(n)
             except ValueError:
                 continue
 
@@ -360,7 +504,6 @@ def single_site_spherical_sampling(
 
     # generate the new structures
     for i in grid_xyz:
-
         # move the center of mass of sampled molecule to the point i in grid
         shift_vector = np.array(i) * angst2bohr
         sampling_final_mol = sampling_mol.scramble(
@@ -403,56 +546,3 @@ def single_site_spherical_sampling(
 
 if __name__ == "__main__":
     main()
-
-
-def main():
-    from optparse import OptionParser
-
-    parser = OptionParser()
-    parser.add_option(
-        "-w", "--water_cluster", dest="c_mol", help="The name of the water cluster"
-    )
-    parser.add_option(
-        "-m",
-        "--molecule",
-        dest="s_mol",
-        help="The name of the molecule to be sampled (from the small_mol collection",
-    )
-    parser.add_option(
-        "-n",
-        "--number_of_structures",
-        dest="s_num",
-        type="int",
-        help="The number of initial structures to be created (Default = 10)",
-        default=10,
-    )
-    parser.add_option(
-        "-s",
-        "--sampling_shell",
-        dest="sampling_shell",
-        type="float",
-        default=1.5,
-        help="The shell size of sampling space (Default = 1.5 Angstrom)",
-    )
-    parser.add_option(
-        "--xyz-path",
-        dest="xyz_path",
-        default=None,
-        help="The path to save the xyz files, if non is provided this will be omitted",
-    )
-    parser.add_option(
-        "--print_out", action="store_true", dest="print_out", help="Print an output"
-    )
-
-    options = parser.parse_args()[0]
-
-    molecule_sampler(
-        options.c_mol,
-        options.s_mol,
-        number_of_structures=options.s_num,
-        sampling_shell=options.sampling_shell,
-        # save_xyz=options.xyz_path,
-        print_out=options.print_out,
-    )
-
-    return
