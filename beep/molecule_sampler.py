@@ -130,7 +130,6 @@ def generate_shift_vector(dis_min: float, dis_max: float) -> np.ndarray:
     unit_vector = vector / np.linalg.norm(vector)
     random_radius = np.random.uniform(dis_min, dis_max)
     shift_vector = unit_vector * random_radius
-    # logger.debug(f"Generated the follwing vector: {scaled_vector} within the radius {random_radius}")
     return shift_vector
 
 
@@ -165,6 +164,7 @@ def random_molecule_sampler(
     cluster: Molecule,
     target_molecule: Molecule,
     sampling_shell: float,
+    max_structures: int,
     debug: bool = False,
 ) -> Tuple[List[Molecule], Molecule]:
     """
@@ -186,17 +186,12 @@ def random_molecule_sampler(
     - list of qcelemental.models.molecule.Molecule : List of sampled molecular structures.
     - qcelemental.models.molecule.Molecule : Debug molecule (if debug=True).
     """
-    log_level = logging.INFO
-    logging.basicConfig(level=log_level)
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger("beep_sampling")
 
-    logger.info("Welcome to the molecule sampler!")
-    logger.info(f"Author: svogt")
-    logger.info(f"Date: 10/24/2020")
-    logger.info(f"Version: 0.2.1")
-    logger.info(f"Cluster to be sampled: {cluster}")
-    logger.info(f"Sampled molecule: {target_molecule}")
-    logger.info(f"Size of the sampling shell: {sampling_shell}")
+    logger.info("\n%%%%%%%%%%%%%% Welcome to the molecule sampler! %%%%%%%%%%%%%%%%%%")
+    logger.debug(f"Cluster to be sampled: {cluster}")
+    logger.debug(f"Sampled molecule: {target_molecule}")
+    logger.debug(f"Size of the sampling shell: {sampling_shell}\n")
 
     dis_min, dis_max = calculate_displacements(cluster, sampling_shell)
     target_mol_diam = calculate_diameter(target_molecule.geometry)
@@ -213,8 +208,7 @@ def random_molecule_sampler(
     total_attempts = 500
     surface_closness_cutoff = 1.52  # Angstrom vdW radius of Oxygen
 
-    max_structures = max(3, (len(cluster.symbols) / atoms_per_cluster_mol) // 3)
-    logger.info(f"Maximum number of structures to be sampled: {max_structures }")
+    logger.debug(f"Maximum number of structures to be sampled: {max_structures }")
     fill_num = len(str(max_structures))
 
     while c < max_structures:
@@ -271,6 +265,7 @@ def random_molecule_sampler(
 
     final_num_struc = len(cluster_with_sampled_mol)
     logger.info(f"Number of generated initial structures: {final_num_struc} ")
+    logger.info(f"%%%%%%%%%%%%%% Exiting molecule sampler. Adios. %%%%%%%%%%%%%%%%\n")
 
     return cluster_with_sampled_mol, debug_molecule
 
@@ -551,56 +546,3 @@ def single_site_spherical_sampling(
 
 if __name__ == "__main__":
     main()
-
-
-# def main():
-#    from optparse import OptionParser
-#
-#    parser = OptionParser()
-#    parser.add_option(
-#        "-w", "--water_cluster", dest="c_mol", help="The name of the water cluster"
-#    )
-#    parser.add_option(
-#        "-m",
-#        "--molecule",
-#        dest="s_mol",
-#        help="The name of the molecule to be sampled (from the small_mol collection",
-#    )
-#    parser.add_option(
-#        "-n",
-#        "--number_of_structures",
-#        dest="s_num",
-#        type="int",
-#        help="The number of initial structures to be created (Default = 10)",
-#        default=10,
-#    )
-#    parser.add_option(
-#        "-s",
-#        "--sampling_shell",
-#        dest="sampling_shell",
-#        type="float",
-#        default=1.5,
-#        help="The shell size of sampling space (Default = 1.5 Angstrom)",
-#    )
-#    parser.add_option(
-#        "--xyz-path",
-#        dest="xyz_path",
-#        default=None,
-#        help="The path to save the xyz files, if non is provided this will be omitted",
-#    )
-#    parser.add_option(
-#        "--print_out", action="store_true", dest="print_out", help="Print an output"
-#    )
-#
-#    options = parser.parse_args()[0]
-#
-#    molecule_sampler(
-#        options.c_mol,
-#        options.s_mol,
-#        number_of_structures=options.s_num,
-#        sampling_shell=options.sampling_shell,
-#        # save_xyz=options.xyz_path,
-#        print_out=options.print_out,
-#    )
-#
-#    return
