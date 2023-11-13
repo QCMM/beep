@@ -215,7 +215,7 @@ def run_sampling(
     logger = logging.getLogger("beep_sampling")
 
     # Defining initial variables
-    FREQUENCY = 200
+    FREQUENCY = 600
     ATOMS_PER_CLUSTER_MOL = 3
     binding_site_num = 0
     n_smpl_mol = 0
@@ -236,7 +236,7 @@ def run_sampling(
     spec = {
         "name": opt_lot,
         "description": "Geometric Optimziation ",
-        "optimization_spec": {"program": "geometric", "keywords": {"maxiter": 100}},
+        "optimization_spec": {"program": "geometric", "keywords": {"maxiter": 125}},
         "qc_spec": {
             "driver": "gradient",
             "method": method,

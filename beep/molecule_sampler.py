@@ -164,7 +164,7 @@ def random_molecule_sampler(
     cluster: Molecule,
     target_molecule: Molecule,
     sampling_shell: float,
-    max_structures = int,
+    max_structures: int,
     debug: bool = False,
 ) -> Tuple[List[Molecule], Molecule]:
     """
