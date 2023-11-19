@@ -606,6 +606,7 @@ def main():
         surf_cbs_en = get_cbs_energy(cbs_col, surf_name.upper(), cbs_list)
         struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list)
         ref_be[bench_struct] = (struct_cbs_en - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol
+        ref_de[bench_struct] = (struct_cbs_en - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol
     print(ref_be)
     return None
 
