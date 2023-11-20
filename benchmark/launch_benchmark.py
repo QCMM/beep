@@ -1,7 +1,9 @@
-import sys, time, argparse, logging
+import sys, time, argparse, logging, os
 import numpy as np
-from pathlib import Path
+import pickle
 import qcelemental as qcel
+import functools
+from pathlib import Path
 from cbs_extrapolation import *
 from typing import Dict, Union, List, Tuple
 from collections import Counter
@@ -11,8 +13,7 @@ from qcfractal.interface.collections.dataset import Dataset
 from qcfractal.interface.collections.reaction_dataset import ReactionDataset
 from qcfractal.interface.client import FractalClient
 from qcelemental.models.molecule import Molecule
-from beep.sampling import run_sampling
-from beep.errors import DatasetNotFound, LevelOfTheoryNotFound
+#from beep.errors import DatasetNotFound, LevelOfTheoryNotFound
 
 
 welcome_msg = """       
@@ -24,6 +25,33 @@ sites are found..
 
 Author: svogt, gbovolenta
             """
+def cache_to_file(cache_file):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Create a key based on the function's arguments
+            key = (args, frozenset(kwargs.items()))
+
+            # Check if the cache file exists and load the cache
+            if os.path.exists(cache_file):
+                with open(cache_file, 'rb') as f:
+                    cache = pickle.load(f)
+            else:
+                cache = {}
+
+            # If the result is cached, return it
+            if key in cache:
+                return cache[key]
+
+            # Otherwise, call the function and cache the result
+            result = func(*args, **kwargs)
+            cache[key] = result
+            with open(cache_file, 'wb') as f:
+                pickle.dump(cache, f)
+            return result
+
+        return wrapper
+    return decorator
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -263,6 +291,45 @@ def compute_rmsd(
     rmsd_val = align_mols[1]["rmsd"]
     return rmsd_val, rmsd_val_mirror
 
+#@cache_to_file('final_opt_lot.pkl')
+def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
+    dft_geom_fmols = {}
+    final_opt_lot = {}
+    for opt_lot in dft_lot:
+        rmsd_tot_dict = {}
+        rmsd_tot_mirror = []
+        for struct_name, odset in odset_dict.items():
+            record = odset.get_record(struct_name, specification=opt_lot)
+            fmol = record.get_final_molecule()
+            rmsd, rmsd_mirror = compute_rmsd(
+                ref_geom_fmols[struct_name], fmol, rmsd_symm=True
+            )
+            rmsd_tot_dict[struct_name] = rmsd
+            rmsd_tot_mirror.append(rmsd_mirror)
+        rmsd_tot = list(rmsd_tot_dict.values())
+        if np.mean(rmsd_tot) < 0.15:
+            final_opt_lot[opt_lot] = np.mean(rmsd_tot)
+        elif np.mean(rmsd_tot_mirror) < 0.15:
+            final_opt_lot[opt_lot] = np.mean(rmsd_tot_mirror)
+    print(len(final_opt_lot.values()))
+    return(final_opt_lot)
+
+
+def create_molecular_fragments(mol: Molecule, len_f1):
+    geom = mol.geometry.flatten()
+    symbols = mol.symbols
+    f_mol = ptl.Molecule(
+        symbols=symbols,
+        geometry=geom,
+        fragments=[
+            list(range(0, len_f1)),
+            list(range(len_f1, len(symbols))),
+        ],
+    )
+    f1_mol = f_mol.get_fragment(0)
+    f2_mol = f_mol.get_fragment(1)
+    return f1_mol, f2_mol
+
 
 def create_be_stoichiometry(odset, bench_struct, lot_geom):
     mol_name, surf_name, _ = bench_struct.split("_")
@@ -376,6 +443,36 @@ def get_cbs_energy(ds: Dataset, struct, cbs_lot_list):
     ccsdt_cbs_corr = ccsdt_dt - ccsd_dt
 
     return scf_dtq + mp2_cbs_corr + ccsd_cbs_corr + ccsdt_cbs_corr
+
+
+def abs_error_dataframe(df, ref_en_dict):
+    # Create a new DataFrame to hold the results
+    result_df = pd.DataFrame(index=df.index, columns=df.columns)
+
+    # Iterate over each row index and column, subtract, and take the absolute value
+    for row_index in df.index:
+        for col in df.columns:
+            dict_key = row_index.split('_')[0] + '_' + row_index.split('_')[1] + '_' + row_index.split('_')[2]  # Construct the key from the row index
+            if dict_key in ref_en_dict:
+                # Subtract the dictionary value from the DataFrame entry and take the absolute value
+                result_df.at[row_index, col] = abs(df.at[row_index, col] - ref_en_dict[dict_key])
+
+    # The result_df now contains the absolute differences
+    return result_df
+
+def save_df_to_json(df, filename):
+    """
+    Save a pandas DataFrame to a JSON file.
+
+    Parameters:
+    df (pandas.DataFrame): The DataFrame to save.
+    filename (str): The name of the file where the DataFrame will be saved.
+    """
+    try:
+        df.to_json(filename, orient='records', lines=True)
+        print(f"DataFrame successfully saved to {filename}")
+    except Exception as e:
+        print(f"Error saving DataFrame to JSON: {e}")
 
 
 def main():
@@ -528,42 +625,21 @@ def main():
                 c = odset.compute(spec_name, tag="bench_dft", subset={struct_name})
                 ct += c
 
-    print(f"Computed {ct} DFT jobs")
-    wait_for_completion(odset_dict, dft_lot, wait_interval=200, check_errors=False)
-    print("Continuing with the script...")
+    #print(f"Computed {ct} DFT jobs")
+    #wait_for_completion(odset_dict, dft_lot, wait_interval=200, check_errors=False)
+    #print("Continuing with the script...")
 
     ## Get final molecules for completed records and compute the RMSD for all structures
     # Create a dictionary ref_geom_mols = {"name" : FinalMolecule}
 
-    # Save optimized molecules of the reference structures
+    ## Save optimized molecules of the reference structures
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
         record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
         ref_geom_fmols[struct_name] = record.get_final_molecule()
 
-    # Compute RMSD
-    dft_geom_fmols = {}
-    final_opt_lot = {}
-    for opt_lot in dft_lot:
-        rmsd_tot_dict = {}
-        rmsd_tot_mirror = []
-        for struct_name, odset in odset_dict.items():
-            record = odset.get_record(struct_name, specification=opt_lot)
-            fmol = record.get_final_molecule()
-            rmsd, rmsd_mirror = compute_rmsd(
-                ref_geom_fmols[struct_name], fmol, rmsd_symm=True
-            )
-            rmsd_tot_dict[struct_name] = rmsd
-            rmsd_tot_mirror.append(rmsd_mirror)
-        rmsd_tot = list(rmsd_tot_dict.values())
-        if np.mean(rmsd_tot) < 0.15:
-            final_opt_lot[opt_lot] = np.mean(rmsd_tot)
-        elif np.mean(rmsd_tot_mirror) < 0.15:
-            final_opt_lot[opt_lot] = np.mean(rmsd_tot_mirror)
-    print(final_opt_lot)
-    print(rmsd_tot_dict)
-    print(rmsd_tot_mirror)
-    print(len(final_opt_lot.values()))
+    ## Compare RMSD
+    final_opt_lot = compare_rmsd(dft_lot, odset_dict, ref_geom_fmols)
 
     # Compute the reference energy at CCSD(T)/CBS
     cbs_list = [
@@ -582,11 +658,29 @@ def main():
     print(ref_geom_fmols.items())
 
     for name, fmol in ref_geom_fmols.items():
-        try:
-            cbs_col.add_entry(name, fmol)
-        except KeyError:
-            print(f"Entry {name} already in Dataset {cbs_col.name}")
-        cbs_col.save()
+        if name in bchmk_structs:
+            mol_name, surf_name, _ = name.split("_")
+            surf_mod_mol = (
+                odset_dict[surf_name.upper()]
+                .get_record(name=surf_name.upper(), specification=geom_ref_opt_lot)
+                .get_final_molecule()
+            )
+            len_f1 = len(surf_mod_mol.symbols)
+            mol_f1, mol_f2 = create_molecular_fragments(fmol, len_f1)
+            try:
+                cbs_col.add_entry(name, fmol)
+                cbs_col.add_entry(name+'_f1', mol_f1)
+                cbs_col.add_entry(name+'_f2', mol_f2)
+            except KeyError:
+                print(f"Entry {name} already in Dataset {cbs_col.name}")
+            cbs_col.save()
+
+        else:
+            try:
+                cbs_col.add_entry(name, fmol)
+            except KeyError:
+                print(f"Entry {name} already in Dataset {cbs_col.name}")
+            cbs_col.save()
 
     ct = 0
     all_cbs_ids = []
@@ -596,7 +690,8 @@ def main():
         )
         all_cbs_ids.extend(c.ids)
 
-    check_dataset_status(client, cbs_col, cbs_list)
+    ## Wait for CBS calculation completion
+    #check_dataset_status(client, cbs_col, cbs_list)
 
     # Get reference energy dict:
     ref_be = {}
@@ -606,9 +701,7 @@ def main():
         surf_cbs_en = get_cbs_energy(cbs_col, surf_name.upper(), cbs_list)
         struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list)
         ref_be[bench_struct] = (struct_cbs_en - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol
-        ref_de[bench_struct] = (struct_cbs_en - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol
     print(ref_be)
-    return None
 
     # Create or get bench_be dataset
     rdset_name = "bchmk_be_" + smol_name + "_" + surf_dset_name
@@ -641,18 +734,30 @@ def main():
     all_dft = hybrid_gga + lrc + meta_hybrid_gga
     stoich_list = ["default", "de", "ie", "be_nocp"]
 
-    c_list = []
-    for func in all_dft:
-        for stoich in stoich_list:
-            c = ds_be.compute(
-                method=func,
-                basis="def2-tzvp",
-                program="psi4",
-                stoich=stoich,
-                tag="bench_dft",
-            )
-            c_list.extend(c)
-    print(f"Sumbited a total of {len(c_list)} DFT computations")
+    ## Send DFT Jobs
+    #c_list = []
+    #for func in all_dft:
+    #    for stoich in stoich_list:
+    #        c = ds_be.compute(
+    #            method=func,
+    #            basis="def2-tzvp",
+    #            program="psi4",
+    #            stoich=stoich,
+    #            tag="bench_dft",
+    #        )
+    #        c_list.extend(c)
+    #print(f"Sumbited a total of {len(c_list)} DFT computations")
+
+
+    # Check job completion for the ReactionDataset
+
+    ## Create dataframe with results:
+    ds_be = client.get_collection("ReactionDataset", rdset_name)
+    ds_be._disable_query_limit = True
+    ds_be.save()
+    df_be = ds_be.get_values(stoich='default')
+    final_be_dict =  abs_error_dataframe(df_be, ref_be)
+    save_df_to_json(final_be_dict, "final_be_dict.json")
 
 
 if __name__ == "__main__":
