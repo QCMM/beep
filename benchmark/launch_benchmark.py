@@ -308,9 +308,9 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
             rmsd_tot_dict[struct_name] = rmsd
             rmsd_tot_mirror.append(rmsd_mirror)
         rmsd_tot = list(rmsd_tot_dict.values())
-        if np.mean(rmsd_tot) < 0.15:
+        if np.mean(rmsd_tot) < 1.20:
             final_opt_lot[opt_lot] = np.mean(rmsd_tot)
-        elif np.mean(rmsd_tot_mirror) < 0.15:
+        elif np.mean(rmsd_tot_mirror) < 1.20:
             final_opt_lot[opt_lot] = np.mean(rmsd_tot_mirror)
     print(len(final_opt_lot.values()))
     return(final_opt_lot)
@@ -591,16 +591,21 @@ def main():
         "B3LYP-D3BJ",
         "PBE0-D3BJ",
     ]
+
     geom_sqm = ["HF3C", "PBEh3c"]
 
-    all_geom_method = geom_dft  # + geom_sqm
+    all_geom_method = geom_dft   + geom_sqm
     geom_basis = args.basis_set
 
     ct = 0
     dft_lot = []
     for struct_name, odset in odset_dict.items():
-        for method in geom_dft:
+        for method in all_geom_method:
             for basis in geom_basis:
+                if method == "HF3C":
+                    basis = "MINIX"
+                elif method == "PBEh3c":
+                    basis == "def2-msvp"
                 spec_name = method + "_" + basis
                 dft_lot.append(spec_name)
                 spec = {
@@ -626,12 +631,9 @@ def main():
                 c = odset.compute(spec_name, tag="bench_dft", subset={struct_name})
                 ct += c
 
-    #print(f"Computed {ct} DFT jobs")
-    #wait_for_completion(odset_dict, dft_lot, wait_interval=200, check_errors=False)
-    #print("Continuing with the script...")
-
-    ## Get final molecules for completed records and compute the RMSD for all structures
-    # Create a dictionary ref_geom_mols = {"name" : FinalMolecule}
+    print(f"Computed {ct} DFT jobs")
+    wait_for_completion(odset_dict, dft_lot, wait_interval=200, check_errors=False)
+    print("Continuing with the script...")
 
     ## Save optimized molecules of the reference structures
     ref_geom_fmols = {}
@@ -641,6 +643,7 @@ def main():
 
     ## Compare RMSD
     final_opt_lot = compare_rmsd(dft_lot, odset_dict, ref_geom_fmols)
+    print(final_opt_lot)
 
     # Compute the reference energy at CCSD(T)/CBS
     cbs_list = [
@@ -692,7 +695,7 @@ def main():
         all_cbs_ids.extend(c.ids)
 
     ## Wait for CBS calculation completion
-    #check_dataset_status(client, cbs_col, cbs_list)
+    check_dataset_status(client, cbs_col, cbs_list)
 
     # Get reference energy dict:
     ref_be = {}
@@ -701,7 +704,12 @@ def main():
         mol_cbs_en = get_cbs_energy(cbs_col, mol_name.upper(), cbs_list)
         surf_cbs_en = get_cbs_energy(cbs_col, surf_name.upper(), cbs_list)
         struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list)
-        ref_be[bench_struct] = (struct_cbs_en - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol
+        struct_cbs_en_f1 = get_cbs_energy(cbs_col, bench_struct+'_f1', cbs_list)
+        struct_cbs_en_f2 = get_cbs_energy(cbs_col, bench_struct+'_f2', cbs_list)
+        ie = struct_cbs_en - (struct_cbs_en_f1 + struct_cbs_en_f2)*qcel.constants.hartree2kcalmol #* (-1)
+        be = (struct_cbs_en - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol #* (-1)
+        de = ((mol_cbs_en + surf_cbs_en) - (struct_cbs_en_f1 + struct_cbs_en_f2))*qcel.constants.hartree2kcalmol #* (-1)
+        ref_be[bench_struct] = {"be" : be , "ie" : ie, "be" : be}
     print(ref_be)
 
     # Create or get bench_be dataset
@@ -736,29 +744,34 @@ def main():
     stoich_list = ["default", "de", "ie", "be_nocp"]
 
     ## Send DFT Jobs
-    #c_list = []
-    #for func in all_dft:
-    #    for stoich in stoich_list:
-    #        c = ds_be.compute(
-    #            method=func,
-    #            basis="def2-tzvp",
-    #            program="psi4",
-    #            stoich=stoich,
-    #            tag="bench_dft",
-    #        )
-    #        c_list.extend(c)
-    #print(f"Sumbited a total of {len(c_list)} DFT computations")
+    c_list = []
+    for func in all_dft:
+        for stoich in stoich_list:
+            c = ds_be.compute(
+                method=func,
+                basis="def2-tzvp",
+                program="psi4",
+                stoich=stoich,
+                tag="bench_dft",
+            )
+            c_list.extend(c)
+    print(f"Sumbited a total of {len(c_list)} DFT computations")
 
 
     # Check job completion for the ReactionDataset
 
-    ## Create dataframe with results:
+    # Create dataframe with results:
     ds_be = client.get_collection("ReactionDataset", rdset_name)
     ds_be._disable_query_limit = True
     ds_be.save()
     df_be = ds_be.get_values(stoich='default')
-    final_be_dict =  abs_error_dataframe(df_be, ref_be)
-    save_df_to_json(final_be_dict, "final_be_dict.json")
+    df_ie = ds_be.get_values(stoich='ie')
+    df_de = ds_be.get_values(stoich='de')
+    be_ae =  abs_error_dataframe(df_be, ref_be)
+    save_df_to_json(be_ae, "be_ae.json")
+    save_df_to_json(df_be, "be_dft.json")
+    save_df_to_json(df_be, "ie_dft.json")
+    save_df_to_json(df_be, "de_dft.json")
 
 
 if __name__ == "__main__":
