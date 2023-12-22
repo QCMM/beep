@@ -14,6 +14,8 @@ from qcfractal.interface.collections.dataset import Dataset
 from qcfractal.interface.collections.reaction_dataset import ReactionDataset
 from qcfractal.interface.client import FractalClient
 from qcelemental.models.molecule import Molecule
+import warnings
+warnings.filterwarnings("ignore")
 #from beep.errors import DatasetNotFound, LevelOfTheoryNotFound
 
 
@@ -26,34 +28,6 @@ sites are found..
 
 Author: svogt, gbovolenta
             """
-def cache_to_file(cache_file):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            # Create a key based on the function's arguments
-            key = (args, frozenset(kwargs.items()))
-
-            # Check if the cache file exists and load the cache
-            if os.path.exists(cache_file):
-                with open(cache_file, 'rb') as f:
-                    cache = pickle.load(f)
-            else:
-                cache = {}
-
-            # If the result is cached, return it
-            if key in cache:
-                return cache[key]
-
-            # Otherwise, call the function and cache the result
-            result = func(*args, **kwargs)
-            cache[key] = result
-            with open(cache_file, 'wb') as f:
-                pickle.dump(cache, f)
-            return result
-
-        return wrapper
-    return decorator
-
 
 def parse_arguments() -> argparse.Namespace:
     """
@@ -193,7 +167,10 @@ def check_dataset_status(client, dataset, cbs_list):
 
         for lot in cbs_list:
             method, basis = lot.split("_")
-            df = dataset.get_records(method=method, basis=basis, program="psi4")
+            if 'ccsd' in method:
+                df = dataset.get_records(method=method, basis=basis, program="psi4", keywords='df')
+            else:
+                df = dataset.get_records(method=method, basis=basis, program="psi4")
 
             # Count the statuses for the current method
             for index, row in df.iterrows():
@@ -292,7 +269,6 @@ def compute_rmsd(
     rmsd_val = align_mols[1]["rmsd"]
     return rmsd_val, rmsd_val_mirror
 
-#@cache_to_file('final_opt_lot.pkl')
 def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
     dft_geom_fmols = {}
     final_opt_lot = {}
@@ -308,9 +284,9 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
             rmsd_tot_dict[struct_name] = rmsd
             rmsd_tot_mirror.append(rmsd_mirror)
         rmsd_tot = list(rmsd_tot_dict.values())
-        if np.mean(rmsd_tot) < 1.20:
+        if np.mean(rmsd_tot) < 0.15:
             final_opt_lot[opt_lot] = np.mean(rmsd_tot)
-        elif np.mean(rmsd_tot_mirror) < 1.20:
+        elif np.mean(rmsd_tot_mirror) < 0.15:
             final_opt_lot[opt_lot] = np.mean(rmsd_tot_mirror)
     print(len(final_opt_lot.values()))
     return(final_opt_lot)
@@ -400,7 +376,7 @@ def get_cbs_energy(ds: Dataset, struct, cbs_lot_list):
             ][0]
             cbs_lot_en[lot] = rec.return_result
         else:
-            rec = ds.get_records(method=method, basis=basis, program="Psi4").loc[
+            rec = ds.get_records(method=method, basis=basis, program="Psi4", keywords='df').loc[
                 struct
             ][0]
             cbs_lot_en["mp2_" + basis] = rec.dict()["extras"]["qcvars"][
@@ -421,7 +397,7 @@ def get_cbs_energy(ds: Dataset, struct, cbs_lot_list):
         4,
         cbs_lot_en["scf_aug-cc-pVQZ"],
     )
-    scf_tq = corl_xtpl_helgaker_2(
+    scf_tq = scf_xtpl_helgaker_2(
         "scf_ext1", 3, cbs_lot_en["scf_aug-cc-pVTZ"], 4, cbs_lot_en["scf_aug-cc-pVQZ"]
     )
     mp2_dt = corl_xtpl_helgaker_2(
@@ -461,6 +437,27 @@ def abs_error_dataframe(df, ref_en_dict):
     # The result_df now contains the absolute differences
     return result_df
 
+def average_over_row(df, methods):
+    # Drop columns with any NaN values
+    df_cleaned = df.dropna(axis=1)
+
+    # Initialize an empty dictionary to hold our averages
+    averages = {}
+
+    # Loop through each method and calculate the average for each column
+    for method in methods:
+        # Filter rows where the index contains the method
+        method_df = df_cleaned.filter(like=method, axis=0)
+
+        # Calculate mean for these rows and store in the dictionary
+        averages[method] = method_df.mean()
+
+    # Create a new DataFrame from the averages dictionary
+    average_df = pd.DataFrame(averages).T  # Transpose to have methods as rows
+
+    return average_df
+
+
 def save_df_to_json(df, filename):
     """
     Save a pandas DataFrame to a JSON file.
@@ -470,7 +467,8 @@ def save_df_to_json(df, filename):
     filename (str): The name of the file where the DataFrame will be saved.
     """
     try:
-        df.to_json(filename, orient='records', lines=True)
+        #df.to_json(filename, orient='records', lines=True)
+        df.to_json(filename)
         print(f"DataFrame successfully saved to {filename}")
     except Exception as e:
         print(f"Error saving DataFrame to JSON: {e}")
@@ -688,29 +686,50 @@ def main():
 
     ct = 0
     all_cbs_ids = []
+    # Adding keywords for coupled cluster
+    kw_dfit = ptl.models.KeywordSet(**{"values": {'scf_type' : 'df', 'cc_type' : 'df', 'freeze_core' : 'true'}})
+    try: 
+        cbs_col.add_keywords("df", "psi4", kw_dfit)
+        cbs_col.save()
+    except KeyError:
+        print("DF Keyword already set")
     for lot in cbs_list:
-        c = cbs_col.compute(
-            lot.split("_")[0], lot.split("_")[1], tag="cbs_en", program="psi4"
-        )
-        all_cbs_ids.extend(c.ids)
+        if "ccsd" in lot:
+            c = cbs_col.compute(
+                lot.split("_")[0], lot.split("_")[1], tag="cbs_en", keywords="df", program="psi4"
+            )
+            all_cbs_ids.extend(c.ids)
+        else:
+            c = cbs_col.compute(
+                lot.split("_")[0], lot.split("_")[1], tag="cbs_en", program="psi4"
+            )
+
 
     ## Wait for CBS calculation completion
     check_dataset_status(client, cbs_col, cbs_list)
 
     # Get reference energy dict:
-    ref_be = {}
-    for bench_struct in bchmk_structs:
-        mol_name, surf_name, _ = bench_struct.split("_")
-        mol_cbs_en = get_cbs_energy(cbs_col, mol_name.upper(), cbs_list)
-        surf_cbs_en = get_cbs_energy(cbs_col, surf_name.upper(), cbs_list)
-        struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list)
-        struct_cbs_en_f1 = get_cbs_energy(cbs_col, bench_struct+'_f1', cbs_list)
-        struct_cbs_en_f2 = get_cbs_energy(cbs_col, bench_struct+'_f2', cbs_list)
-        ie = struct_cbs_en - (struct_cbs_en_f1 + struct_cbs_en_f2)*qcel.constants.hartree2kcalmol #* (-1)
-        be = (struct_cbs_en - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol #* (-1)
-        de = ((mol_cbs_en + surf_cbs_en) - (struct_cbs_en_f1 + struct_cbs_en_f2))*qcel.constants.hartree2kcalmol #* (-1)
-        ref_be[bench_struct] = {"be" : be , "ie" : ie, "be" : be}
-    print(ref_be)
+    ref_en_dict = {"be": None, "ie" : None, "de": None}
+    for en in ref_en_dict.keys():
+        ref_en_struct = {}
+        for bench_struct in bchmk_structs:
+            mol_name, surf_name, _ = bench_struct.split("_")
+            mol_cbs_en = get_cbs_energy(cbs_col, mol_name.upper(), cbs_list)
+            surf_cbs_en = get_cbs_energy(cbs_col, surf_name.upper(), cbs_list)
+            struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list)
+            struct_cbs_en_f1 = get_cbs_energy(cbs_col, bench_struct+'_f1', cbs_list)
+            struct_cbs_en_f2 = get_cbs_energy(cbs_col, bench_struct+'_f2', cbs_list)
+            ie = (struct_cbs_en - (struct_cbs_en_f1 + struct_cbs_en_f2))*qcel.constants.hartree2kcalmol #* (-1)
+            be = (struct_cbs_en - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol #* (-1)
+            de = ((struct_cbs_en_f1 + struct_cbs_en_f2) - (mol_cbs_en + surf_cbs_en))*qcel.constants.hartree2kcalmol * (-1)
+            if en == "be":
+                ref_en_struct[bench_struct] = be
+            elif en == "ie":
+                ref_en_struct[bench_struct] = ie
+            elif en == "de":
+                ref_en_struct[bench_struct] = de
+        ref_en_dict[en] = ref_en_struct
+    print(ref_en_dict)
 
     # Create or get bench_be dataset
     rdset_name = "bchmk_be_" + smol_name + "_" + surf_dset_name
@@ -743,7 +762,7 @@ def main():
     all_dft = hybrid_gga + lrc + meta_hybrid_gga
     stoich_list = ["default", "de", "ie", "be_nocp"]
 
-    ## Send DFT Jobs
+    # Send DFT Jobs
     c_list = []
     for func in all_dft:
         for stoich in stoich_list:
@@ -757,22 +776,34 @@ def main():
             c_list.extend(c)
     print(f"Sumbited a total of {len(c_list)} DFT computations")
 
-
     # Check job completion for the ReactionDataset
 
     # Create dataframe with results:
     ds_be = client.get_collection("ReactionDataset", rdset_name)
     ds_be._disable_query_limit = True
     ds_be.save()
-    df_be = ds_be.get_values(stoich='default')
-    df_ie = ds_be.get_values(stoich='ie')
-    df_de = ds_be.get_values(stoich='de')
-    be_ae =  abs_error_dataframe(df_be, ref_be)
-    save_df_to_json(be_ae, "be_ae.json")
-    save_df_to_json(df_be, "be_dft.json")
-    save_df_to_json(df_be, "ie_dft.json")
-    save_df_to_json(df_be, "de_dft.json")
 
+    df_be = ds_be.get_values(stoich='default')
+    be_ae =  abs_error_dataframe(df_be, ref_en_dict["be"])
+    f_df_ae_be = average_over_row(be_ae, list(final_opt_lot.keys()))
+
+
+    df_ie = ds_be.get_values(stoich='ie')
+    ie_ae =  abs_error_dataframe(df_ie, ref_en_dict["ie"])
+    f_df_ae_ie = average_over_row(ie_ae, list(final_opt_lot.keys()))
+
+    df_de = ds_be.get_values(stoich='de')
+    de_ae =  abs_error_dataframe(df_de, ref_en_dict["de"])
+    f_df_ae_de = average_over_row(de_ae, list(final_opt_lot.keys()))
+    print(f_df_ae_de)
+
+    save_df_to_json(f_df_ae_be, "be_ae.json")
+    save_df_to_json(f_df_ae_ie, "be_ie.json")
+    save_df_to_json(f_df_ae_de, "be_de.json")
+
+    save_df_to_json(df_be, "be_dft.json")
+    save_df_to_json(df_ie, "ie_dft.json")
+    save_df_to_json(df_de, "de_dft.json")
 
 if __name__ == "__main__":
     main()
