@@ -1139,17 +1139,14 @@ def main():
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())
     df_de_ae, df_de_re = get_errors_dataframe(df_de, ref_df["DE"].to_dict())
 
-    import os
-    from pathlib import Path
     
     # Define the folder path for 'json_data' in the current working directory
-    folder_path = Path(os.getcwd()) / 'json_data'
+    folder_path = Path(os.getcwd()) / 'json_data_' + mol_name
     
     # Check if the folder exists, if not, create it
     if not folder_path.is_dir():
         folder_path.mkdir(parents=True, exist_ok=True)
     
-    # Assuming df_be, df_be_ae, df_be_re, etc., are defined DataFrame objects before this snippet.
     
     # Save the DataFrames to JSON files in the 'json_data' folder
     df_be.to_json(folder_path / 'BE_DFT.json', orient='index')
@@ -1164,32 +1161,20 @@ def main():
     df_de_ae.to_json(folder_path / 'DE_AE_DFT.json', orient='index')
     df_de_re.to_json(folder_path / 'DE_RE_DFT.json', orient='index')
 
+    # Create energy benchmark plots
 
-    print(df_de.head())
-    print(df_de_ae.head())
-    print(df_de_re.head())
-    #plot_violin_for_structure(df_be, "ch3oh_w3_0003")
+    # Define the folder path for 'json_data' in the current working directory
+    folder_path = Path(os.getcwd()) / 'en_bchmk_plots_' + mol_name
+    
+    # Check if the folder exists, if not, create it
+    if not folder_path.is_dir():
+        folder_path.mkdir(parents=True, exist_ok=True)
+    
+    # Plot violin plots
 
+    plot_violin(df, mol_name, folder_path)
+   
 
-    #f_df_ae_be = average_over_row(be_ae, list(final_opt_lot.keys()))
-
-    #ie_ae = abs_error_dataframe(df_ie, ref_en_dict["ie"])
-    #f_df_ae_ie = average_over_row(ie_ae, list(final_opt_lot.keys()))
-
-    #de_ae = abs_error_dataframe(df_de, ref_en_dict["de"])
-    #f_df_ae_de = average_over_row(de_ae, list(final_opt_lot.keys()))
-    #print(f_df_ae_de)
-
-    #save_df_to_json(f_df_ae_be, "be_ae.json")
-    #save_df_to_json(f_df_ae_ie, "be_ie.json")
-    #save_df_to_json(f_df_ae_de, "be_de.json")
-
-    #save_df_to_json(df_be, "be_dft.json")
-    #save_df_to_json(df_ie, "ie_dft.json")
-    #save_df_to_json(df_de, "de_dft.json")
-
-    #for st in ref_en_dict["be"].keys():
-    #    plot_violin_with_ref(st, ref_en_dict["be"], df_be.T.dropna(axis=0))
 
 
 if __name__ == "__main__":
