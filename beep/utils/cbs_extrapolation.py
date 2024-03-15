@@ -1,6 +1,6 @@
 import numpy as np
 
-def scf_xtpl_helgaker_2(functionname: str, zLO: int, valueLO, zHI, valueHI, verbose: int = 1, alpha = None):
+def scf_xtpl_helgaker_2(functionname: str, zLO: int, valueLO, zHI, valueHI, verbose: int = 0, alpha = None):
     r"""Extrapolation scheme using exponential form for reference energies with two adjacent
     zeta-level bases. Used by :py:func:`~psi4.driver.cbs`.
 
@@ -109,7 +109,7 @@ def scf_xtpl_helgaker_2(functionname: str, zLO: int, valueLO, zHI, valueHI, verb
         raise ValidationError(f"scf_xtpl_helgaker_2: datatype is not recognized '{type(valueLO)}'.")
 
 
-def scf_xtpl_helgaker_3(functionname, zLO, valueLO, zMD, valueMD, zHI, valueHI, verbose=True, alpha=None):
+def scf_xtpl_helgaker_3(functionname, zLO, valueLO, zMD, valueMD, zHI, valueHI, verbose=False, alpha=None):
     r"""Extrapolation scheme for reference energies with three adjacent zeta-level bases.
     Used by :py:func:`~psi4.cbs`.
     Parameters
@@ -177,7 +177,7 @@ def scf_xtpl_helgaker_3(functionname, zLO, valueLO, zMD, valueMD, zHI, valueHI, 
     return value
 
 
-def corl_xtpl_helgaker_2(functionname, zLO, valueLO, zHI, valueHI, verbose=True, alpha=None):
+def corl_xtpl_helgaker_2(functionname, zLO, valueLO, zHI, valueHI, verbose=False, alpha=None):
     r"""Extrapolation scheme for correlation energies with two adjacent zeta-level bases.
     Used by :py:func:`~psi4.cbs`.
     Parameters
