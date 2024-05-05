@@ -26,7 +26,6 @@ from beep.utils.plotting_utils import *
 
 # Configurations
 warnings.filterwarnings("ignore")
-# from beep.errors import DatasetNotFound, LevelOfTheoryNotFound
 
 bcheck = "\u2714"
 mia0911 = "\u2606"
@@ -143,11 +142,26 @@ of the Binding Energy Evaluation Platform (BEEP).
         help="The level of theory in the format: method basis program (default: df-ccsd(t)-f12 cc-pvdz molpro)",
     )
     parser.add_argument(
+        "--tag-reference-geometry",
+        help="The tag for the high level refrenece geometry optimization with a QCFractal manager",
+    )
+    parser.add_argument(
         "--dft-optimization-program",
         default='psi4',
         help="The program to use for the DFT geometry optimization (default: psi4)",
     )
+    parser.add_argument(
+        "--dft-optimization-keyword",
+        default=None,
+        type=int,
+        help="Keywords id for the gradient computation  (default: None)",
+    )
+    parser.add_argument(
+        "--tag-dft-geometry",
+        help="The tag for the dft geometry optimization with a QCFractal manager",
+    )
     return parser.parse_args()
+
 
 
 def get_or_create_collection(
@@ -224,15 +238,14 @@ def check_collection_existence(
         logger.info(f"The {collection_type} named {collection} exsits {bcheck}")
 
 
-
-
 def create_and_add_specification(
+    client: FractalClient,
     odset: OptimizationDataset,
     method: str,
     basis: str,
     program: str,
+    qc_keyword: int,
     geom_keywords: int = None,
-    qc_keywords: int = None,
 ):
     """
     Create and add a specification to an optimization dataset.
@@ -243,13 +256,18 @@ def create_and_add_specification(
     - basis (str): The basis set.
     - program (str): The program used for the computation.
     - geom_keywords (int, optional): Keyword ID for the geometric optimization. Default is None.
-    - qc_keywords (int, optional): Keyword ID for the quantum chemistry computation. Default is None.
+    - qc_keyword (int, optional): Keyword ID for the quantum chemistry computation. Default is None.
 
     Returns:
     - str: The name of the created specification.
     """
     logger = logging.getLogger("beep")
     spec_name = f"{method}_{basis}"
+    try:
+        if ("uks" or "uhf") in client.query_keywords()[qc_keyword].values.values() and program == "psi4":
+            spec_name = "U"+spec_name
+    except TypeError:
+        pass
     spec = {
         "name": spec_name,
         "description": f"Geometric {program}/{method}/{basis}",
@@ -258,7 +276,7 @@ def create_and_add_specification(
             "driver": "gradient",
             "method": method,
             "basis": basis,
-            "keywords": qc_keywords,
+            "keywords": qc_keyword,
             "program": program,
         },
     }
@@ -288,7 +306,7 @@ def get_molecular_multiplicity(
 
 
 def optimize_reference_molecule(
-    odset: OptimizationDataset, struct_name: str, geom_ref_opt_lot: str, mol_mult: int
+    odset: OptimizationDataset, struct_name: str, geom_ref_opt_lot: str, mol_mult: int, opt_tag: str,
 ) -> None:
     """
     Optimize a molecule in the dataset based on its molecular multiplicity.
@@ -303,11 +321,7 @@ def optimize_reference_molecule(
     - int: The number of computations submitted.
     """
     if mol_mult == 1:
-        return odset.compute(geom_ref_opt_lot, tag="ccsd_opt", subset={struct_name})
-    elif mol_mult == 2:
-        return odset.compute(
-            geom_ref_opt_lot, tag="ccsd_opt_radical", subset={struct_name}
-        )
+        return odset.compute(geom_ref_opt_lot, tag=opt_tag, subset={struct_name})
     else:
         raise RuntimeError(
             "Invalid value for molecular multiplicity. It has to be 1 (Singlet) or 2 (Doublet)"
@@ -315,7 +329,7 @@ def optimize_reference_molecule(
 
 
 def optimize_dft_molecule(
-    odset: OptimizationDataset, struct_name: str, method: str, basis: str, program: str
+    client: FractalClient, odset: OptimizationDataset, struct_name: str, method: str, basis: str, program: str, dft_keyword: int, opt_tag: str
 ) -> int:
     """
     Create and submit a computation job for a given structure with specified method and basis.
@@ -331,16 +345,17 @@ def optimize_dft_molecule(
     - int: The number of jobs submitted.
     """
     logger = logging.getLogger("beep")
-    create_and_add_specification(odset, method, basis, program)
-    #logger.info(f"Sending geometry optimizations for {method} with {basis}")
-    #odset.status([f"{method}_{basis}"])
-    odset.compute(f"{method}_{basis}", tag="bench_dft", subset={struct_name})
-    return odset.compute(f"{method}_{basis}", tag="bench_dft", subset={struct_name})
+    spec_name = create_and_add_specification(client, odset, method, basis, program, dft_keyword)
+    cr = odset.compute(spec_name, tag=opt_tag, subset={struct_name})
+    return cr
 
 
 def wait_for_completion(
+    client: FractalClient,
     odset_dict: Dict[str, "OptimizationDataset"],
     opt_lot: Union[str, List[str]],
+    program: str,
+    qc_keyword: int =  None,
     wait_interval: int = 600,
     check_errors: bool = False,
 ) -> int:
@@ -352,6 +367,7 @@ def wait_for_completion(
         odset_dict (Dict[str, "OptimizationDataset"]): Dictionary with structure names as keys and OptimizationDatasets as values.
         opt_lot (Union[str, List[str]]): The specification (level of theory) to check. Can be a string or a list of strings.
         wait_interval (int): Interval in seconds between status checks.
+        dft_keyword
         check_errors (bool): If True, raise an error if any entry has a status of 'ERROR'.
 
     Raises:
@@ -369,6 +385,11 @@ def wait_for_completion(
     while True:
         statuses = []
         for lot in opt_lot:
+            try:
+                if ("uks" or "uhf") in client.query_keywords()[qc_keyword].values.values() and program == "psi4":
+                    lot = "U"+lot
+            except TypeError:
+                pass
             for struct_name, odset in odset_dict.items():
                 status = odset.get_record(struct_name, specification=lot).status
                 statuses.append(status)
@@ -576,7 +597,6 @@ def compare_all_rmsd(
     """
     logger = logging.getLogger("beep")
     best_opt_lot = {}
-    #all_final_opt_lots = {}
 
     combined_rmsd_df = pd.DataFrame()
 
@@ -593,36 +613,35 @@ def compare_all_rmsd(
         combined_rmsd_df = pd.concat([combined_rmsd_df, rmsd_df], axis=1)
 
         best_opt_lot[func_group] = group_best_opt_lot
-        #all_final_opt_lots.update(final_opt_lot)
 
     return best_opt_lot, combined_rmsd_df
 
 
 
-    return best_opt_lot, all_final_opt_lots
-
-
-def save_df_to_json(df, filename):
+def save_df_to_json(logger, df, filename):
     """
     Save a pandas DataFrame to a JSON file.
 
     Parameters:
+    logger
     df (pandas.DataFrame): The DataFrame to save.
     filename (str): The name of the file where the DataFrame will be saved.
     """
+    logger = logging.getLogger("beep")
     try:
         # df.to_json(filename, orient='records', lines=True)
         df.to_json(filename)
-        print(f"DataFrame successfully saved to {filename}")
+        logger.info(f"\nDataFrame successfully saved to {filename}\n")
     except Exception as e:
-        print(f"Error saving DataFrame to JSON: {e}")
+        logger.info(f"Error saving DataFrame to JSON: {e}")
 
 
 def main():
     # Call the arguments
     args = parse_arguments()
 
-    logger = setup_logging("bchmk",args.molecule)
+
+    logger = setup_logging("bchmk_geom",args.molecule)
     logger.info(welcome_msg)
 
     client = ptl.FractalClient(
@@ -631,6 +650,10 @@ def main():
         username=args.username,
         password=args.password,
     )
+
+    # Tags for the optimization 
+    hl_tag  = args.tag_reference_geometry
+    dft_tag = args.tag_dft_geometry
 
     # The name of the molecule to be sampled at level of theory opt_lot
     smol_name = args.molecule
@@ -683,30 +706,32 @@ def main():
     logger.info(f"Program: {gr_program}\n")
     for odset in odset_dict.values():
         create_and_add_specification(
+            client,
             odset,
             method=gr_method,
             basis=gr_basis,
             program=gr_program,
+            qc_keyword=None,
             geom_keywords=None,
-            qc_keywords=None,
         )
 
     # Optimize all three molecules at the reference benchmark level of theory
     ct = 0
     for struct_name, odset in odset_dict.items():
         ct += optimize_reference_molecule(
-            odset, struct_name, geom_ref_opt_lot, mol_mult
+            odset, struct_name, geom_ref_opt_lot, mol_mult, hl_tag
         )
 
-    logger.info(f"\nSend a total of {ct} structures to compute at the {geom_ref_opt_lot} level of theory\n")
+    logger.info(f"\nSend a total of {ct} structures to compute at the {geom_ref_opt_lot} level of theory to the tag {hl_tag}\n")
 
     ## Wait for the Opimizations to finish
-    wait_for_completion(odset_dict, geom_ref_opt_lot, wait_interval=600, check_errors=True)
+    wait_for_completion(client, odset_dict, geom_ref_opt_lot, gr_program, wait_interval=600, check_errors=True)
 
     padded_log(logger, "Start of the DFT geometry computations")
 
     ## Optimize with DFT functionals
     dft_program = args.dft_optimization_program
+    dft_keyword = args.dft_optimization_keyword
 
     ## Saving funcitona lists in a dictionary
     dft_geom_functionals = {
@@ -726,6 +751,7 @@ def main():
     logger.info(f"Program: {dft_program}")
     logger.info(f"DFT and SQM geometry methods:")
     dict_to_log(logger, dft_geom_functionals)
+
     # Sending all DFT geometry optimizations
     ct = 0
     c = 0
@@ -736,15 +762,15 @@ def main():
         for functionals in dft_geom_functionals.values():
             for functional in functionals:
                 method, basis = functional.split("_")
-                cs += optimize_dft_molecule(odset, struct_name, method, basis, dft_program)
+                cs += optimize_dft_molecule(client, odset, struct_name, method, basis, dft_program, dft_keyword, dft_tag)
                 ct += cs
                 c+=1
         logger.info(f"Send {cs} geometry optimizations for structure {struct_name}")
 
-    logger.info(f"\nSend {ct}/{c} to the tag bench_dft"  )
+    logger.info(f"\nSend {c}/{ct} to the tag {dft_tag}")
 
     wait_for_completion(
-        odset_dict, all_dft_functionals, wait_interval=200, check_errors=False
+        client, odset_dict, all_dft_functionals, dft_program, dft_keyword, wait_interval=200, check_errors=False
     )
 
     # Save optimized molecules of the reference structures
@@ -755,6 +781,11 @@ def main():
 
     padded_log(logger, "Start of RMSD comparsion between DFT and {} geometries", geom_ref_opt_lot)
     # Compare RMSD for all functional groups
+    try:
+        if ("uks" or "uhf") in client.query_keywords()[dft_keyword].values.values() and dft_program == "psi4":
+            dft_geom_functionals = {key: ['U' + item for item in value] for key, value in dft_geom_functionals.items()}
+    except TypeError:
+        pass
     best_opt_lot, rmsd_df = compare_all_rmsd(
         dft_geom_functionals, odset_dict, ref_geom_fmols
     )
@@ -762,9 +793,19 @@ def main():
     padded_log(logger, "BENCHMARK RESULSTS")
     log_dataframe_averages(logger, rmsd_df)
 
-    # Plot Geomtry benchmark results
-    rmsd_histograms(smol_name, rmsd_df)
-    save_df_to_json(rmsd_df, f"results_geom_benchmark_{smol_name}.json")
+    # Define the folder path for 'json_data' in the current working directory
+    folder_path_json = Path.cwd() / Path('geom_json_data_' + smol_name)
+    if not folder_path_json.is_dir():
+        folder_path_json.mkdir(parents=True, exist_ok=True)
+
+    # Save json with all the results
+    save_df_to_json(logger, rmsd_df, str(folder_path_json)+"/results_geom_benchmark.json")
+
+    folder_path_plots = Path.cwd() / Path('geom_bchmk_plots_' + smol_name)
+    if not folder_path_plots.is_dir():
+        folder_path_plots.mkdir(parents=True, exist_ok=True)
+
+    rmsd_histograms(rmsd_df, smol_name, str(folder_path_plots))
 
     padded_log(logger, "Geometry Benchmark finished successfully! Hasta pronto!", padding_char=mia0911)
 

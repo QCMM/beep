@@ -205,3 +205,53 @@ def log_dataframe_averages(logger: logging.Logger, df: pd.DataFrame):
         logger.info(f"{group:<30} | {theory:<30} | {min_avg:.6f}")
 
 
+
+def log_energy_mae(logger: logging.Logger, df: pd.DataFrame):
+    """
+    Calculate the Mean Absolute Error (MAE)  for each method_basis pair in a DataFrame and log the results.
+
+    This function takes a DataFrame where each row corresponds to a different structure and each column
+    corresponds to a different computational method. It computes the MAE for each method_basis pair,
+    and logs the 10 best-performing methods (those with the lowest MAE) for each pair. The best overall
+    method is marked with an asterisk.
+
+    Parameters:
+    logger (logging.Logger): The logger object to use for logging the MAE results.
+    df (pd.DataFrame): The DataFrame containing the computational methods' errors.
+
+    Returns:
+    pd.DataFrame: A new DataFrame containing the MAEs for each method_basis pair.
+    """
+
+    # Step 1: Extract the method_basis pair and add it as a new column
+    df['method_basis'] = df.index.map(lambda x: '/'.join(x.split('_')[-2:]))
+    abs_columns = df.columns.difference(['method_basis'])
+    df[abs_columns] = df[abs_columns].abs()
+    mae_results = df.groupby('method_basis').mean()
+
+    # Determine the maximum width for method names for formatting
+    max_method_len = max(len(method) for method in mae_results.columns) + 1  # Adding space for the pipe symbol
+
+    # Header for the log
+    header = f"\n{'Level of Theory':<{max_method_len}} | MAE\n" + "-" * (max_method_len + 6)  # 6 for " | MAE" and newline
+
+    # Log the header for MAE results
+    logger.info(header)
+
+    # New logging capability with neat formatting
+    for index, row in mae_results.iterrows():
+        sorted_row = row.sort_values()
+        min_value = sorted_row.iloc[0]
+        log_message = [f"Lowest MAEs for {index} geometry:\n"]
+
+        # Formatting each line to match the requested structure
+        for col in sorted_row.index[:10]:
+            value = sorted_row[col]
+            star = "*" if value == min_value else " "
+            method_formatted = col.ljust(max_method_len - 2)  # Adjust for the length of " |"
+            log_message.append(f"{method_formatted} | {value:.6f}{star}\n")
+
+        # Combine the log message and log it
+        log_message_str = ''.join(log_message)
+        logger.info(log_message_str)
+

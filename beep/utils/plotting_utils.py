@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 
 def plot_violin_with_ref(structure_name, ref_be, df):
 
@@ -189,7 +190,7 @@ import matplotlib.cm as cm
 #
 #   #plt.savefig(f"histogram_mean_rmsd_{mol_name}.svg")
 
-def rmsd_histograms(df, molecule_name,  cmap_style='RdYlGn'):
+def rmsd_histograms(df, molecule_name, plot_path, cmap_style='RdYlGn'):
     """
     This function creates and saves a histogram for each row in the DataFrame,
     as well as a histogram for the mean of all rows.
@@ -241,7 +242,7 @@ def rmsd_histograms(df, molecule_name,  cmap_style='RdYlGn'):
         plt.tight_layout()
 
         # Save the figure
-        plt.savefig(f"{index}_histogram.svg")
+        plt.savefig(plot_path+f"/{index}_histogram.svg")
         plt.close(fig)
 
     # Plot histogram for the mean of all rows
@@ -269,49 +270,50 @@ def rmsd_histograms(df, molecule_name,  cmap_style='RdYlGn'):
     plt.tight_layout()
 
     # Save the figure
-    plt.savefig("mean_values_histogram_{molecule_name}.svg")
+    plt.savefig(plot_path+f"/mean_values_histogram_{molecule_name}.svg")
     plt.close(fig)
 
 
+## ENERGY BENCHMARK PLOTS
 
+def plot_violins(df, structure_names, mol_name, folder_name, ref_df, en_type="BE"):
+    n = len(structure_names)
+    fig, axs = plt.subplots(nrows=n, ncols=1, figsize=(7, 5 * n), sharex=True, sharey=False)
 
+    if n == 1:
+        axs = [axs]
 
-def plot_violin(df, mol_name, folder_name):
+    for i, structure_name in enumerate(structure_names):
+        mask = df.index.astype(str).str.contains(structure_name)
+        data = df[mask].T * -1
+        matching_columns = data.columns.tolist()
 
-    # Filtering dataframe  to match a given structure name
-    mask = df.index.astype(str).str.contains(structure_name)
-    data = df[mask].T * -1
-    matching_columns = data.columns.tolist()
+        ax = axs[i]
+        ax.violinplot(data)
 
-    # Creating the violin plot
-    plt.figure(figsize=(7, 5))
-    plt.violinplot(data)
+        processed_columns = [col.replace(structure_name + "_", "").replace("_", "/") for col in matching_columns]
+        ax.set_xticks(range(1, len(matching_columns) + 1))
+        ax.set_xticklabels(processed_columns, rotation=45, ha='right')
 
-    # Adjusting x-tick labels
-    processed_columns = [col.replace(structure_name + "_", "").replace("_", "/") for col in matching_columns]
-    plt.xticks(range(1, len(matching_columns) + 1), processed_columns, rotation=45, ha='right')
+        ax.set_ylabel('Binding Energy [kcal $\mathrm{mol^{-1}}$]', size=12)
+        ax.set_title(f'Violin Plots for {structure_name}')
 
-    plt.ylabel('Binding Energy [kcal $\mathrm{mol^{-1}}$]', size= 12)
-    plt.title(f'Violin Plots for {structure_name}')
+        for j, col in enumerate(matching_columns):
+            mean_val = np.mean(data[col])
+            ax.text(j + 1.1, mean_val, f'{mean_val:.1f}', horizontalalignment='left', color='k', fontsize=10)
 
-    # Adding horizontal reference line and adjusting y-ticks if structure name is in the dictionary
-    #if structure_name in ref_be:
-    #    ref_value = ref_be[structure_name] * -1
-    #    plt.axhline(y=ref_value, color='C3', linestyle='--', alpha=0.7)
-    #    current_ticks = plt.gca().get_yticks()
-    #    #plt.yticks(np.append(current_ticks, ref_value))
+        # Get the reference BE value for the current structure name and add a red line to the plot
+        ref_value = ref_df.loc[structure_name, en_type] * -1
+        ax.axhline(y=ref_value, color='red', linestyle='--', alpha=0.7)
 
-    # Adding mean value annotations
-    for i, col in enumerate(matching_columns):
-        mean_val = np.mean(data[col])
-        plt.text(i + 1.1, mean_val, f'{mean_val:.1f}', horizontalalignment='left', color='k', fontsize=10)
+        if i == n - 1:
+            ax.set_xlabel('Level of Theory', size=12)
 
     plt.tight_layout()
-    plt.savefig(str(folder_name_) + f"violin_{mol_name}.svg")
+    plt.savefig(str(folder_name) +  f"/violin_{mol_name}.svg")
 
 
-
-def plot_density_panels(df, bchmk_struct, opt_lot,  mol_name, panel_width=6, panel_height=3, color='#18b6f4', transparency=0.3):
+def plot_density_panels(df, bchmk_struct, opt_lot,  mol_name, folder_path_plots, panel_width=6, panel_height=3, color='#18b6f4', transparency=0.3):
     """
     Creates a density plot for each row in the DataFrame, with each row plotted in a separate panel.
 
@@ -344,10 +346,10 @@ def plot_density_panels(df, bchmk_struct, opt_lot,  mol_name, panel_width=6, pan
         i += 1
 
     plt.tight_layout()
-    plt.savefig(f'be_error_{mol_name}.svg')
+    plt.savefig(str(folder_path_plots) +  f"/denstiy_plots_{mol_name}.svg")
 
 
-def plot_mean_errors(df, bchmk_struct, opt_lot,  mol_name):
+def plot_mean_errors(df, bchmk_struct, opt_lot,  mol_name, folder_path_plots):
     """
     Creates a density plot for each row in the DataFrame, with each row plotted in a separate panel.
 
@@ -357,13 +359,9 @@ def plot_mean_errors(df, bchmk_struct, opt_lot,  mol_name):
     :param color: Hex color code for the plot shading.
     :param transparency: Transparency level for the plot shading.
     """
-    #opt_lot = "PWB6K-D3BJ_def2-svp"
-    opt_lot = ['CAM-B3LYP-D3BJ_def2-tzvp', "PWB6K-D3BJ_def2-svp"]
 
-    print(df.head())
 
     n_rows = len(opt_lot)
-    print(n_rows)
     n_col = 1
     fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 15))  # Adjust size as needed
 
@@ -378,20 +376,17 @@ def plot_mean_errors(df, bchmk_struct, opt_lot,  mol_name):
         ax = axes[i]
         ax.bar(lowest_10_mean_errors.index, lowest_10_mean_errors.values)
         ax.set_xlabel('Columns')
-        ax.set_ylabel('Mean Error')
-        ax.set_title(f'Mean Errors at {lot} geometry')
+        ax.set_ylabel('MAE')
+        ax.set_title(f'MAE at {lot} geometry')
         ax.set_xticks(ax.get_xticks())
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=7)
 
     plt.tight_layout() # Adjusts plot parameters to give some padding
-    plt.savefig(f'best_be_dft_{mol_name}.svg')o
+    plt.savefig(str(folder_path_plots) +  f"/mae_{mol_name}.svg")
 
-def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_name):
-    # Adjustments for DataFrame index prefix already applied here
+def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_path_plots):
     
-    opt_lot = ['CAM-B3LYP-D3BJ_def2-tzvp', "PWB6K-D3BJ_def2-svp"]
     n_rows = len(opt_lot)
-    print(n_rows)
     n_col = 1
     fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 15))
 
@@ -399,17 +394,13 @@ def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_name):
         df_tmp_de = df_de[df_de.index.str.contains(lot)].abs()
         mean_errors_de = df_tmp_de.mean(axis=0)
         mean_errors_de.index = mean_errors_de.index.str.replace("^de-", "", regex=True)
-        print(mean_errors_de.sort_values())
         
         df_tmp_ie = df_ie[df_ie.index.str.contains(lot)].abs()
         mean_errors_ie = df_tmp_ie.mean(axis=0)
         mean_errors_ie.index = mean_errors_ie.index.str.replace("^ie-", "", regex=True)
-        print(mean_errors_ie.sort_values())
 
         distances = np.sqrt(mean_errors_de**2 + mean_errors_ie**2)
         closest_indices = distances.nsmallest(5).index
-        print(distances.sort_values())
-        break
 
         ax = axes[i]
         # Plot all points
@@ -439,4 +430,4 @@ def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_name):
         ax.grid(color='gray', linestyle='--', linewidth=0.5)
 
     plt.tight_layout()
-    plt.savefig(str(folder_name) +  f'/ie_vs_de_dft_{mol_name}.svg')
+    plt.savefig(str(folder_path_plots) +  f"/ie_vs_de_dft_{mol_name}.svg")
