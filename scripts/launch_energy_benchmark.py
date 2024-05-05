@@ -1016,7 +1016,7 @@ def main():
     smol_dset_name = args.small_molecule_collection
     dft_opt_lot = args.optimization_level_of_theory
 
-    padded_log(logger, "Starting BEEP Energy benchmark procedure", padding_char=gear)
+    padded_log(logger, "Starting BEEP Energy benchmark procedure", padding_char=wstar)
     logger.info(f"Molecule: {smol_name}")
     logger.info(f"Surface Model: {smol_dset_name}")
     logger.info(f"Benchmark Structures: { ' '.join(bchmk_structs) }")
@@ -1115,8 +1115,8 @@ def main():
 
     # Compute BE for all functionals
 
-    dft_func = { "Meta_hybrid_gga" : meta_hybrid_gga() }
-    #dft_func = {"Hybrid GGA" : hybrid_gga(), "Long range corrected" : lrc(), "Meta Hybrid GGA" : meta_hybrid_gga()}
+    #dft_func = { "Meta_hybrid_gga" : meta_hybrid_gga() }
+    dft_func = {"Hybrid GGA" : hybrid_gga(), "Long range corrected" : lrc(), "Meta Hybrid GGA" : meta_hybrid_gga()}
 
     for name, dft_f_list in dft_func.items():
         padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvp basis")
@@ -1139,43 +1139,60 @@ def main():
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())
     df_de_ae, df_de_re = get_errors_dataframe(df_de, ref_df["DE"].to_dict())
 
-    
+    # Log benchmark results
+    padded_log(logger, 'BINDING ENERGY BENCHMARK RESULTS', padding_char=gear)
+    padded_log(logger, 'BINDING ENERGY MAE')
+    log_energy_mae(logger, df_be_ae)
+    padded_log(logger, 'INTERACTION ENERGY MAE')
+    log_energy_mae(logger, df_ie_ae)
+    padded_log(logger, 'DEFORMATION ENERGY MAE')
+    log_energy_mae(logger, df_de_ae)
+
     # Define the folder path for 'json_data' in the current working directory
-    folder_path = Path(os.getcwd()) / 'json_data_' + mol_name
-    
+    folder_path_json = Path.cwd() / Path('en_json_data_' + smol_name)
+
     # Check if the folder exists, if not, create it
-    if not folder_path.is_dir():
-        folder_path.mkdir(parents=True, exist_ok=True)
+    if not folder_path_json.is_dir():
+        folder_path_json.mkdir(parents=True, exist_ok=True)
     
-    
+    padded_log(logger, 'Saving BE data and creating plots')
     # Save the DataFrames to JSON files in the 'json_data' folder
-    df_be.to_json(folder_path / 'BE_DFT.json', orient='index')
-    df_be_ae.to_json(folder_path / 'BE_AE_DFT.json', orient='index')
-    df_be_re.to_json(folder_path / 'BE_RE_DFT.json', orient='index')
+    df_be.to_json(folder_path_json / 'BE_DFT.json', orient='index')
+    df_be_ae.to_json(folder_path_json / 'BE_AE_DFT.json', orient='index')
+    df_be_re.to_json(folder_path_json / 'BE_RE_DFT.json', orient='index')
     
-    df_ie.to_json(folder_path / 'IE_DFT.json', orient='index')
-    df_ie_ae.to_json(folder_path / 'IE_AE_DFT.json', orient='index')
-    df_ie_re.to_json(folder_path / 'IE_RE_DFT.json', orient='index')
+    df_ie.to_json(folder_path_json / 'IE_DFT.json', orient='index')
+    df_ie_ae.to_json(folder_path_json / 'IE_AE_DFT.json', orient='index')
+    df_ie_re.to_json(folder_path_json / 'IE_RE_DFT.json', orient='index')
     
-    df_de.to_json(folder_path / 'DE_DFT.json', orient='index')
-    df_de_ae.to_json(folder_path / 'DE_AE_DFT.json', orient='index')
-    df_de_re.to_json(folder_path / 'DE_RE_DFT.json', orient='index')
+    df_de.to_json(folder_path_json / 'DE_DFT.json', orient='index')
+    df_de_ae.to_json(folder_path_json / 'DE_AE_DFT.json', orient='index')
+    df_de_re.to_json(folder_path_json / 'DE_RE_DFT.json', orient='index')
 
     # Create energy benchmark plots
 
     # Define the folder path for 'json_data' in the current working directory
-    folder_path = Path(os.getcwd()) / 'en_bchmk_plots_' + mol_name
+    folder_path_plots = Path.cwd() / Path('en_bchmk_plots_' + smol_name)
     
     # Check if the folder exists, if not, create it
-    if not folder_path.is_dir():
-        folder_path.mkdir(parents=True, exist_ok=True)
+    if not folder_path_plots.is_dir():
+        folder_path_plots.mkdir(parents=True, exist_ok=True)
     
-    # Plot violin plots
+    # Reading plotting data from json
 
-    plot_violin(df, mol_name, folder_path)
+    df_be_plt = pd.read_json(folder_path_json / 'BE_DFT.json', orient='index')
+    df_be_ae_plt = pd.read_json(folder_path_json / 'BE_AE_DFT.json', orient='index')
+
+    df_de_re_plt = pd.read_json(folder_path_json / 'DE_RE_DFT.json', orient='index')
+    df_ie_re_plt = pd.read_json(folder_path_json / 'IE_RE_DFT.json', orient='index')
+
+    # Generating plots
+
+    plot_violins(df_be_plt, bchmk_structs, smol_name, folder_path_plots, ref_df)
+    plot_density_panels(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+    plot_mean_errors(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+    plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
    
-
-
 
 if __name__ == "__main__":
     main()
