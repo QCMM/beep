@@ -305,11 +305,13 @@ def geom_hmgga_dz():
         "M05-2X_def2-svp",
         "MPWB1K-D3BJ_def2-svp",
         "PWB6K-D3BJ_def2-svp",
-        "WPBE-D3BJ_def2-svp",
-        "CAM-B3LYP-D3BJ_def2-svp",
-        "WB97X-D3BJ_def2-svp",
         "B3LYP-D3BJ_def2-svp",
+        "B3PW91-D3BJ_def2-svp",
         "PBE0-D3BJ_def2-svp",
+        "MPWB1K-D3BJ_def2-svpd",
+        "PBE0-D3BJ_def2-svpd",
+        #"PBE0-D3BJ_aug-cc-pV(D+d)Z",
+        "B3LYP-D3BJ_def2-svpd",
     ]
 
 def  geom_hmgga_tz():
@@ -317,15 +319,26 @@ def  geom_hmgga_tz():
         "M05-2X_def2-tzvp",
         "MPWB1K-D3BJ_def2-tzvp",
         "PWB6K-D3BJ_def2-tzvp",
-        "WPBE-D3BJ_def2-tzvp",
-        "CAM-B3LYP-D3BJ_def2-tzvp",
-        "WB97X-D3BJ_def2-tzvp",
         "B3LYP-D3BJ_def2-tzvp",
+        "B3PW91-D3BJ_def2-tzvp",
         "PBE0-D3BJ_def2-tzvp",
+        "MPWB1K-D3BJ_def2-tzvpd",
+        #"MPWB1K-D3BJ_aug-cc-pV(T+d)Z",
+        "PBE0-D3BJ_def2-tzvpd",
+        "B3LYP-D3BJ_def2-tzvpd",
+        "MPWB1K_def2-tzvp",
     ]
 
 def geom_gga_dz():
-    return ["PBE-D3BJ_def2-svp", "BLYP-D3BJ_def2-svp", "B97-D_def2-svp", "PW91-D3BJ_def2-svp"]
+    return [
+         "PBE-D3BJ_def2-svp", 
+         "BLYP-D3BJ_def2-svp", 
+         "B97-D_def2-svp", 
+         "PW91-D3BJ_def2-svp",
+         "B97-D_def2-svpd", 
+         "BLYP-D3BJ_def2-svpd", 
+         #"BLYP-D3BJ_aug-cc-pV(D+d)Z", 
+         ]
 
 def geom_sqm_mb():
     return ["HF3C_MINIX", "PBEh3c_def2-msvp"]
