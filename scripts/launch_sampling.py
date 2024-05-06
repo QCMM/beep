@@ -159,10 +159,16 @@ of the Binding Energy Evaluation Platform (BEEP).
         help="The tag to use to specify the qcfractal-manager for the sampling optimization (default: sampling)",
     )
     parser.add_argument(
+        "--refinement-tag",
+        type=str,
+        default="refinement",
+        help="The tag to use to specify the qcfractal-manager for the refinement optimization (default: refinement)",
+    )
+    parser.add_argument(
         "--keyword-id",
         type=int,
         default=None,
-        help="ID of the QC keywords for the OptimizationDataSet specification of the sampling (default: None)",
+        help="ID of the QCFractal keyword for the OptimizationDataSet specification (default: None)",
     )
 
     return parser.parse_args()
@@ -184,9 +190,9 @@ def sampling_args(args: argparse.Namespace) -> Dict[str, any]:
         "program": args.sampling_level_of_theory[2],
         "tag": args.sampling_tag,
         "kw_id": args.keyword_id,
-        "opt_lot": args.sampling_level_of_theory[0]
-        + "_"
-        + args.sampling_level_of_theory[1],
+        #"opt_lot": args.sampling_level_of_theory[0]
+        #+ "_"
+        #+ args.sampling_level_of_theory[1],
         "rmsd_symm": args.rmsd_symmetry,
         "store_initial": args.store_initial_structures,
         "rmsd_val": args.rmsd_value,
@@ -274,7 +280,7 @@ def get_or_create_opt_collection(
 
 
 def process_refinement(
-    client: FractalClient, refine_lot: Tuple[str, str, str], ds_opt: OptimizationDataset
+    client: FractalClient, ropt_lot_name: str, rmethod: str, rbasis: str, program: str , qc_keyword: int,  ds_opt: OptimizationDataset, rtag = "refinement", 
 ) -> None:
     """
     Process the refinement optimization at a given level of theory.
@@ -291,22 +297,22 @@ def process_refinement(
     - None, no return value, this function is expected to execute a procedure that does not need a return.
     """
     logger = logging.getLogger("beep_logger")
-    method, basis, program = refine_lot
+    #method, basis, program = refine_lot
     spec = {
-        "name": method + "_" + basis,
+        "name": ropt_lot_name,
         "description": f"Geometric + {method}/{basis}/{program}",
         "optimization_spec": {"program": "geometric", "keywords": None},
         "qc_spec": {
             "driver": "gradient",
-            "method": method,
-            "basis": basis,
-            "keywords": None,
+            "method": rmethod,
+            "basis": rbasis,
+            "keywords": qc_keyword,
             "program": program,
         },
     }
     ds_opt.add_specification(**spec, overwrite=True)
     ds_opt.save()
-    c = ds_opt.compute(method + "_" + basis, tag="refinement")
+    c = ds_opt.compute(ropt_lot_name, tag=rtag)
     logger.info(f"Sending {c} refinement optimizations at {refine_lot} level.")
     return None
 
@@ -343,10 +349,22 @@ def main():
 
     # The name of the molecule to be sampled at level of theory opt_lot
     smol_name = args.molecule
-    method = args.sampling_level_of_theory[0]
-    basis = args.sampling_level_of_theory[1]
-    program = args.sampling_level_of_theory[2]
+    method, basis, program = args.sampling_level_of_theory
+    rmethod, rbasis, rprogram  = args.refinement_level_of_theory
+
+    qc_keyword = args.keyword_id
     opt_lot = method + "_" + basis
+    ropt_lot = rmethod + "_" + rbasis
+    args_dict = sampling_args(args)
+
+    try:
+        if ("uks" or "uhf") in client.query_keywords()[qc_keyword-1].values.values() and program == "psi4":
+            opt_lot = "U"+opt_lot
+            ropt_lot = "U"+opt_lot
+    except TypeError:
+        pass
+
+    args_dict["opt_lot"] = opt_lot
 
     # Check if the OptimizationDataSets exist
     check_collection_existence(
@@ -359,7 +377,6 @@ def main():
     check_optimized_molecule(ds_sm, opt_lot, [smol_name])
     check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
 
-    args_dict = sampling_args(args)
     args_dict["target_mol"] = ds_sm.get_record(smol_name, opt_lot).get_final_molecule()
     args_dict["client"] = client
 
@@ -399,8 +416,7 @@ def main():
         run_sampling(**args_dict)
 
         # Do the geometry refinement optimizations
-        r_lot = args.refinement_level_of_theory
-        process_refinement(client, r_lot, ds_ref)
+        process_refinement(client, ropt_lot, rmethod, rbasis, rprogram, qc_keyword , args.refinement_tag, ds_ref)
 
         # Count number of structures for this model
         ds_ref = get_or_create_opt_collection(client, ref_opt_dset_name)
