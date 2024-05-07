@@ -313,7 +313,7 @@ def process_refinement(
     ds_opt.add_specification(**spec, overwrite=True)
     ds_opt.save()
     c = ds_opt.compute(ropt_lot_name, tag=rtag)
-    logger.info(f"Sending {c} refinement optimizations at {refine_lot} level.")
+    logger.info(f"Sending {c} refinement optimizations at {r_opt_lot_name} level.")
     return None
 
 
