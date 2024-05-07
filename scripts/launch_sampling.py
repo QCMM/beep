@@ -300,7 +300,7 @@ def process_refinement(
     #method, basis, program = refine_lot
     spec = {
         "name": ropt_lot_name,
-        "description": f"Geometric + {method}/{basis}/{program}",
+        "description": f"Geometric + {rmethod}/{rbasis}/{program}",
         "optimization_spec": {"program": "geometric", "keywords": None},
         "qc_spec": {
             "driver": "gradient",
