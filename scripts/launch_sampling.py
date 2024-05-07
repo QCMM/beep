@@ -416,7 +416,7 @@ def main():
         run_sampling(**args_dict)
 
         # Do the geometry refinement optimizations
-        process_refinement(client, ropt_lot, rmethod, rbasis, rprogram, qc_keyword , args.refinement_tag, ds_ref)
+        process_refinement(client, ropt_lot, rmethod, rbasis, rprogram, qc_keyword ,ds_ref ,args.refinement_tag)
 
         # Count number of structures for this model
         ds_ref = get_or_create_opt_collection(client, ref_opt_dset_name)
