@@ -782,7 +782,7 @@ def compute_be_dft_energies(ds_be, all_dft, basis="def2-tzvp", program="psi4", t
     all_dft (list): List of hybrid GGA functional names.
     basis (str, optional): Basis set to be used for DFT computations. Defaults to 'def2-tzvp'.
     program (str, optional): Quantum chemistry program to use. Defaults to 'psi4'.
-    tag (str, optional): Tag for categorizing the computation jobs. Defaults to 'bench_dft'.
+    tag (str, optional): Tag for categorizing the computation jobs. Defaults to 'ench_dft'.
 
     Returns:
     list: A list of computation IDs representing the submitted jobs.
