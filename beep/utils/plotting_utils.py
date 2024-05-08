@@ -337,6 +337,8 @@ def plot_density_panels(df, bchmk_struct, opt_lot,  mol_name, folder_path_plots,
     for name, df in struct_dict.items():
         for j in range(n_rows):
             ax = axes[j, i]
+            print(j)
+            print(df.iloc[j])
             sns.kdeplot(df.iloc[j], ax=ax, fill=True, color='#18b6f4')
             ax.set_title(f'{df.index[j]}', fontsize=7)
             ax.set_xlabel('')
