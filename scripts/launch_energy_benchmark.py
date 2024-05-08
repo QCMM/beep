@@ -1120,7 +1120,7 @@ def main():
 
     for name, dft_f_list in dft_func.items():
         padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvp basis")
-        dft_ids = compute_be_dft_energies(ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_dft")
+        dft_ids = compute_be_dft_energies(ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_en_dft")
         check_jobs_status(client, dft_ids)
 
    
