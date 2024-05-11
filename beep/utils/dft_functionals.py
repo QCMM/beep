@@ -335,6 +335,7 @@ def geom_gga_dz():
          "PW91-D3BJ_def2-svp",
          "B97-D_def2-svpd", 
          "BLYP-D3BJ_def2-svpd", 
+         "PBE-D3BJ_def2-svpd", 
          #"BLYP-D3BJ_aug-cc-pV(D+d)Z", 
          ]
 
