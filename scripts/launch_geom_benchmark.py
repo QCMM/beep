@@ -320,7 +320,7 @@ def optimize_reference_molecule(
     Returns:
     - int: The number of computations submitted.
     """
-    if mol_mult == 1:
+    if (mol_mult) == 1 or (mol_mult == 2):
         return odset.compute(geom_ref_opt_lot, tag=opt_tag, subset={struct_name})
     else:
         raise RuntimeError(
