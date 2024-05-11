@@ -500,7 +500,14 @@ def get_energy_record(ds: Dataset, struct: str, method: str, basis: str) -> Any:
     kwargs = {"method": method, "basis": basis, "program": "Psi4", "keywords":None}
     if not "scf" in method:
         kwargs["keywords"] = "df"
-    records = ds.get_records(**kwargs).loc[struct]
+
+    #ds.get_records(**kwargs).index = ds.get_records(**kwargs).index.str.upper()
+    df_records = ds.get_records(**kwargs)
+    df_records.index = df_records.index.str.upper()
+    records = df_records.loc[struct.upper()]
+
+    #print(ds.get_records(**kwargs).index )
+    #records = ds.get_records(**kwargs).loc[struct.upper()]
 
     # Check if the result is a DataFrame (multiple records) or not (single record) and retrive the first record
     if isinstance(records, pd.DataFrame):
@@ -719,8 +726,10 @@ def create_be_stoichiometry(odset: OptimizationDataset, bench_struct: str, lot_g
     """
     mol_name, surf_name, _ = bench_struct.split("_")
     bench_mol = (
-        odset[mol_name.upper()]
-        .get_record(name=mol_name.upper(), specification=lot_geom)
+        odset[mol_name]
+        #odset[mol_name.upper()]
+        #.get_record(name=mol_name.upper(), specification=lot_geom)
+        .get_record(name=mol_name, specification=lot_geom)
         .get_final_molecule()
     )  ##  m_2
 
