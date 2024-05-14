@@ -360,7 +360,7 @@ def main():
     try:
         if ("uks" or "uhf") in client.query_keywords()[qc_keyword-1].values.values() and program == "psi4":
             opt_lot = "U"+opt_lot
-            ropt_lot = "U"+opt_lot
+            ropt_lot = "U"+ropt_lot
     except TypeError:
         pass
 
