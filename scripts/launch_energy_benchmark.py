@@ -726,10 +726,10 @@ def create_be_stoichiometry(odset: OptimizationDataset, bench_struct: str, lot_g
     """
     mol_name, surf_name, _ = bench_struct.split("_")
     bench_mol = (
-        odset[mol_name]
-        #odset[mol_name.upper()]
-        #.get_record(name=mol_name.upper(), specification=lot_geom)
-        .get_record(name=mol_name, specification=lot_geom)
+        #odset[mol_name]
+        #.get_record(name=mol_name, specification=lot_geom)
+        odset[mol_name.upper()]
+        .get_record(name=mol_name.upper(), specification=lot_geom)
         .get_final_molecule()
     )  ##  m_2
 
