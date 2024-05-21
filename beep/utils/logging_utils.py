@@ -212,7 +212,7 @@ def log_energy_mae(logger: logging.Logger, df: pd.DataFrame):
 
     This function takes a DataFrame where each row corresponds to a different structure and each column
     corresponds to a different computational method. It computes the MAE for each method_basis pair,
-    and logs the 10 best-performing methods (those with the lowest MAE) for each pair. The best overall
+    and logs the 15 best-performing methods (those with the lowest MAE) for each pair. The best overall
     method is marked with an asterisk.
 
     Parameters:
@@ -245,7 +245,7 @@ def log_energy_mae(logger: logging.Logger, df: pd.DataFrame):
         log_message = [f"Lowest MAEs for {index} geometry:\n"]
 
         # Formatting each line to match the requested structure
-        for col in sorted_row.index[:10]:
+        for col in sorted_row.index[:15]:
             value = sorted_row[col]
             star = "*" if value == min_value else " "
             method_formatted = col.ljust(max_method_len - 2)  # Adjust for the length of " |"
