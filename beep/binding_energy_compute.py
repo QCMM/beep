@@ -151,8 +151,11 @@ def compute_be(
         print(l)
         if mult == 2:
             keywords = ptl.models.KeywordSet(values={"reference": "uks"})
-            ds_be.add_keywords("rad_be", "psi4", keywords, default=True)
-            ds_be.save()
+            try:
+                ds_be.add_keywords("rad_be", "psi4", keywords, default=True)
+                ds_be.save()
+            except KeyError:
+               pass
 
             c = ds_be.compute(
                 l.split("_")[0],
@@ -194,11 +197,13 @@ def compute_hessian(
 
     if mult == 2:
         kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1},'reference': 'uhf'}})
+        method = opt_lot.split("_")[0][1:]
     else:
         kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1}}})
+        method = opt_lot.split("_")[0]
 
     kw_id = client.add_keywords([kw])[0]
-    r = client.add_compute(program, opt_lot.split("_")[0], opt_lot.split("_")[1], "hessian", kw_id, list(mols), tag=hess_tag)
+    r = client.add_compute(program, method, opt_lot.split("_")[1], "hessian", kw_id, list(mols), tag=hess_tag)
     print_out("{} hessian computations have been sent.\n".format(r), o_file)
 
 
