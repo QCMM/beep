@@ -50,9 +50,8 @@ parser.add_argument("--keyword_id",
                     default=None
 )
 parser.add_argument("--hessian_compute",
-                    type=int,
-                    help="Computes the hessian for the molecules comprising the binding sites of model cluster X. If 0 is specified, no Hessian is computed (default = 1)",
-                    default=1
+                    default=None,
+                    help="Computes the hessian for the molecules comprising the binding sites of the chosen cluster. If None is specified, no Hessian is computed (default = None)",
 )
 parser.add_argument("-p", "--program",
                     default="psi4",
@@ -164,9 +163,9 @@ while not all(w_dict.values()):
             w_dict[w] = True
             print_out("Time to send the energies!\n")
             compute_be(wat_collection, mol_collection, database, opt_lot, lot_list, out_file, energy_tag, client=client, program=program)
-            time.sleep(30)
+            time.sleep(5)
 
-        if float(w.split('_')[1]) == float(hessian):
+        if hessian_clust is not None and w == hessian_clust:
             name_be = f"be_{database}_{opt_lot.split('_')[0]}"
             compute_hessian(name_be, opt_lot, out_file, hess_tag, client=client, program=program)
             print_out(f"Sending Hessian computation for cluster {w}\n")
