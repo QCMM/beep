@@ -146,7 +146,6 @@ def compute_be(
 
     mol_id = ds_be.get_entries().loc[0].molecule
     mult = client.query_molecules(mol_id)[0].molecular_multiplicity
-    print(lot)
     for l in lot:
         print(l)
         if mult == 2:
@@ -193,10 +192,12 @@ def compute_hessian(
 
     df_all = ds_be.get_entries()
     mols = df_all[df_all['stoichiometry'] == 'be_nocp']['molecule'] 
-    mult = df_all.loc[0].molecule
 
-    if mult == 2:
-        kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1},'reference': 'uhf'}})
+    mol_id = ds_be.get_entries().loc[1].molecule
+    mult = client.query_molecules(mol_id)[0].molecular_multiplicity
+
+    if float(mult) == 2:
+        kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1}, 'reference': 'uks'}})
         method = opt_lot.split("_")[0][1:]
     else:
         kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1}}})
@@ -204,6 +205,6 @@ def compute_hessian(
 
     kw_id = client.add_keywords([kw])[0]
     r = client.add_compute(program, method, opt_lot.split("_")[1], "hessian", kw_id, list(mols), tag=hess_tag)
-    print_out("{} hessian computations have been sent.\n".format(r), o_file)
+    print_out(f"{r} hessian computations have been sent at the {method} level of theory.\n", o_file)
 
 
