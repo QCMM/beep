@@ -206,9 +206,9 @@ def log_dataframe_averages(logger: logging.Logger, df: pd.DataFrame):
 
 
 
-def log_energy_mae(logger: logging.Logger, df: pd.DataFrame):
+def log_energy_mae(logger: logging.Logger, df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculate the Mean Absolute Error (MAE)  for each method_basis pair in a DataFrame and log the results.
+    Calculate the Mean Absolute Error (MAE) for each method_basis pair in a DataFrame and log the results.
 
     This function takes a DataFrame where each row corresponds to a different structure and each column
     corresponds to a different computational method. It computes the MAE for each method_basis pair,
@@ -222,12 +222,14 @@ def log_energy_mae(logger: logging.Logger, df: pd.DataFrame):
     Returns:
     pd.DataFrame: A new DataFrame containing the MAEs for each method_basis pair.
     """
+    # Create a copy of the DataFrame to avoid modifying the original
+    df_copy = df.copy()
 
     # Step 1: Extract the method_basis pair and add it as a new column
-    df['method_basis'] = df.index.map(lambda x: '/'.join(x.split('_')[-2:]))
-    abs_columns = df.columns.difference(['method_basis'])
-    df[abs_columns] = df[abs_columns].abs()
-    mae_results = df.groupby('method_basis').mean()
+    df_copy['method_basis'] = df_copy.index.map(lambda x: '/'.join(x.split('_')[-2:]))
+    abs_columns = df_copy.columns.difference(['method_basis'])
+    df_copy[abs_columns] = df_copy[abs_columns].abs()
+    mae_results = df_copy.groupby('method_basis').mean()
 
     # Determine the maximum width for method names for formatting
     max_method_len = max(len(method) for method in mae_results.columns) + 1  # Adding space for the pipe symbol
@@ -254,4 +256,6 @@ def log_energy_mae(logger: logging.Logger, df: pd.DataFrame):
         # Combine the log message and log it
         log_message_str = ''.join(log_message)
         logger.info(log_message_str)
+    
+    return mae_results
 
