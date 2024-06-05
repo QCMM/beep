@@ -879,64 +879,42 @@ def check_jobs_status(
             time.sleep(wait_interval)  # Wait before the next check
 
 
-#def dev_dataframe(df, ref_en_dict):
-#    # Create a new DataFrame to hold the results
-#    result_df = pd.DataFrame(index=df.index, columns=df.columns)
-#
-#    # Iterate over each row index and column, subtract, and take the absolute value
-#    for row_index in df.index:
-#        for col in df.columns:
-#            dict_key = (
-#                row_index.split("_")[0]
-#                + "_"
-#                + row_index.split("_")[1]
-#                + "_"
-#                + row_index.split("_")[2]
-#            )  # Construct the key from the row index
-#            if dict_key in ref_en_dict:
-#                # Subtract the dictionary value from the DataFrame entry and take the absolute value
-#                #result_df.at[row_index, col] = abs(
-#                #    df.at[row_index, col] - ref_en_dict[dict_key]
-#                #)
-#                result_df.at[row_index, col] = df.at[row_index, col] - ref_en_dict[dict_key]
-#
-#    # The result_df now contains the absolute differences
-#    return result_df
+def get_errors_dataframe(df: pd.DataFrame, ref_en_dict: Dict[str, float]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Calculate the absolute and relative errors between DataFrame values and reference energies.
 
-import pandas as pd
+    This function filters the DataFrame to include only rows where the index exists in the reference energy dictionary.
+    It then computes the absolute and relative errors for each entry in the DataFrame compared to the corresponding
+    reference energy.
 
-def get_errors_dataframe(df, ref_en_dict):
+    :param df: DataFrame containing the data to compare.
+    :param ref_en_dict: Dictionary with reference energies. Keys should match the DataFrame index.
+    :return: A tuple of two DataFrames (absolute error DataFrame, relative error DataFrame).
+    """
+
+    # Function to construct the key from the row index
+    def construct_key(index: str) -> str:
+        return '_'.join(index.split('_')[:3])
+
+    # Filter the DataFrame to only include rows where the index is present in ref_en_dict
+    df = df[df.index.map(construct_key).isin(ref_en_dict.keys())]
+
     # Create new DataFrames to hold the absolute and relative errors
     abs_error_df = pd.DataFrame(index=df.index, columns=df.columns)
     rel_error_df = pd.DataFrame(index=df.index, columns=df.columns)
 
     # Iterate over each row index and column
     for row_index in df.index:
+        ref_value = ref_en_dict["_".join(row_index.split("_")[:3])]
         for col in df.columns:
-            dict_key = (
-                row_index.split("_")[0]
-                + "_"
-                + row_index.split("_")[1]
-                + "_"
-                + row_index.split("_")[2]
-            )  # Construct the key from the row index
-            if dict_key in ref_en_dict:
-                ref_value = ref_en_dict[dict_key]
-                # Calculate the absolute error
-                abs_error = df.at[row_index, col] - ref_value
-                abs_error_df.at[row_index, col] = abs_error
-                # Calculate the relative error only if the reference value is non-zero
-                if ref_value != 0:
-                    rel_error_df.at[row_index, col] = abs_error / ref_value
-                else:
-                    rel_error_df.at[row_index, col] = None  # or some other value to indicate undefined
+            # Calculate the absolute error
+            abs_error = df.at[row_index, col] - ref_value
+            abs_error_df.at[row_index, col] = abs_error
+            # Calculate the relative error
+            rel_error_df.at[row_index, col] = abs_error / ref_value
 
     # The abs_error_df now contains the absolute errors, and rel_error_df contains the relative errors
     return abs_error_df, rel_error_df
-
-# Example usage:
-# abs_error, rel_error = dev_dataframe(df, ref_en_dict)
-
 
 
 
@@ -960,29 +938,6 @@ def average_over_row(df, methods):
     average_df = pd.DataFrame(averages).T  # Transpose to have methods as rows
 
     return average_df
-
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-def plot_violin_for_structure(df, structure_name):
-    # Filter DataFrame for the given structure name
-    filtered_df = df[df['first_column'].str.contains(structure_name)]
-
-    # Check if there are any rows for the given structure
-    if filtered_df.empty:
-        print("No data found for the structure:", structure_name)
-        return
-
-    # Create a new column 'geom_method_geom_basis' extracted from 'first_column'
-    filtered_df['geom_method_geom_basis'] = filtered_df['first_column'].str.replace(structure_name + '_', '')
-
-    # Plotting
-    plt.figure(figsize=(10, 6))
-    sns.violinplot(x='geom_method_geom_basis', y='your_value_column', data=filtered_df)
-    plt.title(f'Violin Plots for {structure_name}')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.show()
 
 
 #def save_df_to_json(df, filename):
@@ -1072,8 +1027,6 @@ def main():
         record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
         ref_geom_fmols[struct_name] = record.get_final_molecule()
 
-    #padded_log(logger, "Start of RMSD comparsion between DFT and {} geometries", geom_ref_opt_lot)
-    #padded_log(logger, "Geometry Benchmark finished successfully! Hasta pronto!", padding_char=mia0911)
 
     padded_log(logger, "CCSD(T)/CBS computations:")
 
@@ -1104,7 +1057,7 @@ def main():
 
 
     ## Send al computations for CCSD(T)/CBS
-    compute_all_cbs(cbs_col, cbs_list, mol_mult)
+    #compute_all_cbs(cbs_col, cbs_list, mol_mult)
 
     ## Wait for CBS calculation completion
     check_dataset_status(cbs_col, cbs_list)
@@ -1125,12 +1078,12 @@ def main():
     # Compute BE for all functionals
 
     #dft_func = { "Meta_hybrid_gga" : meta_hybrid_gga() }
-    dft_func = {"Hybrid GGA" : hybrid_gga(), "Long range corrected" : lrc(), "Meta Hybrid GGA" : meta_hybrid_gga()}
+    #dft_func = {"Hybrid GGA" : hybrid_gga(), "Long range corrected" : lrc(), "Meta Hybrid GGA" : meta_hybrid_gga()}
 
-    for name, dft_f_list in dft_func.items():
-        padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvp basis")
-        dft_ids = compute_be_dft_energies(ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_en_dft")
-        check_jobs_status(client, dft_ids)
+    #for name, dft_f_list in dft_func.items():
+    #    padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvp basis")
+    #    dft_ids = compute_be_dft_energies(ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_en_dft")
+    #    check_jobs_status(client, dft_ids)
 
    
     # Create dataframe with results:
@@ -1148,7 +1101,7 @@ def main():
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())
     df_de_ae, df_de_re = get_errors_dataframe(df_de, ref_df["DE"].to_dict())
 
-    # Log benchmark results
+    #Log benchmark results
     padded_log(logger, 'BINDING ENERGY BENCHMARK RESULTS', padding_char=gear)
     padded_log(logger, 'BINDING ENERGY MAE')
     log_energy_mae(logger, df_be_ae)
@@ -1156,6 +1109,7 @@ def main():
     log_energy_mae(logger, df_ie_ae)
     padded_log(logger, 'DEFORMATION ENERGY MAE')
     log_energy_mae(logger, df_de_ae)
+
 
     # Define the folder path for 'json_data' in the current working directory
     folder_path_json = Path.cwd() / Path('en_json_data_' + smol_name)
@@ -1191,6 +1145,7 @@ def main():
 
     df_be_plt = pd.read_json(folder_path_json / 'BE_DFT.json', orient='index')
     df_be_ae_plt = pd.read_json(folder_path_json / 'BE_AE_DFT.json', orient='index')
+    print(df_be_ae_plt)
 
     df_de_re_plt = pd.read_json(folder_path_json / 'DE_RE_DFT.json', orient='index')
     df_ie_re_plt = pd.read_json(folder_path_json / 'IE_RE_DFT.json', orient='index')
