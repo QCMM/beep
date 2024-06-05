@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from typing import List
 
 def plot_violin_with_ref(structure_name, ref_be, df):
 
@@ -312,91 +313,87 @@ def plot_violins(df, structure_names, mol_name, folder_name, ref_df, en_type="BE
     plt.tight_layout()
     plt.savefig(str(folder_name) +  f"/violin_{mol_name}.svg")
 
-
-def plot_density_panels(df, bchmk_struct, opt_lot,  mol_name, folder_path_plots, panel_width=6, panel_height=3, color='#18b6f4', transparency=0.3):
+def plot_density_panels(df, bchmk_struct, opt_lot, mol_name, folder_path_plots, panel_width=6, panel_height=3, color='#18b6f4', transparency=0.3):
     """
     Creates a density plot for each row in the DataFrame, with each row plotted in a separate panel.
-
-    :param df: pandas DataFrame containing the data to plot.
-    :param panel_width: width of each panel.
-    :param panel_height: height of each panel.
-    :param color: Hex color code for the plot shading.
-    :param transparency: Transparency level for the plot shading.
     """
     struct_dict = {}
-    for struct in  bchmk_struct:
+    for struct in bchmk_struct:
         df_f = df[df.index.str.contains(struct)] * -1
+        if df_f.empty:
+            print(f"No data for {struct}, skipping...")
+            continue
         struct_dict[struct] = df_f
 
-    # Plotting
-    n_rows = df_f.shape[0]
-    n_col = len(struct_dict)
-    fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 6))  # Adjust size as needed
+    n_rows = max(df_f.shape[0] for df_f in struct_dict.values())  # Find the maximum number of rows any structure has
+    n_cols = len(struct_dict)  # number of columns determined by number of structures
 
-    i = 0
-    for name, df in struct_dict.items():
-        for j in range(n_rows):
+    print(f"Max rows to plot: {n_rows}, Columns to plot: {n_cols}")
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(panel_width * n_cols, panel_height * n_rows), squeeze=False)
+    print(f"axes array shape: {axes.shape}")
+
+    for i, (name, df_f) in enumerate(struct_dict.items()):
+        print(f"Plotting {name} in column {i}, Data rows: {df_f.shape[0]}")
+        for j in range(df_f.shape[0]):  # Loop over actual number of rows in df_f
             ax = axes[j, i]
-            print(j)
-            print(df.iloc[j])
-            sns.kdeplot(df.iloc[j], ax=ax, fill=True, color='#18b6f4')
-            ax.set_title(f'{df.index[j]}', fontsize=7)
+            sns.kdeplot(df_f.iloc[j], ax=ax, fill=True, color=color, alpha=transparency)
+            ax.set_title(f'{df_f.index[j]}', fontsize=7)
             ax.set_xlabel('')
             ax.set_ylabel('Density')
-        # Set column title for the first column or any specific column
-        axes[-1, i].set_xlabel('BE error (kcal/mol)')
-        i += 1
+
+        # Set x-axis label for the last row of the actual data, or the bottom of the column if fewer data rows
+        if n_rows > 1 and j == df_f.shape[0] - 1:
+            axes[j, i].set_xlabel('BE error (kcal/mol)')
+        elif n_rows == 1:
+            axes[0, i].set_xlabel('BE error (kcal/mol)')
 
     plt.tight_layout()
-    plt.savefig(str(folder_path_plots) +  f"/denstiy_plots_{mol_name}.svg")
+    plt.savefig(str(folder_path_plots) + f"/density_plots_{mol_name}.svg")
 
-
-def plot_mean_errors(df, bchmk_struct, opt_lot,  mol_name, folder_path_plots):
+def plot_mean_errors(df, bchmk_struct, opt_lot, mol_name, folder_path_plots):
     """
-    Creates a density plot for each row in the DataFrame, with each row plotted in a separate panel.
+    Creates a bar plot for each `opt_lot` entry, showing the 15 columns with the lowest mean absolute error (MAE).
 
     :param df: pandas DataFrame containing the data to plot.
-    :param panel_width: width of each panel.
-    :param panel_height: height of each panel.
-    :param color: Hex color code for the plot shading.
-    :param transparency: Transparency level for the plot shading.
+    :param opt_lot: List of optimization levels to plot.
+    :param mol_name: Name of the molecule for file naming.
+    :param folder_path_plots: Directory path to save the plot.
     """
-
-
     n_rows = len(opt_lot)
     n_col = 1
-    fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 15))  # Adjust size as needed
+    fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 15), squeeze=False)  # Adjust size and force 2D array
 
     for i, lot in enumerate(opt_lot):
         df_tmp = df[df.index.str.contains(lot)].abs()
         mean_errors = df_tmp.mean(axis=0)
 
-        # Step 2: Find the 10 columns with the lowest mean error
+        # Find the 10 columns with the lowest mean error
         lowest_10_mean_errors = mean_errors.nsmallest(15)
 
-        # Step 3: Plot the results
-        ax = axes[i]
+        # Plot the results
+        ax = axes[i, 0]  # Use 2D indexing
         ax.bar(lowest_10_mean_errors.index, lowest_10_mean_errors.values)
         ax.set_xlabel('Columns')
         ax.set_ylabel('MAE')
         ax.set_title(f'MAE at {lot} geometry')
-        ax.set_xticks(ax.get_xticks())
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=7)
+        ax.set_xticks(range(len(lowest_10_mean_errors.index)))
+        ax.set_xticklabels(lowest_10_mean_errors.index, rotation=45, ha="right", fontsize=7)
 
-    plt.tight_layout() # Adjusts plot parameters to give some padding
-    plt.savefig(str(folder_path_plots) +  f"/mae_{mol_name}.svg")
+    plt.tight_layout()  # Adjusts plot parameters to give some padding
+    plt.savefig(str(folder_path_plots) + f"/mae_{mol_name}.svg")
+
 
 def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_path_plots):
-    
     n_rows = len(opt_lot)
-    n_col = 1
-    fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 15))
+    n_col = 1  # Since you have only one column
+    fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 15), squeeze=False)
 
     for i, lot in enumerate(opt_lot):
         df_tmp_de = df_de[df_de.index.str.contains(lot)].abs()
         mean_errors_de = df_tmp_de.mean(axis=0)
         mean_errors_de.index = mean_errors_de.index.str.replace("^de-", "", regex=True)
-        
+
         df_tmp_ie = df_ie[df_ie.index.str.contains(lot)].abs()
         mean_errors_ie = df_tmp_ie.mean(axis=0)
         mean_errors_ie.index = mean_errors_ie.index.str.replace("^ie-", "", regex=True)
@@ -404,14 +401,14 @@ def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_path_plo
         distances = np.sqrt(mean_errors_de**2 + mean_errors_ie**2)
         closest_indices = distances.nsmallest(5).index
 
-        ax = axes[i]
+        ax = axes[i, 0]  # Correct indexing for a 2D axes array
         # Plot all points
         ax.scatter(mean_errors_de, mean_errors_ie, alpha=0.5, label='All Points')
 
-        # Prepare different shades of green
+        # Prepare different shades of green for the closest points
         green_gradients = ['#004c00', '#007200', '#009900', '#00bf00', '#00e500']  # Dark to light green
 
-        # Plot and label the 5 closest points with green gradient and add their values to the legend
+        # Plot and label the 5 closest points with green gradient
         legend_handles = [plt.Line2D([0], [0], marker='o', color='w', label='All Points',
                                      markerfacecolor='grey', markersize=10, alpha=0.5)]
 
@@ -423,13 +420,13 @@ def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_path_plo
                                              markerfacecolor=green_gradients[j], markersize=10, alpha=0.7))
 
         ax.legend(handles=legend_handles, title="Legend", loc="best")
-
-        ax.set_xlabel('Absolute IE_RE')
-        ax.set_ylabel('Absolute DE_RE')
-        ax.set_ylim([0.,1.])
-        ax.set_xlim([0.,1.])
+        ax.set_xlabel('Absolute DE_RE')
+        ax.set_ylabel('Absolute IE_RE')
+        ax.set_ylim([0., 1.])
+        ax.set_xlim([0., 1.])
         ax.set_title(f'{lot}')
         ax.grid(color='gray', linestyle='--', linewidth=0.5)
 
     plt.tight_layout()
-    plt.savefig(str(folder_path_plots) +  f"/ie_vs_de_dft_{mol_name}.svg")
+    plt.savefig(str(folder_path_plots) + f"/ie_vs_de_dft_{mol_name}.svg")
+
