@@ -429,6 +429,7 @@ def check_dataset_status(
 
             # Count the statuses for the current method
             for index, row in df.iterrows():
+                #print(index, row["record"])
                 status = row["record"].status.upper()
                 if status not in status_counts[method]:
                     continue  # If status is not one of the expected statuses, skip it
@@ -1057,7 +1058,7 @@ def main():
 
 
     ## Send al computations for CCSD(T)/CBS
-    #compute_all_cbs(cbs_col, cbs_list, mol_mult)
+    compute_all_cbs(cbs_col, cbs_list, mol_mult)
 
     ## Wait for CBS calculation completion
     check_dataset_status(cbs_col, cbs_list)
