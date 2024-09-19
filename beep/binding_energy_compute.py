@@ -190,8 +190,10 @@ def compute_hessian(
         print_out("Reaction  database {} does not exist\n".format(str(be_collection)), o_file)
         return None
 
+    print_out(f"Computing hessian for all molecules in collection {ds_be.name}")
     df_all = ds_be.get_entries()
     mols = df_all[df_all['stoichiometry'] == 'be_nocp']['molecule'] 
+    print_out(f"Molecule list for hessian compute: {mols}")
 
     mol_id = ds_be.get_entries().loc[1].molecule
     mult = client.query_molecules(mol_id)[0].molecular_multiplicity
