@@ -77,7 +77,7 @@ opt_lot = args.opt_level_of_theory
 lot_list = args.level_of_theory
 kw_id = args.keyword_id
 smol_name = args.molecule
-hessian = args.hessian_compute
+hessian_clust = args.hessian_compute
 energy_tag = args.energy_tag
 hess_tag = args.hessian_tag
 
@@ -166,9 +166,10 @@ while not all(w_dict.values()):
             time.sleep(5)
 
         if hessian_clust is not None and w == hessian_clust:
+            print("Sending Hessian computation for cluster {w}\n")
             name_be = f"be_{database}_{opt_lot.split('_')[0]}"
-            compute_hessian(name_be, opt_lot, out_file, hess_tag, client=client, program=program)
             print_out(f"Sending Hessian computation for cluster {w}\n")
+            compute_hessian(name_be, opt_lot, out_file, hess_tag, client=client, program=program)
 
     time.sleep(frequency)
 
