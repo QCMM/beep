@@ -673,13 +673,20 @@ def create_or_load_reaction_dataset(client, smol_name, surf_dset_name, bchmk_str
     # Create or get benchmark binding energy dataset
     rdset_name = f"bchmk_be_{smol_name}_{surf_dset_name}"
     logger.info(f"Creating a loading ReactionDataset: {rdset_name}\n")
-    try:
-        ds_be = ReactionDataset(rdset_name, ds_type="rxn", client=client, default_program="psi4")
-        ds_be.save()
+    try: 
+        ds_be = client.delete_collection("ReactionDataset", rdset_name)
     except KeyError:
-        ds_be = client.get_collection("ReactionDataset", rdset_name)
+        pass
+    #try:
+    #    ds_be = ReactionDataset(rdset_name, ds_type="rxn", client=client, default_program="psi4")
+    #    ds_be.save()
+    #except KeyError:
+    #    ds_be = client.get_collection("ReactionDataset", rdset_name)
 
+    #ds_be = client.get_collection("ReactionDataset", rdset_name)
     # Add reactions to the dataset
+    ds_be = ReactionDataset(rdset_name, ds_type="rxn", client=client, default_program="psi4")
+    ds_be.save()
     n_entries = 0
     for bench_struct in bchmk_structs:
         for lot in dft_opt_lot:
@@ -941,21 +948,6 @@ def average_over_row(df, methods):
     return average_df
 
 
-#def save_df_to_json(df, filename):
-#    """
-#    Save a pandas DataFrame to a JSON file.
-#
-#    Parameters:
-#    df (pandas.DataFrame): The DataFrame to save.
-#    filename (str): The name of the file where the DataFrame will be saved.
-#    """
-#    try:
-#        # df.to_json(filename, orient='records', lines=True)
-#        df.to_json(filename)
-#        print(f"DataFrame successfully saved to {filename}")
-#    except Exception as e:
-#        print(f"Error saving DataFrame to JSON: {e}")
-
 
 def main():
     # Call the arguments
@@ -1021,7 +1013,6 @@ def main():
         )
 
 
-
     ## Retrive optimized molecules of the reference structures
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
@@ -1079,12 +1070,12 @@ def main():
     # Compute BE for all functionals
 
     #dft_func = { "Meta_hybrid_gga" : meta_hybrid_gga() }
-    #dft_func = {"Hybrid GGA" : hybrid_gga(), "Long range corrected" : lrc(), "Meta Hybrid GGA" : meta_hybrid_gga()}
+    dft_func = {"Hybrid GGA" : hybrid_gga(), "Long range corrected" : lrc(), "Meta Hybrid GGA" : meta_hybrid_gga()}
 
-    #for name, dft_f_list in dft_func.items():
-    #    padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvp basis")
-    #    dft_ids = compute_be_dft_energies(ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_en_dft")
-    #    check_jobs_status(client, dft_ids)
+    for name, dft_f_list in dft_func.items():
+        padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvp basis")
+        dft_ids = compute_be_dft_energies(ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_en_dft")
+        check_jobs_status(client, dft_ids)
 
    
     # Create dataframe with results:
@@ -1102,14 +1093,6 @@ def main():
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())
     df_de_ae, df_de_re = get_errors_dataframe(df_de, ref_df["DE"].to_dict())
 
-    #Log benchmark results
-    padded_log(logger, 'BINDING ENERGY BENCHMARK RESULTS', padding_char=gear)
-    padded_log(logger, 'BINDING ENERGY MAE')
-    log_energy_mae(logger, df_be_ae)
-    padded_log(logger, 'INTERACTION ENERGY MAE')
-    log_energy_mae(logger, df_ie_ae)
-    padded_log(logger, 'DEFORMATION ENERGY MAE')
-    log_energy_mae(logger, df_de_ae)
 
 
     # Define the folder path for 'json_data' in the current working directory
@@ -1119,21 +1102,31 @@ def main():
     if not folder_path_json.is_dir():
         folder_path_json.mkdir(parents=True, exist_ok=True)
     
-    padded_log(logger, 'Saving BE data and creating plots')
+    padded_log(logger, 'Saving BE data in json files')
     # Save the DataFrames to JSON files in the 'json_data' folder
     df_be.to_json(folder_path_json / 'BE_DFT.json', orient='index')
+    logger.info(f"Saved BE dataframe in BE_DFT.json. {bcheck}\n")
     df_be_ae.to_json(folder_path_json / 'BE_AE_DFT.json', orient='index')
+    logger.info(f"Saved BE absolute error  dataframe in BE_AE_DFT.json. {bcheck}\n")
     df_be_re.to_json(folder_path_json / 'BE_RE_DFT.json', orient='index')
+    logger.info(f"Saved BE relative error  dataframe in BE_AE_DFT.json. {bcheck}\n")
     
     df_ie.to_json(folder_path_json / 'IE_DFT.json', orient='index')
+    logger.info(f"Saved IE dataframe in iE_DFT.json. {bcheck}\n")
     df_ie_ae.to_json(folder_path_json / 'IE_AE_DFT.json', orient='index')
+    logger.info(f"Saved IE absolute error  dataframe in IE_AE_DFT.json. {bcheck}\n")
     df_ie_re.to_json(folder_path_json / 'IE_RE_DFT.json', orient='index')
+    logger.info(f"Saved IE relative error  dataframe in IE_AE_DFT.json. {bcheck}\n")
     
     df_de.to_json(folder_path_json / 'DE_DFT.json', orient='index')
+    logger.info(f"Saved DE dataframe in DE_DFT.json. {bcheck}\n")
     df_de_ae.to_json(folder_path_json / 'DE_AE_DFT.json', orient='index')
+    logger.info(f"Saved DE absolute error  dataframe in DE_AE_DFT.json. {bcheck}\n")
     df_de_re.to_json(folder_path_json / 'DE_RE_DFT.json', orient='index')
+    logger.info(f"Saved DE relative error  dataframe in DE_AE_DFT.json. {bcheck}\n")
 
     # Create energy benchmark plots
+    padded_log(logger, 'Generating BE benchmark plots')
 
     # Define the folder path for 'json_data' in the current working directory
     folder_path_plots = Path.cwd() / Path('en_bchmk_plots_' + smol_name)
@@ -1146,7 +1139,6 @@ def main():
 
     df_be_plt = pd.read_json(folder_path_json / 'BE_DFT.json', orient='index')
     df_be_ae_plt = pd.read_json(folder_path_json / 'BE_AE_DFT.json', orient='index')
-    print(df_be_ae_plt)
 
     df_de_re_plt = pd.read_json(folder_path_json / 'DE_RE_DFT.json', orient='index')
     df_ie_re_plt = pd.read_json(folder_path_json / 'IE_RE_DFT.json', orient='index')
@@ -1154,9 +1146,22 @@ def main():
     # Generating plots
 
     plot_violins(df_be_plt, bchmk_structs, smol_name, folder_path_plots, ref_df)
+    padded_log(logger, 'Generating violin plots')
     plot_density_panels(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+    padded_log(logger, 'Generating density plots')
     plot_mean_errors(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+    padded_log(logger, 'Generating MAE plots')
     plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+    padded_log(logger, 'Generating IE vs DE plots')
+
+    #Log benchmark results
+    padded_log(logger, 'BINDING ENERGY BENCHMARK RESULTS', padding_char=gear)
+    padded_log(logger, 'BINDING ENERGY MAE')
+    log_energy_mae(logger, df_be_ae)
+    padded_log(logger, 'INTERACTION ENERGY MAE')
+    log_energy_mae(logger, df_ie_ae)
+    padded_log(logger, 'DEFORMATION ENERGY MAE')
+    log_energy_mae(logger, df_de_ae)
    
 
 if __name__ == "__main__":
