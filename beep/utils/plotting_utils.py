@@ -1,7 +1,10 @@
-import matplotlib.pyplot as plt
-import numpy as np
 import seaborn as sns
 from typing import List
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+import matplotlib.cm as cm
 
 def plot_violin_with_ref(structure_name, ref_be, df):
 
@@ -58,138 +61,6 @@ def plot_lowest_values_with_indices(df, num):
     plt.tight_layout()
     plt.savefig("bar_dft.svg")
 
-
-#def rmsd_histogram(data, mol_name):
-#    """
-#    Create a histogram for the given data with colors indicating value magnitude.
-#    Lower values are represented with green and higher values with red.
-#
-#    Parameters:
-#    data (dict): A dictionary with labels as keys and numerical values as values.
-#
-#    Returns:
-#    None: This function displays the histogram plot.
-#    """
-#    import matplotlib.pyplot as plt
-#    import matplotlib.cm as cm
-#    import matplotlib.colors as colors
-#
-#    # Extract labels and values from the data
-#    labels = list(data.keys())
-#    values = list(data.values())
-#
-#    # Create the figure and axes for the histogram
-#    fig, ax = plt.subplots(figsize=(10, 6))
-#
-#    # Create the bars for the histogram
-#    bars = ax.bar(labels, values)
-#
-#    # Generate a color map based on the values
-#    norm = colors.Normalize(vmin=min(values), vmax=max(values))
-#    cmap = cm.RdYlGn.reversed()
-#
-#    # Apply the colormap to the bars
-#    for bar, value in zip(bars, values):
-#        bar.set_color(cmap(norm(value)))
-#
-#    # Create a ScalarMappable with the same colormap and norm as used for the bars
-#    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-#    sm.set_array([])
-#
-#    # Add the colorbar to the axes
-#    cbar = fig.colorbar(sm, ax=ax)
-#    cbar.set_label('MAE [Angstrom]', rotation=270, labelpad=15)
-#
-#    # Rotate the x labels for better readability
-#    ax.set_xticklabels(labels, rotation=90)
-#
-#    # Show the plot
-#    plt.title('Histogram of MAE values for Popular DFT Functionals for {mol_name}')
-#    plt.tight_layout()
-#    plt.savefig(f"rmsd_histogram_{mol_name}.svg")
-
-
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.colors as colors
-import matplotlib.cm as cm
-
-
-# Function to create histograms for each row and the mean of all rows
-#def rmsd_histograms(df, cmap_style='RdYlGn'):
-#    """
-#    This function creates and saves a histogram for each row in the DataFrame,
-#    as well as a histogram for the mean of all rows.
-#
-#    Parameters:
-#    - df: Pandas DataFrame containing the data.
-#    - cmap_style: String representing the colormap (default is 'RdYlGn').
-#    """
-#    # Reverse the colormap for better visuals (green for low, red for high)
-#    cmap = cm.get_cmap(cmap_style).reversed()
-#
-#    # Normalize the color map based on the entire DataFrame's values
-#    norm = colors.Normalize(vmin=df.min().min(), vmax=df.max().max())
-#
-#    # Plot histogram for each row
-#    for index, row in df.iterrows():
-#        fig, ax = plt.subplots()
-#        labels = labels = ['_'.join(label.split('_')[-2:]) for label in row.index] 
-#        values = row.values
-#
-#        # Create the bars for the histogram
-#        bars = ax.bar(labels, values)
-#
-#        # Apply the colormap to the bars
-#        for bar, value in zip(bars, values):
-#            bar.set_color(cmap(norm(value)))
-#
-#        # Add the colorbar to the axes
-#        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-#        sm.set_array([])
-#        cbar = fig.colorbar(sm, ax=ax)
-#        cbar.set_label('Value', rotation=270, labelpad=15)
-#
-#        # Rotate the x labels for better readability
-#        ax.set_xticklabels(labels, rotation=90)
-#
-#        # Set the title
-#        title = 'Histogram for ' + index
-#        plt.title(title)
-#        plt.tight_layout()
-#
-#        # Save the figure
-#        plt.savefig(f"{index}_histogram.png")
-#        plt.close(fig)
-#
-#    # Plot histogram for the mean of all rows
-#    mean_values = df.mean()
-#    fig, ax = plt.subplots()
-#    bars = ax.bar(mean_values.index, mean_values.values)
-#
-#    # Apply the colormap to the bars
-#    for bar, value in zip(bars, mean_values.values):
-#        bar.set_color(cmap(norm(value)))
-#
-#    # Add the colorbar to the axes
-#    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-#    sm.set_array([])
-#    cbar = fig.colorbar(sm, ax=ax)
-#    cbar.set_label('Mean Value', rotation=270, labelpad=15)
-#
-#    # Rotate the x labels for better readability
-#    ax.set_xticklabels(mean_values.index, rotation=90)
-#
-#    # Set the title
-#    plt.title('Histogram of Mean Values')
-#    plt.tight_layout()
-#
-#    # Save the figure
-#    plt.savefig("mean_values_histogram.png")
-#    plt.close(fig)
-#
-#
-#   #plt.savefig(f"histogram_mean_rmsd_{mol_name}.svg")
 
 def rmsd_histograms(df, molecule_name, plot_path, cmap_style='RdYlGn'):
     """
@@ -321,20 +192,16 @@ def plot_density_panels(df, bchmk_struct, opt_lot, mol_name, folder_path_plots, 
     for struct in bchmk_struct:
         df_f = df[df.index.str.contains(struct)] * -1
         if df_f.empty:
-            print(f"No data for {struct}, skipping...")
             continue
         struct_dict[struct] = df_f
 
     n_rows = max(df_f.shape[0] for df_f in struct_dict.values())  # Find the maximum number of rows any structure has
     n_cols = len(struct_dict)  # number of columns determined by number of structures
 
-    print(f"Max rows to plot: {n_rows}, Columns to plot: {n_cols}")
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(panel_width * n_cols, panel_height * n_rows), squeeze=False)
-    print(f"axes array shape: {axes.shape}")
 
     for i, (name, df_f) in enumerate(struct_dict.items()):
-        print(f"Plotting {name} in column {i}, Data rows: {df_f.shape[0]}")
         for j in range(df_f.shape[0]):  # Loop over actual number of rows in df_f
             ax = axes[j, i]
             sns.kdeplot(df_f.iloc[j], ax=ax, fill=True, color=color, alpha=transparency)
