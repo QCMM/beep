@@ -246,7 +246,7 @@ def check_optimized_molecule(
             rr = ds.get_record(mol, opt_lot)
         except KeyError:
             raise LevelOfTheoryNotFound(
-                f"{opt_lot} level of theory for {mol} or the entry itself does not exist. Add the molecule and optimize it first\n"
+                f"{opt_lot} level of theory for {mol} or the entry itself does not exist in {ds.name} collection. Add the molecule and optimize it first\n"
             )
         if rr.status == "INCOMPLETE":
             raise ValueError(f" Optimization has status {rr.status} restart it or wait")
