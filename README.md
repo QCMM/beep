@@ -9,22 +9,15 @@
 
 BEEP is a binding energy evaluation platform and database for molecules on interstellar ice-grain mantels.
 
-If you would like to query the platform using the BindingParadies class or QCPortal you 
-will need to install the  QCPortal Python module. The easiest way to install it it is using the 
-[Mamba Python pacakge manager](https://mamba.readthedocs.io/en/latest/index.html). First install mamba, inside
-your anaconda base directory.
+For data query for the BEEP database you only need to install the QCPortal python module and follow the tutorial
 
-`conda install mamba -n base -c conda-forge`
-
-Then you can install QCPortal by running. 
-
-`mamba install -c conda-forge qcportal=0.15`
+`conda install -c conda-forge  qcfportal=0.15  pydantic=1.9*`
 
 If you would like to create your own database using the BEEP protocol or if you would like 
 to contribute to the BEEP database you will need to install the QCFractal module. It is best intall
 QCFractal into a fresh environment.
 
-`mamba install --name qcfrc -c conda-forge -c psi4 qcfractal psi4`
+`conda create -n beep -c conda -c psi4  qcfractal=0.15 psi4=1.6 pydantic=1.9*`
 
 Once you installed QCFractal or QCPortal, to install the BEEP libraries run:
 
