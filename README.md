@@ -11,7 +11,7 @@ BEEP is a binding energy evaluation platform and database for molecules on inter
 
 For data query for the BEEP database you only need to install the QCPortal python module and follow the tutorial
 
-`conda install -c conda-forge  qcfportal=0.15  pydantic=1.9*`
+`conda install -c conda-forge  qcportal=0.15  pydantic=1.9*`
 
 If you would like to create your own database using the BEEP protocol or if you would like 
 to contribute to the BEEP database you will need to install the QCFractal module. It is best intall
