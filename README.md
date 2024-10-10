@@ -17,7 +17,7 @@ If you would like to create your own database using the BEEP protocol or if you 
 to contribute to the BEEP database you will need to install the QCFractal module. It is best intall
 QCFractal into a fresh environment.
 
-`conda create -n beep -c conda -c psi4  qcfractal=0.15 psi4=1.6 pydantic=1.9*`
+`conda create -n beep -c psi4 -c main qcfractal=0.15 psi4=1.6* pydantic=1.9* intel-openmp`
 
 Once you installed QCFractal or QCPortal, to install the BEEP libraries run:
 
