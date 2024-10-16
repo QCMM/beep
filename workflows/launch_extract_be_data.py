@@ -352,18 +352,23 @@ def get_zpve_mol(client: ptl.FractalClient, mol: int, lot_opt: str, on_imaginary
     """
     logger = logging.getLogger("beep")
     mol_form = client.query_molecules(mol)[0].dict()['identifiers']['molecular_formula']
+    method = lot_opt.split("_")[0]
+    basis  = lot_opt.split("_")[1]
+    if method[0] == 'U':
+        method = method[1:]
 
     try:
         result = client.query_results(
             driver='hessian',
             molecule=mol,
-            method=lot_opt.split("_")[0],
-            basis=lot_opt.split("_")[1]
+            method=method,
+            basis=basis
         )[0]
         logger.info(f"Molecule {mol} with molecular formula {mol_form} has a Hessian {bcheck}")
     except IndexError:
-        warnings.warn(f"Molecule {mol} with molecular formula {mol_form} has not finished computing.")
+        logger.info(f"Molecule {mol} with molecular formula {mol_form} has not finished computing.")
         return None, True  # Use return instead of continue in a function
+
 
     hess = result.dict()['return_result']
     energy = result.dict()['extras']['qcvars']['CURRENT ENERGY']
@@ -440,6 +445,11 @@ def zpve_correction(name_be: List[str], be_methods: List[str], lot_opt: str,
 
         m1, _ = get_zpve_mol(client, mol_list[1], lot_opt, on_imaginary = 'raise')
         m2, _ = get_zpve_mol(client, mol_list[2], lot_opt, on_imaginary = 'raise')
+
+
+        if not (m1 and m2):
+            logger.info("Molecule {mol_list[1]} and {mol_list[2]} have no Hessian. Compute them first.")
+            raise IndexError
 
         if not d_bol:
             logger.info(f"Appending structure {entry} into list to delete.")
