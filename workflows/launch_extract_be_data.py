@@ -4,19 +4,88 @@ import warnings
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from functools import wraps
 from tqdm import tqdm
 from typing import Union, List, Tuple, Dict
+from pathlib import Path
 import qcfractal.interface as ptl
 import qcelemental as qcel
-import sys
+import sys, os
+
+
+# Local application/library specific imports
+from beep.utils.logging_utils import *
 
 warnings.filterwarnings('ignore')
 
+bcheck = "\u2714"
+mia0911 = "\u2606"
+gear = "\u2699"
+
 welcome_msg = """       
+·······················································································
+:                                                                                     :
+:  ██████╗ ██╗███╗   ██╗██████╗ ██╗███╗   ██╗ ██████╗                                 :
+:  ██╔══██╗██║████╗  ██║██╔══██╗██║████╗  ██║██╔════╝                                 :
+:  ██████╔╝██║██╔██╗ ██║██║  ██║██║██╔██╗ ██║██║  ███╗                                :
+:  ██╔══██╗██║██║╚██╗██║██║  ██║██║██║╚██╗██║██║   ██║                                :
+:  ██████╔╝██║██║ ╚████║██████╔╝██║██║ ╚████║╚██████╔╝                                :
+:  ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝                                 :
+:                                                                                     :
+:  ███████╗███╗   ██╗███████╗██████╗  ██████╗ ██╗   ██╗                               :
+:  ██╔════╝████╗  ██║██╔════╝██╔══██╗██╔════╝ ╚██╗ ██╔╝                               :
+:  █████╗  ██╔██╗ ██║█████╗  ██████╔╝██║  ███╗ ╚████╔╝                                :
+:  ██╔══╝  ██║╚██╗██║██╔══╝  ██╔══██╗██║   ██║  ╚██╔╝                                 :
+:  ███████╗██║ ╚████║███████╗██║  ██║╚██████╔╝   ██║                                  :
+:  ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝                                  :
+:                                                                                     :
+:  ███████╗██╗   ██╗ █████╗ ██╗     ██╗   ██╗ █████╗ ████████╗██╗ ██████╗ ███╗   ██╗  :
+:  ██╔════╝██║   ██║██╔══██╗██║     ██║   ██║██╔══██╗╚══██╔══╝██║██╔═══██╗████╗  ██║  :
+:  █████╗  ██║   ██║███████║██║     ██║   ██║███████║   ██║   ██║██║   ██║██╔██╗ ██║  :
+:  ██╔══╝  ╚██╗ ██╔╝██╔══██║██║     ██║   ██║██╔══██║   ██║   ██║██║   ██║██║╚██╗██║  :
+:  ███████╗ ╚████╔╝ ██║  ██║███████╗╚██████╔╝██║  ██║   ██║   ██║╚██████╔╝██║ ╚████║  :
+:  ╚══════╝  ╚═══╝  ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝  :
+:                                                                                     :
+:  ██████╗ ██╗      █████╗ ████████╗███████╗ ██████╗ ██████╗ ███╗   ███╗              :
+:  ██╔══██╗██║     ██╔══██╗╚══██╔══╝██╔════╝██╔═══██╗██╔══██╗████╗ ████║              :
+:  ██████╔╝██║     ███████║   ██║   █████╗  ██║   ██║██████╔╝██╔████╔██║              :
+:  ██╔═══╝ ██║     ██╔══██║   ██║   ██╔══╝  ██║   ██║██╔══██╗██║╚██╔╝██║              :
+:  ██║     ███████╗██║  ██║   ██║   ██║     ╚██████╔╝██║  ██║██║ ╚═╝ ██║              :
+:  ╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝      ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝              :
+:                                                                                     :
+·······················································································
+
 ---------------------------------------------------------------------------------------
-Welcome to the BEEP Binding Energy Evaluation Platform 
+Welcome to the BEEP  data extraction workflow!
 ---------------------------------------------------------------------------------------
+
+"And now I see. With eye serene. The very. Pulse. Of the machine."
+
+                                                ~ Michael Swanwick
+
+
+Scrutinizing, Leveraging, and Magnifying.
+
+
+                           By: Stefan Vogt-Geisse
 """
+
+def suppress_stdout(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Save the current stdout
+        original_stdout = sys.stdout
+        try:
+            # Redirect stdout to devnull
+            sys.stdout = open(os.devnull, 'w')
+            # Call the function with its arguments
+            return func(*args, **kwargs)
+        finally:
+            # Restore original stdout
+            sys.stdout = original_stdout
+    return wrapper
+
+
 def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecule=None, energy=None, project_trans: bool = True, project_rot: bool = True, molden=False,name=None, lt=None):
     """Function to perform analysis of a hessian or hessian block, specifically...
     calling for and printing vibrational and thermochemical analysis, setting thermochemical variables,
@@ -44,17 +113,12 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
         A dictionary of vibrational information. See :py:func:`~psi4.driver.qcdb.vib.harmonic_analysis`
     """
 
-    from psi4.driver import qcdb
+    from psi4.driver.qcdb.vib import harmonic_analysis, thermo
+    harmonic = suppress_stdout(harmonic_analysis)
+    therm = suppress_stdout(thermo)
     from psi4 import core, geometry
 
-
-
-    if hess is None:
-        print("no hessian")
-
-    else:
-        nmwhess = hess
-
+    nmwhess = hess
 
     m=molecule.to_string('xyz')
     m= '\n'.join(m.split('\n')[2:])+'no_reorient'
@@ -64,7 +128,9 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
     vibrec = {'molecule': mol.to_dict(np_out=False), 'hessian': nmwhess.tolist()}
     m = np.asarray([mol.mass(at) for at in range(mol.natom())])
     irrep_labels = mol.irrep_labels()
-    vibinfo, vibtext = qcdb.vib.harmonic_analysis(
+    #vibinfo, vibtext = qcdb.vib.harmonic_analysis(
+    #    nmwhess, geom, m, None, irrep_labels, dipder=None, project_trans=project_trans, project_rot=project_rot)
+    vibinfo, vibtext = harmonic(
         nmwhess, geom, m, None, irrep_labels, dipder=None, project_trans=project_trans, project_rot=project_rot)
 
 
@@ -74,7 +140,7 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
         rsn = mol.rotational_symmetry_number()
 
     if irrep is None:
-        therminfo, thermtext = qcdb.vib.thermo(
+        therminfo, thermtext = therm(
             vibinfo,
             T=core.get_option("THERMO", "T"),  # 298.15 [K]
             P=core.get_option("THERMO", "P"),  # 101325. [Pa]
@@ -98,149 +164,6 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
     else:
         core.print_out('  Thermochemical analysis skipped for partial frequency calculation.\n')
     return vibinfo, therminfo
-
-
-def zpve_correction(name_be: List[str], be_methods: List[str], lot_opt: str,
-                    client: ptl.FractalClient, scale_factor: float = 1.0) -> Tuple[pd.DataFrame, List[float]]:
-    """
-    Processes data to apply ZPVE corrections and perform a linear fit.
-
-    Parameters
-    ----------
-    name_be : list of str
-        List of dataset names.
-    be_method : str
-        Binding energy method.
-    lot_opt : str
-        Level of theory and basis set.
-    client : ptl.FractalClient
-        Fractal client for dataset access.
-    scale_factor : float, optional
-        Scaling factor for ZPVE corrections.
-
-    Returns
-    -------
-    df_all : pd.DataFrame
-        DataFrame with ZPVE corrected binding energies, with Delta_ZPVE as the last column.
-    fit_params : list of float
-        List containing the slope, intercept, and R-squared of the linear fit.
-    """
-    entry_list,  df_nocp, df_be, fitting_params = [],  pd.DataFrame(), pd.DataFrame(), {}
-    basis = 'def2-tzvp'
-
-    for name in name_be:
-        # Retrieve entries and binding energies
-        ds_be = client.get_collection("ReactionDataset", name)
-        entry_list.extend(ds_be.get_index())
-        df_be = df_be.append(ds_be.get_values(), ignore_index=False)
-
-
-        temp_df = ds_be.get_entries()
-        df_nocp = df_nocp.append(temp_df[temp_df['stoichiometry'] == 'be_nocp'], ignore_index=False)
-
-
-    zpve_corr_dict, todelete = {}, []
-    for entry in entry_list:
-        zpve_list, imaginary = [], []
-        mol_list = df_nocp[df_nocp['name'] == entry]['molecule']
-
-        for mol in mol_list:
-            try:
-                result = client.query_results(driver='hessian', molecule=mol, method=lot_opt.split("_")[0],
-                                              basis=lot_opt.split("_")[1])[0]
-            except IndexError:
-                continue
-            hess = result.dict()['return_result']
-            energy = result.dict()['extras']['qcvars']['CURRENT ENERGY']
-            vib, therm = _vibanal_wfn(hess=hess, molecule=result.get_molecule(), energy=energy)
-
-            if any(abs(num.imag) > 1 for num in vib['omega'].data):
-                imaginary.append(True)
-            zpve_list.append(therm['ZPE_vib'].data)
-
-        if len(zpve_list) != 3 or any(imaginary):
-            todelete.append(entry)
-            continue
-
-        d, m1, m2 = zpve_list
-        zpve_corr_dict[entry] = (d - m1 - m2) * qcel.constants.hartree2kcalmol
-
-
-    if lot_opt.split("_")[0] == 'hf3c':
-        scale_factor = 0.86
-
-    # Dataframe with ZPVE correction
-
-    df_zpve = pd.DataFrame.from_dict(zpve_corr_dict, orient='index', columns=["Delta_ZPVE"])
-
-    # Filter df_be dataframe
-    df_be = df_be.drop(todelete)
-
-    # Apply the scale factor to Delta_ZPVE and calculate Eb_ZPVE
-    for bm in be_methods:
-        df_zpve['Delta_ZPVE'] *= scale_factor
-        zpve_col_name = bm + '/'+basis+'+ZPVE' 
-
-        #Sum with the Delta_ZPVE from df_zpve instead of df_all
-        df_be[zpve_col_name] = df_be[bm + '/' + basis] + df_zpve['Delta_ZPVE']
-
-        # Convert columns to NumPy arrays and calculate fit parameters
-        x = df_be[bm + '/' + basis].to_numpy(dtype=float)
-        y = df_be[zpve_col_name].to_numpy(dtype=float)
-        m, b = np.polyfit(x, y, 1)
-        r_sq = np.corrcoef(x, y)[0, 1] ** 2
-        fitting_params[bm] = [m, b, r_sq]
-
-    # Retain only columns with '+ZPVE' in their names
-    df_be = df_be[[col for col in df_be.columns if '+ZPVE' in col]]
-
-
-    
-    # Compute main 
-    df_be['Mean_Eb_all_dft'] = df_be.mean(axis=1)
-    df_be['StdDev_all_dft'] = df_be.std(axis=1) #/ np.sqrt(3)
-
-    # Filter structures
-    df_be = df_be[(df_be['Mean_Eb_all_dft'] > -20.0) & (df_be['Mean_Eb_all_dft'] < -0.2)]
-
-    # Join Delta ZPVE with df_be
-    df_be = pd.concat([df_be, df_zpve], axis=1)
-
-    # Reorder columns to ensure Delta_ZPVE is the last column
-    columns_order = [col for col in df_be.columns if col != 'Delta_ZPVE'] + ['Delta_ZPVE']
-    df_be = df_be[columns_order]
-
-    return df_be, fitting_params
-
-
-
-def zpve_plot(x: np.ndarray, y: np.ndarray, fit_params: List[float]) -> plt.Figure:
-    """
-    Creates a plot of ZPVE corrected binding energies with a linear fit.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        Array of x-values (original binding energies).
-    y : np.ndarray
-        Array of y-values (ZPVE corrected binding energies).
-    fit_params : list of float
-        List containing the slope, intercept, and R-squared of the linear fit.
-
-    Returns
-    -------
-    fig : matplotlib.Figure
-        Plot of ZPVE corrected binding energies.
-    """
-    m, b, r_sq = fit_params
-    fig, ax = plt.subplots(figsize=(12, 10))
-    ax.plot(x, y, 's', markersize=13)
-    ax.plot(x, m * x + b, '--k', label=f'y = {m:.3g}x + {b:.3g}\n$R^2$ = {r_sq:.2g}')
-    ax.set_xlabel('$E_b$ / kcal mol$^{-1}$', size=22)
-    ax.set_ylabel('$E_b$ + $\Delta$ZPVE / kcal mol$^{-1}$', size=22)
-    ax.legend(prop={'size': 20}, loc=2)
-
-    return fig
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -300,7 +223,7 @@ def log_dataframe(logger, df, title="DataFrame"):
     df_string = df.to_string()
 
     # Log the DataFrame with the provided title
-    logger.info(f"{title}:\n{df_string}")
+    logger.info(f"{title}\n{df_string}")
 
 def log_dictionary(logger, dictionary, title="Dictionary"):
     # Log the dictionary with the provided title
@@ -309,7 +232,7 @@ def log_dictionary(logger, dictionary, title="Dictionary"):
         logger.info(f"{key}: m = {value[0]}, n = {value[1]}, R^2 = {value[2]}")
 
 
-def write_energy_log(df: pd.DataFrame, mol: str, existing_content: str = "") -> str:
+def write_energy_log(df: pd.DataFrame, mol: str, existing_content: str = "", comment: str  = "") -> str:
     """
     Writes energy values from the DataFrame to a log string.
 
@@ -329,17 +252,17 @@ def write_energy_log(df: pd.DataFrame, mol: str, existing_content: str = "") -> 
     """
     content = existing_content
     if not content:
-        content += f"{'':<20}{'BE Average':<50}{'BE Standard Deviation'}\n"
+        content += f"{'':<50}{'BE Average':<50}{'BE Standard Deviation'}\n"
 
     last_two_rows = df.iloc[-2:]
-    content += f"{mol:<20}"
+    content += f"{mol} {comment:<30}"
     for _, row in last_two_rows.iterrows():
         mean_values = []
         for unit in ['kcal/mol', 'K']:
-            mean_val = round(qcel.constants.conversion_factor('kcal/mol', unit) * row['Mean_Eb_all_dft'], 2)
-            std_val = round(qcel.constants.conversion_factor('kcal/mol', unit) * row['StdDev_all_dft'], 2)
+            mean_val = -1 * round(qcel.constants.conversion_factor('kcal/mol', unit) * row['Mean_Eb_all_dft'], 2)
+            std_val =  round(qcel.constants.conversion_factor('kcal/mol', unit) * row['StdDev_all_dft'], 2)
             mean_values.append(f"{mean_val:.2f} ± {std_val:.2f} [{unit}]")
-        content += f"{' '.join(mean_values):<50}"
+        content += f"{'   '.join(mean_values):<50}"
     content += "\n"
     return content
 
@@ -368,6 +291,8 @@ def concatenate_frames(client: ptl.FractalClient, mol: str, ds_w: pd.DataFrame, 
     df_be = pd.DataFrame()
     method = opt_method.split('_')[0]
 
+    padded_log(logger, "Joining the energies of the different clusters.", padding_char=mia0911)
+
     for w in ds_w.df.index:
         if "W7_03" in w:
             continue
@@ -386,48 +311,224 @@ def concatenate_frames(client: ptl.FractalClient, mol: str, ds_w: pd.DataFrame, 
         df = df.reindex(columns=all_columns)
         df = df.reset_index().rename(columns={'index': 'OriginalIndex'})
         df_be = pd.concat([df_be, df.dropna(axis=1, how='all')], axis=0, ignore_index=True)
+        logger.info(f"Succesfully added collection {name_be}  {bcheck}")
 
     df_be.set_index('OriginalIndex', inplace=True)
 
+    # Identify columns to drop (Without D3BJ)
+    cols_to_drop = []
+    for col in df_be.columns:
+        me = col.split('/')[0]
+        ba = col.split('/')[1]
+        if '-D3BJ' not in me:
+            d3bj_col = me  + '-D3BJ/' + ba
+            if d3bj_col in df_be.columns:
+                cols_to_drop.append(col)
+    
+    # Drop the columns
+    logger.info("Deleting Columns without dispersion correction")
+    df_be.drop(columns=cols_to_drop, inplace=True)
+
+    logger.info(f"\n Computing mean values and standart deviation....")
     df_be['Mean_Eb_all_dft'] = df_be.mean(axis=1)
-    df_be['StdDev_all_dft'] = df_be.std(axis=1) / np.sqrt(3)
-    df_be = df_be[(df_be['Mean_Eb_all_dft'] > -20.0) & (df_be['Mean_Eb_all_dft'] < -0.2)]
-    #log_dataframe(logger, df_be, f"Raw Binding Energies for {mol}")
+    df_be['StdDev_all_dft'] = df_be.std(axis=1) #/ np.sqrt(3)
+    df_be = df_be[df_be['Mean_Eb_all_dft'] < -0.2]
     return df_be
 
 
-def process_zpve(client: ptl.FractalClient, mol: str, be_methods: List[str], hess_list: List[str], opt_method: str,
-                 scale_factor: float = 0.958) -> Tuple[pd.DataFrame, Dict[str, List[float]]]:
+def get_zpve_mol(client: ptl.FractalClient, mol: int, lot_opt: str, on_imaginary: str = 'return') -> Union[bool, Any]:
     """
-    Processes Hessian data and applies ZPVE corrections.
+    Compute vibrational analysis and handle imaginary frequencies.
+
+    Parameters:
+    - mol: Molecule object.
+    - lot_opt: Level of theory and basis set, e.g., 'HF_6-31G'.
+    - on_imaginary: Specifies behavior when imaginary frequencies are found.
+        - 'return': Return False.
+        - 'raise': Raise a ValueError.
+
+    Returns:
+    - The computed zero-point vibrational energy (ZPVE) data, or False if imaginary frequencies are found and on_imaginary='return'.
+    """
+    logger = logging.getLogger("beep")
+    mol_form = client.query_molecules(mol)[0].dict()['identifiers']['molecular_formula']
+
+    try:
+        result = client.query_results(
+            driver='hessian',
+            molecule=mol,
+            method=lot_opt.split("_")[0],
+            basis=lot_opt.split("_")[1]
+        )[0]
+        logger.info(f"Molecule {mol} with molecular formula {mol_form} has a Hessian {bcheck}")
+    except IndexError:
+        warnings.warn(f"Molecule {mol} with molecular formula {mol_form} has not finished computing.")
+        return None, True  # Use return instead of continue in a function
+
+    hess = result.dict()['return_result']
+    energy = result.dict()['extras']['qcvars']['CURRENT ENERGY']
+    vib, therm = _vibanal_wfn(hess=hess, molecule=result.get_molecule(), energy=energy)
+
+    # Check for imaginary frequencies
+    imag_freqs = [num for num in vib['omega'].data if abs(num.imag) > 1]
+    if imag_freqs:
+        if on_imaginary == 'raise':
+            raise ValueError(f"There are imaginary frequencies,  {imag_freqs}.  You will need to reoptimize {mol} I am affraid.")
+        elif on_imaginary == 'return':
+            logger.info(f"There are imaginary frequencies: {imag_freqs} proceed with caution")
+            return therm['ZPE_vib'].data, False
+        else:
+            raise ValueError(f"Invalid option for on_imaginary: {on_imaginary}")
+
+    return therm['ZPE_vib'].data, True  
+
+def zpve_correction(name_be: List[str], be_methods: List[str], lot_opt: str,
+                    client: ptl.FractalClient, scale_factor: float = 1.0) -> Tuple[pd.DataFrame, List[float]]:
+    """
+    Processes data to apply ZPVE corrections and perform a linear fit.
 
     Parameters
     ----------
+    name_be : list of str
+        List of dataset names.
+    be_method : str
+        Binding energy method.
+    lot_opt : str
+        Level of theory and basis set.
     client : ptl.FractalClient
         Fractal client for dataset access.
-    mol : str
-        Molecule identifier.
-    be_methods : list of str
-        Binding energy methods.
-    hess_list : list of str
-        List of Hessian clusters.
-    opt_method : str
-        Optimization method.
     scale_factor : float, optional
-        Scaling factor for ZPVE corrections, default is 0.958.
+        Scaling factor for ZPVE corrections.
 
     Returns
     -------
-    Tuple[pd.DataFrame, Dict[str, List[float]]]
-        Dataframe with ZPVE corrected binding energies and a dictionary with fitting parameters.
+    df_all : pd.DataFrame
+        DataFrame with ZPVE corrected binding energies, with Delta_ZPVE as the last column.
+    fit_params : list of float
+        List containing the slope, intercept, and R-squared of the linear fit.
     """
-    meth_fit_dict = {}
-    name_hess_be = [f"be_{mol}_{cluster}_{opt_method.split('_')[0]}" for cluster in hess_list]
+    logger = logging.getLogger("beep")
+    entry_list,  df_nocp, df_be, fitting_params = [],  pd.DataFrame(), pd.DataFrame(), {}
+    basis = 'def2-tzvp'
 
-    # Retrieve and process ZPVE data for each method
-    df, meth_fit_dict  = zpve_correction(name_hess_be, be_methods, opt_method, client=client, scale_factor=scale_factor)
+    padded_log(logger, "Starting ZPVE correction procedure", padding_char=gear)
+    for name in name_be:
+        # Retrieve entries and binding energies
+        ds_be = client.get_collection("ReactionDataset", name)
+        entry_list.extend(ds_be.get_index())
+        df_be = df_be.append(ds_be.get_values(), ignore_index=False)
+        logger.info(f"Extrating and saving binding energies from {name} for ZPVE correction {bcheck}")
 
-    return df, meth_fit_dict
+
+        temp_df = ds_be.get_entries()
+        df_nocp = df_nocp.append(temp_df[temp_df['stoichiometry'] == 'be_nocp'], ignore_index=False)
+
+
+    padded_log(logger, "Obtaining the ZPVE correction from the harmonic vibtrational analysis", padding_char=mia0911)
+    zpve_corr_dict, todelete = {}, []
+    logger.info(f"\nExtracting Hessian:\n")
+    log_formatted_list(logger, entry_list, f"Structures for Hessian Extraction", max_rows = 5)
+    todelete = []
+    for entry in entry_list:
+        logger.info(f"\nProcessing structure {entry}")
+        imaginary = []
+        mol_list = df_nocp[df_nocp['name'] == entry]['molecule']
+
+        # Extracting ZPVE for the tree molecules
+        mol_list = list(mol_list)
+        d, d_bol = get_zpve_mol(client, mol_list[0], lot_opt)
+
+        m1, _ = get_zpve_mol(client, mol_list[1], lot_opt, on_imaginary = 'raise')
+        m2, _ = get_zpve_mol(client, mol_list[2], lot_opt, on_imaginary = 'raise')
+
+        if not d_bol:
+            logger.info(f"Appending structure {entry} into list to delete.")
+            todelete.append(entry)
+            continue
+
+        zpve_corr_dict[entry] = (d - m1 - m2) * qcel.constants.hartree2kcalmol
+        logger.info(f"Finished processing structure {entry}, the ZPVE correction is: {zpve_corr_dict[entry]}\n\n")
+
+    if lot_opt.split("_")[0] == 'hf3c':
+        scale_factor = 0.86
+
+    # Dataframe with ZPVE correction
+
+    df_zpve = pd.DataFrame.from_dict(zpve_corr_dict, orient='index', columns=["Delta_ZPVE"])
+
+    # Filter df_be dataframe
+    df_be = df_be.drop(todelete)
+
+    # Apply the scale factor to Delta_ZPVE and calculate Eb_ZPVE
+    logger.info(f"Applying scaling factor {scale_factor} to the ZPVE correction\n")
+    for bm in be_methods:
+        df_zpve['Delta_ZPVE'] *= scale_factor
+        zpve_col_name = bm + '/'+basis+'+ZPVE' 
+
+        #Sum with the Delta_ZPVE from df_zpve instead of df_all
+        df_be[zpve_col_name] = df_be[bm + '/' + basis] + df_zpve['Delta_ZPVE']
+
+        logger.info(f"Fitting procedure for level of theory {bm} all units are in kcal/mol")
+        # Convert columns to NumPy arrays and calculate fit parameters
+        x = df_be[bm + '/' + basis].to_numpy(dtype=float)
+        y = df_be[zpve_col_name].to_numpy(dtype=float)
+        m, b = np.polyfit(x, y, 1)
+        r_sq = np.corrcoef(x, y)[0, 1] ** 2
+        fitting_params[bm] = [m, b, r_sq]
+        logger.info(f"The linear model  at the {bm} level of theory is: BE+ ΔZPVE = {m} BE + {b}")
+        logger.info(f"The qualtiy of the fit: R2 = {r_sq}\n")
+
+    # Retain only columns with '+ZPVE' in their names
+    df_be = df_be[[col for col in df_be.columns if '+ZPVE' in col]]
+
+    # Compute main 
+    df_be['Mean_Eb_all_dft'] = df_be.mean(axis=1)
+    df_be['StdDev_all_dft'] = df_be.std(axis=1) #/ np.sqrt(3)
+
+    # Filter structures
+    #df_be = df_be[(df_be['Mean_Eb_all_dft'] > -20.0) & (df_be['Mean_Eb_all_dft'] < -0.2)]
+    be_cutoff = 0.1
+    logger.info(f"Applying BE cutoff of {be_cutoff} kcal/mol\n")
+    df_be = df_be[df_be['Mean_Eb_all_dft'] < be_cutoff]
+
+    # Join Delta ZPVE with df_be
+    df_be = pd.concat([df_be, df_zpve], axis=1)
+
+    # Reorder columns to ensure Delta_ZPVE is the last column
+    columns_order = [col for col in df_be.columns if col != 'Delta_ZPVE'] + ['Delta_ZPVE']
+    df_be = df_be[columns_order]
+
+    return df_be, fitting_params
+
+
+
+def zpve_plot(x: np.ndarray, y: np.ndarray, fit_params: List[float]) -> plt.Figure:
+    """
+    Creates a plot of ZPVE corrected binding energies with a linear fit.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Array of x-values (original binding energies).
+    y : np.ndarray
+        Array of y-values (ZPVE corrected binding energies).
+    fit_params : list of float
+        List containing the slope, intercept, and R-squared of the linear fit.
+
+    Returns
+    -------
+    fig : matplotlib.Figure
+        Plot of ZPVE corrected binding energies.
+    """
+    m, b, r_sq = fit_params
+    fig, ax = plt.subplots(figsize=(12, 10))
+    ax.plot(x, y, 's', markersize=13)
+    ax.plot(x, m * x + b, '--k', label=f'y = {m:.3g}x + {b:.3g}\n$R^2$ = {r_sq:.2g}')
+    ax.set_xlabel('$E_b$ / kcal mol$^{-1}$', size=22)
+    ax.set_ylabel('$E_b$ + $\Delta$ZPVE / kcal mol$^{-1}$', size=22)
+    ax.legend(prop={'size': 20}, loc=2)
+
+    return fig
 
 
 def apply_lin_models(df_be: pd.DataFrame, meth_fit_dict: Dict[str, List[float]], be_methods: List[str],
@@ -454,14 +555,17 @@ def apply_lin_models(df_be: pd.DataFrame, meth_fit_dict: Dict[str, List[float]],
         Dataframe with ZPVE corrected binding energies and calculated mean and standard deviation.
     """
     zpve_df = pd.DataFrame()
-    
+    basis = 'def2-tzvp'
+
+    padded_log(logger, "Applying linear model to correct for ZPVE", padding_char=gear)
     for method, factors in meth_fit_dict.items():
         m, n, R2 = factors
-        column_name = f"{method}/def2-tzvp"
+        column_name = f"{method}/{basis}"
 
+        logger.info(f"Applying linear model to {column_name} BEs")
         if column_name in df_be.columns:
             # Apply linear model and store in the dataframe
-            scaled_column_name = f"Eb_ZPVE_{column_name}"
+            scaled_column_name = f"{column_name}_lin_ZPVE"
             zpve_df[scaled_column_name] = df_be[column_name] * m + n
 
             # Convert the columns to NumPy arrays for plotting
@@ -469,21 +573,23 @@ def apply_lin_models(df_be: pd.DataFrame, meth_fit_dict: Dict[str, List[float]],
             y = zpve_df[scaled_column_name].to_numpy(dtype=float)
             
             # Generate the plot for the method
+            logger.info(f"Creating BE vs BE + ΔZPVE plot for {column_name} saving as {mol}/zpve_{mol}_{method}.svg")
             fig = zpve_plot(x, y, [m, n, R2])
-            fig.savefig(f"zpve_{mol}_{method}.svg")
+            fig.savefig(f"{mol}/zpve_{mol}_{method}.svg")
             plt.close(fig)
+        else:
+            raise KeyError(f"Column {column_name} not present in the BE dataframe")
 
     zpve_df['Mean_Eb_all_dft'] = zpve_df.mean(axis=1)
     zpve_df['StdDev_all_dft'] = zpve_df.std(axis=1) / np.sqrt(3)
-    zpve_df = zpve_df[(zpve_df['Mean_Eb_all_dft'] > -20.0) & (zpve_df['Mean_Eb_all_dft'] < -0.2)]
+    zpve_df = zpve_df[zpve_df['Mean_Eb_all_dft'] < -0.1]
 
-    logger.info("Hessian data retrieved")
-    log_dictionary(logger, meth_fit_dict, "ZPVE Fitting models")
+    #log_dictionary(logger, meth_fit_dict, "ZPVE Fitting models")
 
     return zpve_df
 
 
-def calculate_mean_std(df_res: pd.DataFrame, mol: str, final_result: str, logger: logging.Logger) -> str:
+def calculate_mean_std(df_res: pd.DataFrame, mol: str,  logger: logging.Logger) -> str:
     """
     Calculates the mean and standard deviation of binding energies and logs the results.
 
@@ -512,20 +618,18 @@ def calculate_mean_std(df_res: pd.DataFrame, mol: str, final_result: str, logger
     df_res.loc[f'Mean_{mol}'] = mean_row
     df_res.loc[f'StdDev_{mol}'] = std_row
 
-    mean_value = df_res.loc[f'Mean_{mol}', 'Mean_Eb_all_dft']
-    std_value = df_res.loc[f'StdDev_{mol}', 'StdDev_all_dft']
+    mean_val = df_res.loc[f'Mean_{mol}', 'Mean_Eb_all_dft']
+    std_val = df_res.loc[f'StdDev_{mol}', 'StdDev_all_dft']
 
-    logger.info(f"Binding energy for {mol} is {mean_value:.4f} ± {std_value:.4f}")
-    #log_dataframe(logger, df_res, f"ZPVE Corrected binding energies for {mol}")
-    en_log_mol = write_energy_log(df_res, mol, "")
-    final_result = write_energy_log(df_res, mol, final_result)
-    logger.info(en_log_mol)
-    return df_res, final_result
+    return df_res, mean_val, std_val
+
 
 def main():
     args = parse_arguments()
     logger = setup_logging("results", args.mol_coll_name)
-    logger.info("Welcome to the BEEP Binding Energy Evaluation Platform")
+    #logger.info("Welcome to the BEEP Binding Energy Evaluation Platform")
+    logger.info(welcome_msg)
+    scale_factor = 0.958
 
     client = ptl.FractalClient(address=args.server_address, verify=False)
 
@@ -537,28 +641,63 @@ def main():
     # Use all molecules from dset_smol if none are specified in arguments
     mol_list = args.molecules or dset_smol.df.index
 
+    final_result_nz = ''
+    final_result_dz = ''
+    final_result_lz = ''
+
     # Process each molecule
     for mol in mol_list:
+
         logger.info(f"\nProcessing molecule {mol}")
+
+        # Create the new folder
+        res_folder = Path.cwd() / str(mol)
+        res_folder.mkdir(exist_ok=True)
 
         # Generate concatenated data frame for binding energy evaluation
         df_no_zpve = concatenate_frames(client, mol, ds_w, args.opt_method)
 
         # Process ZPVE data
-        df_zpve, fit_data_dict = process_zpve(client, mol, args.be_methods, args.hessian_clusters, args.opt_method)
+        name_hess_be = [f"be_{mol}_{cluster}_{args.opt_method.split('_')[0]}" for cluster in args.hessian_clusters]
+
+        # Retrieve and process ZPVE data for each method
+        df_zpve, fit_data_dict  = zpve_correction(name_hess_be, args.be_methods, args.opt_method, client=client, scale_factor=scale_factor)
 
         # Apply linear models and plot results
         df_zpve_lin = apply_lin_models(df_no_zpve, fit_data_dict, args.be_methods, mol, logger)
 
         # Calculate and log mean and standard deviation if ZPVE data is available
-        res_be_no_zpve, res_string_1 = calculate_mean_std(df_no_zpve, mol, final_result, logger)
-        res_be_zpve, res_string_2    = calculate_mean_std(df_zpve, mol, final_result, logger)
-        res_be_lin_zpve, res_string_3  = calculate_mean_std(df_zpve, mol, final_result, logger)
+        res_be_no_zpve, mean, sdev = calculate_mean_std(df_no_zpve, mol, logger)
+        res_be_zpve, mean, sdev    = calculate_mean_std(df_zpve, mol, logger)
+        res_be_lin_zpve, mean, sdev  = calculate_mean_std(df_zpve_lin, mol, logger)
 
+        #logger.info(f"Binding energy for {mol} is {mean_value:.4f} ± {std_value:.4f}")
+        padded_log(logger, "Average binding energy results", padding_char=gear)
+        log_dataframe(logger, res_be_no_zpve, f"\nBinding energies without ZPVE correction for {mol}\n")
+        log_dataframe(logger, res_be_zpve, f"\nBinding energies with direct ZPVE correction for  {mol}\n")
+        log_dataframe(logger, res_be_lin_zpve, f"\nBinding energies with linear model ZPVE correction for {mol}\n")
+
+        en_log_mol = ''
+        en_log_mol = write_energy_log(res_be_no_zpve, mol, en_log_mol, "(NO ZPVE):")
+        en_log_mol = write_energy_log(res_be_zpve, mol, en_log_mol, "(Direct ZPVE):")
+        en_log_mol = write_energy_log(res_be_lin_zpve, mol, en_log_mol, "(Linear model ZPVE):")
+        logger.info(en_log_mol)
+
+        final_result_nz = write_energy_log(res_be_no_zpve, mol, final_result_nz, "(NO ZPVE):")
+        final_result_dz = write_energy_log(res_be_zpve, mol, final_result_dz, "(Direct ZPVE):")
+        final_result_lz = write_energy_log(res_be_lin_zpve, mol, final_result_lz, "(Linear model ZPVE):")
+        #en_log_mol = write_energy_log(res_, mol, "")
+
+        padded_log(logger, "Saving all dataframes to csv", padding_char=gear)
         # Save all processed data to a CSV file
-        res_be_zpve.to_csv(f'be_no_zpve_{mol}.csv')
-        res_be_no_zpve.to_csv(f'be_no_zpve_{mol}.csv')
-        res_be_lin_zpve.to_csv(f'be_no_zpve_{mol}.csv')
+        res_be_no_zpve.to_csv(f'{res_folder}/be_no_zpve_{mol}.csv')
+        res_be_zpve.to_csv(f'{res_folder}/be_zpve_{mol}.csv')
+        res_be_lin_zpve.to_csv(f'{res_folder}/be_lin_zpve_{mol}.csv')
+
+    padded_log(logger, "Summary of binding energy results", padding_char=gear)
+    logger.info(final_result_nz)
+    logger.info(final_result_dz)
+    logger.info(final_result_lz)
 
 if __name__ == "__main__":
     main()
