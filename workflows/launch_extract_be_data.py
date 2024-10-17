@@ -302,10 +302,13 @@ def concatenate_frames(client: ptl.FractalClient, mol: str, ds_w: pd.DataFrame, 
             ds_be = client.get_collection("ReactionDataset", name_be)
         except KeyError:
             logger.info(f"ReactionDataset {name_be} not found for molecule: {mol}")
-            return None, False
 
         ds_be._disable_query_limit = True
-        df = ds_be.get_values(stoich="default")
+        try:
+            df = ds_be.get_values(stoich="default")
+        except KeyError:
+            logger.info("ReactionDataset {name_be} existis but seems to be empty, please check")
+            continue
 
         all_columns = df_be.columns if not df_be.empty else df.columns
         df = df.reindex(columns=all_columns)
@@ -317,15 +320,17 @@ def concatenate_frames(client: ptl.FractalClient, mol: str, ds_w: pd.DataFrame, 
 
     # Identify columns to drop (Without D3BJ)
     cols_to_drop = []
+    # Iterate through columns
     for col in df_be.columns:
-        me = col.split('/')[0]
-        ba = col.split('/')[1]
-        if '-D3BJ' not in me:
-            d3bj_col = me  + '-D3BJ/' + ba
-            if d3bj_col in df_be.columns:
+        me, ba = col.split('/')
+        # Check for both '-D3BJ' and '-D3MBJ' and append if a corresponding column exists
+        for suffix in ['-D3BJ', '-D3MBJ']:
+            d3bj_col = f"{me}{suffix}/{ba}"
+            if suffix not in me and d3bj_col in df_be.columns:
                 cols_to_drop.append(col)
-    
-    # Drop the columns
+                break  # Exit the loop early if a match is found to avoid duplicate entries
+
+    # Drop the non D3 columns
     logger.info("Deleting Columns without dispersion correction")
     df_be.drop(columns=cols_to_drop, inplace=True)
 
@@ -451,6 +456,9 @@ def zpve_correction(name_be: List[str], be_methods: List[str], lot_opt: str,
             logger.info("Molecule {mol_list[1]} and {mol_list[2]} have no Hessian. Compute them first.")
             raise IndexError
 
+        #if d == None:
+        #    continue
+
         if not d_bol:
             logger.info(f"Appending structure {entry} into list to delete.")
             todelete.append(entry)
@@ -463,11 +471,18 @@ def zpve_correction(name_be: List[str], be_methods: List[str], lot_opt: str,
         scale_factor = 0.86
 
     # Dataframe with ZPVE correction
-
     df_zpve = pd.DataFrame.from_dict(zpve_corr_dict, orient='index', columns=["Delta_ZPVE"])
 
     # Filter df_be dataframe
     df_be = df_be.drop(todelete)
+
+    # Check number of Hessians
+    if len(df_be) < 5:
+        raise ValueError (f'There are too little Hessians to construct a ZPVE linear model =(. Please compute more Hessians')
+    if 5 <= len(df_be) <= 9:
+        logger.info(f"\n{mia0911}WARNING{mia0911}:  Number of Hessians is low and might result in a poor linear model. Proceed with caution\n")
+    else:
+        logger.info(f"\nTotal number of Hessian structures is: {len(df)} {bcheck}\n")
 
     # Apply the scale factor to Delta_ZPVE and calculate Eb_ZPVE
     logger.info(f"Applying scaling factor {scale_factor} to the ZPVE correction\n")
@@ -508,8 +523,7 @@ def zpve_correction(name_be: List[str], be_methods: List[str], lot_opt: str,
     columns_order = [col for col in df_be.columns if col != 'Delta_ZPVE'] + ['Delta_ZPVE']
     df_be = df_be[columns_order]
 
-    return df_be, fitting_params
-
+    return df_be, fitting_params, todelete
 
 
 def zpve_plot(x: np.ndarray, y: np.ndarray, fit_params: List[float]) -> plt.Figure:
@@ -666,15 +680,23 @@ def main():
 
         # Generate concatenated data frame for binding energy evaluation
         df_no_zpve = concatenate_frames(client, mol, ds_w, args.opt_method)
+        log_dataframe(logger, df_no_zpve, f"\nBinding energies without ZPVE correction for {mol}\n")
+        df_no_zpve.to_csv(f'{res_folder}/be_no_zpve_{mol}.csv')
 
         # Process ZPVE data
         name_hess_be = [f"be_{mol}_{cluster}_{args.opt_method.split('_')[0]}" for cluster in args.hessian_clusters]
 
         # Retrieve and process ZPVE data for each method
-        df_zpve, fit_data_dict  = zpve_correction(name_hess_be, args.be_methods, args.opt_method, client=client, scale_factor=scale_factor)
+        df_zpve, fit_data_dict, imag_todelete  = zpve_correction(name_hess_be, args.be_methods, args.opt_method, client=client, scale_factor=scale_factor)
+
 
         # Apply linear models and plot results
         df_zpve_lin = apply_lin_models(df_no_zpve, fit_data_dict, args.be_methods, mol, logger)
+
+        # Delete structures that have imaginary frequencies
+        df_zpve_lin.drop(imag_todelete, inplace=True)
+        df_no_zpve.drop(imag_todelete, inplace=True)
+
 
         # Calculate and log mean and standard deviation if ZPVE data is available
         res_be_no_zpve, mean, sdev = calculate_mean_std(df_no_zpve, mol, logger)
@@ -696,10 +718,9 @@ def main():
         final_result_nz = write_energy_log(res_be_no_zpve, mol, final_result_nz, "(NO ZPVE):")
         final_result_dz = write_energy_log(res_be_zpve, mol, final_result_dz, "(Direct ZPVE):")
         final_result_lz = write_energy_log(res_be_lin_zpve, mol, final_result_lz, "(Linear model ZPVE):")
-        #en_log_mol = write_energy_log(res_, mol, "")
 
-        padded_log(logger, "Saving all dataframes to csv", padding_char=gear)
         # Save all processed data to a CSV file
+        padded_log(logger, "Saving all dataframes to csv", padding_char=gear)
         res_be_no_zpve.to_csv(f'{res_folder}/be_no_zpve_{mol}.csv')
         res_be_zpve.to_csv(f'{res_folder}/be_zpve_{mol}.csv')
         res_be_lin_zpve.to_csv(f'{res_folder}/be_lin_zpve_{mol}.csv')
