@@ -263,11 +263,12 @@ def create_and_add_specification(
     """
     logger = logging.getLogger("beep")
     spec_name = f"{method}_{basis}"
-    try:
-        if ("uks" or "uhf") in client.query_keywords()[qc_keyword].values.values() and program == "psi4":
+    if qc_keyword:
+        kw_name = client.query_keywords()[qc_keyword].values.values()
+        logger.debug(f"Using the following keyword for the specification {kw_name} to {odset.name}")
+        if ("uks" or "uhf") in kw_name and program == "psi4":
             spec_name = "U"+spec_name
-    except TypeError:
-        pass
+    print(spec_name)
     spec = {
         "name": spec_name,
         "description": f"Geometric {program}/{method}/{basis}",
@@ -556,11 +557,17 @@ def compare_rmsd(
 
         for struct_name, odset in odset_dict.items():
             record = odset.get_record(struct_name, specification=opt_lot)
+            err = record.get_error()
+            if err:
+                logger.info(f"Calculation for {struct_name} at the {opt_lot} level of theory finished with error. It will be skipped")
+                break
             fmol = record.get_final_molecule()
             rmsd = compute_rmsd(ref_geom_fmols[struct_name], fmol, rmsd_symm=True)
             rmsd_tot_dict[struct_name] = rmsd
             rmsd_df.at[struct_name, opt_lot] = rmsd
 
+        if err:
+           continue
         rmsd_tot = list(rmsd_tot_dict.values())
         final_opt_lot[opt_lot] = np.mean(rmsd_tot)
         log_progress(logger, i + 1, total_operations)
@@ -732,6 +739,7 @@ def main():
     ## Optimize with DFT functionals
     dft_program = args.dft_optimization_program
     dft_keyword = args.dft_optimization_keyword
+    print("THE DFT KEYWORD: ", dft_keyword)
 
     ## Saving funcitona lists in a dictionary
     dft_geom_functionals = {

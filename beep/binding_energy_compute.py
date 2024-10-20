@@ -1,222 +1,353 @@
-import sys, time
-
 import qcfractal.interface as ptl
-from pathlib import Path
+import logging
+from typing import List, Tuple, Dict
+from collections import Counter
+from pydantic import ValidationError
+from qcfractal.interface.client import FractalClient
+from qcelemental.models.molecule import Molecule
+from qcfractal.interface.collections import Dataset, OptimizationDataset, ReactionDataset
+
+from .utils.logging_utils import *
 
 
-def print_out(string, out_file):
-    with open(out_file, "a") as f:
-        f.write(string)
 
+def rmsd_filter(ds_opt, opt_lot: str, logger: logging.Logger) -> Dict[str, Molecule]:
+    """
+    Filters molecules based on their RMSD (Root Mean Square Deviation) values.
 
-def rmsd_filter(ds_opt, opt_lot, o_file):
+    Parameters:
+    ds_opt (Dataset): Dataset object containing molecule records.
+    opt_lot (str): Level of theory used for optimization.
+    logger (logging.Logger): Logger instance for logging messages.
 
-    todelete = []
+    Returns:
+    Dict[str, Molecule]: Dictionary containing filtered molecule records.
+    """
+    logger.info("Starting rmsd_filter")
+    molecules_to_delete: List[str] = []
+    molecule_records: Dict[str, Molecule] = {}
 
-    di = {}
-
-    for i in ds_opt.df.index:
+    for index in ds_opt.df.index:
         try:
-            di[i] = ds_opt.get_record(
-                name=i, specification=opt_lot
+            # Retrieve the final molecule based on the specified level of theory
+            molecule_records[index] = ds_opt.get_record(
+                name=index, specification=opt_lot
             ).get_final_molecule()
-        except:
-            "ValidationError" or "TypeError"
+        except (ValidationError, TypeError) as e:
+            logger.warning(f"Error retrieving record {index}: {e}")
             continue
 
-    list_keys = list(di.keys())
-
+    molecule_keys: List[str] = list(molecule_records.keys())
     count = 0
-    for i in range(len(list_keys)):
-        for j in range(i + 1, len(list_keys)):
-            count = count + 1
-            mol1 = di[list_keys[i]]
-            mol2 = di[list_keys[j]]
+    for i in range(len(molecule_keys)):
+        for j in range(i + 1, len(molecule_keys)):
+            count += 1
+            mol1 = molecule_records[molecule_keys[i]]
+            mol2 = molecule_records[molecule_keys[j]]
+            # Calculate RMSD between two molecules
             rmsd = mol1.align(mol2, atoms_map=True)[1]["rmsd"]
-            # print(rmsd)
+            logger.debug(f"RMSD between {molecule_keys[i]} and {molecule_keys[j]}: {rmsd}")
+            # If the RMSD is less than 0.25 and not zero, mark the second molecule for deletion
             if rmsd < 0.25 and rmsd != 0.0:
-                if not list_keys[j] in todelete:
-                    todelete.append(list_keys[j])
-    print_out("List of molecules to delete: {}\n".format(todelete), o_file)
+                if molecule_keys[j] not in molecules_to_delete:
+                    molecules_to_delete.append(molecule_keys[j])
 
-    from collections import Counter
+    logger.info(f"List of molecules to delete: {molecules_to_delete}")
 
-    c = Counter(todelete)
-    fin = todelete.copy()
-    for key, value in c.items():
-        if value > 1:
-            fin.remove(key)
+    # Remove duplicates from the deletion list using a set
+    unique_molecules_to_delete: List[str] = list(set(molecules_to_delete))
 
-    for u in fin:
-        del di[u]
-    final_keys = list(di.keys())
-    return di, final_keys
+    # Remove marked molecules from the record dictionary
+    for molecule_key in unique_molecules_to_delete:
+        del molecule_records[molecule_key]
 
+    logger.info(f"Remaining molecules after filtering: {list(molecule_records.keys())}")
 
-def be_stoich(
-    ds_be, database, small_collection, wat_collection, opt_lot, o_file, client
-):
+    return molecule_records
 
-    ds_opt = client.get_collection("OptimizationDataset", database)
-    ds_m = client.get_collection("OptimizationDataset", small_collection)
-    ds_w = client.get_collection("OptimizationDataset", wat_collection)
+def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molecule, logger: logging.Logger) -> Dict[str, List[Tuple[Molecule, float]]]:
+    """
+    Generates the Binding Energy (BE) stoichiometry for a given molecular system.
 
-    di, final_keys = rmsd_filter(ds_opt, opt_lot, o_file)
+    This function computes the BE stoichiometry for different scenarios, including the 
+    default BE stoichiometry, BE without counterpoise (nocp), interaction energy (ie), 
+    and deformation energy (de).
 
-    for k in final_keys:
-        mol = di[k]
-        g = mol.geometry.flatten()
-        s = mol.symbols
+    Parameters:
+    smol_mol (Molecule): The small molecule bound to the surface.
+    cluster_mol (Molecule): The surface or cluster model molecule.
+    struc_mol (Molecule): The full structure with both the small molecule and cluster bound together.
+    logger (logging.Logger): Logger instance for logging messages.
 
-        m = database.split("_")[0]
-        op_m = ds_m.get_record(name=m, specification=opt_lot)
-        m_2 = op_m.get_final_molecule()
+    Returns:
+    Dict[str, List[Tuple[Molecule, float]]]: A dictionary containing different sets of tuples 
+                                             for BE stoichiometry calculations.
+                                             Each tuple consists of a Molecule object and 
+                                             a corresponding coefficient.
+                                             The keys of the dictionary represent different 
+                                             calculation scenarios:
+                                             'default', 'be_nocp', 'ie', and 'de'.
 
-        w = database.split("_")[1] + "_" + database.split("_")[2]
+    Notes:
+    - The function assumes the input molecules (smol_mol, cluster_mol, struc_mol) are valid.
+    - The function uses the QCFractal interface for accessing and manipulating molecular data.
+    """
+    # Flatten the structure geometry and get the symbols
+    geom = struc_mol.geometry.flatten()
+    symbols = struc_mol.symbols
+    surf_symbols = cluster_mol.symbols
 
-        m_w = ds_w.get_record(name=w, specification=opt_lot)
-        m_1 = m_w.get_final_molecule()
-        g1 = m_1.geometry.flatten()
-        s1 = m_1.symbols
+    # Create a fragmented molecule with the surface as one fragment and the small molecule as another
+    f_struc_mol = ptl.Molecule(
+        symbols=symbols,
+        geometry=geom,
+        fragments=[
+            list(range(0, len(surf_symbols))),
+            list(range(len(surf_symbols), len(symbols))),
+        ],
+    )
 
-        n1 = len(s1)
+    # Fragment extraction
+    j5 = f_struc_mol.get_fragment(0)  # Surface fragment
+    j4 = f_struc_mol.get_fragment(1)  # Small molecule fragment
+    j7 = f_struc_mol.get_fragment(0, 1)  # Combined surface and small molecule
+    j6 = f_struc_mol.get_fragment(1, 0)  # Alternative combined fragment
 
-        d = ptl.Molecule(
-            symbols=s,
-            geometry=g,
-            fragments=[list(range(0, n1)), list(range(n1, len(s)))],
-        )
+    logger.debug(f"Fragments generated: j4={j4}, j5={j5}, j6={j6}, j7={j7}")
 
-        j5 = d.get_fragment(0)  # M1
-        j4 = d.get_fragment(1)
-        j7 = d.get_fragment(0, 1)  # M2
-        j6 = d.get_fragment(1, 0)
+    # Binding energy stoichiometry dictionary
+    be_stoic = {
+        "default": [
+            (f_struc_mol, 1.0),
+            (j4, 1.0),
+            (j5, 1.0),
+            (j7, -1.0),
+            (j6, -1.0),
+            (cluster_mol, -1.0),
+            (smol_mol, -1.0),
+        ],
+        "be_nocp": [
+            (f_struc_mol, 1.0),
+            (cluster_mol, -1.0),
+            (smol_mol, -1.0),
+        ],
+        "ie": [(f_struc_mol, 1.0), (j7, -1.0), (j6, -1.0)],
+        "de": [(cluster_mol, -1.0), (smol_mol, -1.0), (j4, 1.0), (j5, 1.0)],
+    }
 
-        be_cal = {
-            "default": [
-                (d, 1.0),
-                (j4, 1.0),
-                (j5, 1.0),
-                (j7, -1.0),
-                (j6, -1.0),
-                (m_1, -1.0),
-                (m_2, -1.0),
-            ],
-            "be_nocp": [(d, 1.0), (m_1, -1.0), (m_2, -1.0)],
-            "ie": [(d, 1.0), (j7, -1.0), (j6, -1.0)],
-            "de": [(m_1, 1.0), (m_2, 1.0), (j4, -1.0), (j5, -1.0)],
-        }
-        ds_be.add_rxn(k, be_cal)
-        ds_be.save()
+    return be_stoic
 
+def create_or_load_reaction_dataset(
+    client: FractalClient, 
+    rdset_name: str, 
+    opt_lot: str, 
+    smol_mol: Molecule, 
+    cluster_mol: Molecule, 
+    ds_opt: Dataset, 
+    opt_stru: Dict[str, object], 
+    logger: logging.Logger
+) -> ReactionDataset:
+    """
+    Create or update a ReactionDataset with benchmark structures and levels of theory.
 
-def compute_be(
-    wat_collection,
-    small_collection,
-    database,
-    opt_lot,
-    lot,
-    o_file,
-    be_tag,
-    client,
-    program='psi4',
-):
-    name_be = "be_" + str(database) + "_" + opt_lot.split("_")[0]
+    Parameters:
+    - client (FractalClient): The active client connected to a QCFractal server.
+    - rdset_name (str): The name of the ReactionDataset to create or update.
+    - opt_lot (str): The level of theory used for optimizations.
+    - smol_mol (Molecule): The small molecule to be included in the dataset.
+    - cluster_mol (Molecule): The cluster (surface) molecule to be included.
+    - ds_opt (Dataset): Dataset object containing the optimization records.
+    - opt_stru (dict): A dictionary containing the structure identifiers as keys.
+    - logger (logging.Logger): Logger instance for logging messages.
 
+    Returns:
+    - ReactionDataset: The created or updated ReactionDataset object.
+    """
+    # Try to delete the dataset if it already exists
     try:
-        ds_be = ptl.collections.ReactionDataset(
-            name_be, ds_type="rxn", client=client, default_program=program
-        )
-        ds_be.save()
-
-        be_stoich(
-            ds_be,
-            database,
-            small_collection,
-            wat_collection,
-            opt_lot,
-            o_file,
-            client=client,
-        )
-
+        client.delete_collection("ReactionDataset", rdset_name)
     except KeyError:
-        print_out("Be database {} already exists\n".format(str(name_be)), o_file)
+        pass  # If dataset doesn't exist, continue without error
 
-        ds_be = client.get_collection("ReactionDataset", name_be)
+    # Create a new ReactionDataset
+    ds_be = ReactionDataset(rdset_name, ds_type="rxn", client=client, default_program="psi4")
+    ds_be.save()
 
-    #if not ds_be.get_values(method=lot.split("_")[0], basis=lot.split("_")[1]).empty:
-    #    print_out(
-    #        "{} Be values already computed in {}\n".format(str(lot), str(database)),
-    #        o_file,
-    #    )
-    #    return None
+    # Retrieve the ReactionDataset after saving
+    ds_be = client.get_collection("ReactionDataset", rdset_name)
 
-    mol_id = ds_be.get_entries().loc[0].molecule
-    mult = client.query_molecules(mol_id)[0].molecular_multiplicity
-    if mult == 2:
-        keywords = ptl.models.KeywordSet(values={"reference": "uks"})
-        ds_be.add_keywords("rad_be", "psi4", keywords, default=True)
-        ds_be.save()
+    n_entries = 0
+    padded_log(logger, f"Populating the dataframe with {len(opt_stru.keys())} new entries", padding_char="*", total_length=60)
 
-        c = ds_be.compute(
-            lot.split("_")[0],
-            lot.split("_")[1],
-            keywords="rad_be",
-            stoich="default",
-            tag=be_tag,
-            program=program,
-        )
-    else:
-        c = ds_be.compute(
-            lot.split("_")[0],
-            lot.split("_")[1],
-            stoich="default",
-            tag=be_tag,
-            program=program,
-        )
-    print_out("Collection {}: {}\n".format(name_be, c), o_file)
+    # Iterate over the structures in the optimization dataset
+    for st in opt_stru.keys():
+        logger.info(f"Processing structure: {st}")
+        rr = ds_opt.get_record(st, opt_lot)
 
-    #ids_path = Path(
-    #    ".enregy_job_ids/" + ds_be.name + "_" + lot.split("_")[0] + "_idlist.dat"
-    #)
+        # Skip structures with optimization errors
+        if rr.status == "ERROR":
+            logger.warning(f"WARNING: Optimization of {st} with {opt_lot} finished with error. Will skip this structure.")
+            continue
 
-    #if not ids_file.is_file():
-    #    out_file.parent.mkdir(parents=True, exist_ok=True)
+        # Get the final optimized molecule
+        struct_mol = rr.get_final_molecule()
 
-    #f_w = open(ids_path, "w")
-    #id_str = ""
-    #for i in c.ids:
-    #    id_str += i + " "
-    #f_w.write(id_str)
-    #f_w.close()
+        # Generate binding energy stoichiometry
+        logger.info(f"Generating BE stoichiometry for {st}")
+        be_stoich = be_stoichiometry(smol_mol, cluster_mol, struct_mol, logger)
+
+        # Add the reaction to the ReactionDataset
+        rds_entry = f"{st}"
+        n_entries += 1
+        try:
+            ds_be.add_rxn(rds_entry, be_stoich)
+            logger.info(f"Successfully added {st} to the dataset.\n")
+        except KeyError:
+            logger.warning(f"Failed to add {st}. Skipping entry.")
+            continue
+
+    # Save changes to the dataset
+    ds_be.save()
+
+    logger.info(f"Created a total of {n_entries} entries in {rdset_name}.\n")
+
+    return ds_be
+
+
+def compute_be_dft_energies(
+    ds_be,
+    all_dft: List[str],
+    tag: str,
+    program: str,
+    logger: logging.Logger,
+    keyword: str = None
+) -> List[str]:
+    """
+    Submits DFT computation jobs for Binding Energy (BE) calculations for various stoichiometries and functionals.
+
+    Parameters:
+    - ds_be (Dataset): The QCFractal Dataset object for BE computations.
+    - all_dft (list): List of hybrid GGA functional names.
+    - tag (str): Tag for the QCFractal manager computation.
+    - program (str): Quantum chemistry program to use for the computations.
+    - logger (logging.Logger): Logger instance for logging messages.
+    - keyword (str, optional): Keyword to use in the computation. Defaults to None.
+
+    Returns:
+    - list: A list of computation IDs representing the submitted jobs.
+    """
+    stoich_list = ["default", "de", "ie", "be_nocp"]
+    logger.info(f"Computing energies for the following stoichiometries: {' '.join(stoich_list)} (default = be)\n")
+
+    log_formatted_list(logger, all_dft, "Sending DFT energy computations for the following Levels of theory:", max_rows=1)
+
+    c_list_sub = []
+    c_list_exis = []
+
+    logger.info(f"\nSending DFT computations with tag: {tag}\n")
+
+    for i, lot in enumerate(all_dft):
+        method, basis = lot.split("_")  # Split method and basis
+        logger.info(f"Processing method: {method}, basis: {basis}")
+
+        c_per_lot_sub = []
+        c_per_lot_exis = []
+
+        for stoich in stoich_list:
+            c = ds_be.compute(
+                method=method,
+                basis=basis,
+                program=program,
+                stoich=stoich,
+                tag=tag,
+                keywords=keyword,
+            )
+            # Extract submitted and existing computations
+            c_list_sub.extend(list(c)[1][1])
+            c_per_lot_sub.extend(list(c)[1][1])
+            c_list_exis.extend(list(c)[0][1])
+            c_per_lot_exis.extend(list(c)[0][1])
+
+        logger.info(f"{lot}: Existing {len(c_per_lot_exis)}  Submitted {len(c_per_lot_sub)}")
+
+    logger.info(f"\nSubmitted a total of {len(c_list_sub)} DFT computations. {len(c_list_exis)} are already computed.")
+
+    return c_list_sub + c_list_exis
+
 
 def compute_hessian(
-    be_collection,
-    opt_lot,
-    o_file,
-    hess_tag,
-    client,
-    program='psi4',
-    ):
+    client: FractalClient,
+    ds_be_name: str,
+    opt_lot: str,
+    mult: int,
+    hess_tag: str,
+    logger: logging.Logger,
+    program: str = 'psi4'
+) -> List[str]:
+    """
+    Compute hessian for all molecules in a given ReactionDataset collection.
 
+    Parameters:
+    - client (FractalClient): A connection to the QCFractal server.
+    - ds_be_name (str): The name of the ReactionDataset collection from which to compute hessians.
+    - opt_lot (str): The level of theory, split into method and basis (e.g., 'b3lyp_def2svp').
+    - mult (int): The multiplicity of the molecules.
+    - hess_tag (str): The tag used for the compute submission.
+    - logger (logging.Logger): Logger instance for logging messages.
+    - program (str, optional): The quantum chemistry program to use. Defaults to 'psi4'.
+
+    Returns:
+    - list: A combined list of submitted and existing computations.
+    """
+
+    # Fetch the ReactionDataset collection by name
     try:
-        ds_be = client.get_collection("ReactionDataset", be_collection)
-    except:
-        "KeyError"
-        print_out("Reaction  database {} does not exist\n".format(str(be_collection)), o_file)
-        return None
+        ds_be = client.get_collection("ReactionDataset", ds_be_name)
+    except KeyError:
+        logger.info(f"\nWARNING: Reaction database {ds_be_name} does not exist.\n")
+        return []
+
+    padded_log(logger, f"Computing Hessians for {ds_be.name}", padding_char="*", total_length=60)
+
+    # Extract method and basis from opt_lot
+    method, basis = opt_lot.split("_")
 
     df_all = ds_be.get_entries()
-    mols = df_all[df_all['stoichiometry'] == 'be_nocp']['molecule'] 
-    mult = df_all.loc[0].molecule
+    mols = df_all[df_all['stoichiometry'] == 'be_nocp']['molecule']
+    u_mols = list(set(mols))
 
+    log_formatted_list(logger, u_mols, "Sending Hessian computations for the following molecules:", max_rows=5)
+
+    # Set keywords depending on the multiplicity
     if mult == 2:
-        kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1},'reference': 'uhf'}})
+        kw = ptl.models.KeywordSet(
+            **{"values": {"function_kwargs": {"dertype": 1}, "reference": "uks"}}
+        )
+        method = method[1:]  # Adjust method for unrestricted cases
     else:
-        kw = ptl.models.KeywordSet(**{"values": {'function_kwargs': {'dertype': 1}}})
+        kw = ptl.models.KeywordSet(
+            **{"values": {"function_kwargs": {"dertype": 1}}}
+        )
+
+    logger.info(f"\nComputing Hessian at {method}/{basis} level of theory")
+    logger.info(f"Using keywords: {kw.values}")
 
     kw_id = client.add_keywords([kw])[0]
-    r = client.add_compute(program, opt_lot.split("_")[0], opt_lot.split("_")[1], "hessian", kw_id, list(mols), tag=hess_tag)
-    print_out("{} hessian computations have been sent.\n".format(r), o_file)
+    c = client.add_compute(
+        program, method, basis, "hessian", kw_id, u_mols, tag=hess_tag
+    )
 
+    # List operations to track submissions and existing computations
+    c_list_sub = list(c)[1][1]
+    c_list_exis = list(c)[0][1]
+
+    logger.info(
+        f"\nExisting: {len(c_list_exis)} Submitted: {len(c_list_sub)}"
+    )
+    logger.info(
+        f"\nSubmitted a total of {len(c_list_sub)} computations. "
+        f"{len(c_list_exis)} are already computed."
+    )
+
+    return c_list_sub + c_list_exis
 
