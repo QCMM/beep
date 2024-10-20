@@ -122,8 +122,11 @@ def zpve_correction(name_be, be_method, lot_opt, client, scale_factor = 1.0):
     
             h = r.dict()['return_result']
             e = r.dict()['extras']['qcvars']['CURRENT ENERGY']
+            print(f"Obtaining ZPVE correction for {mol} in {i}")
             vib,therm = _vibanal_wfn(hess=h, molecule=r.get_molecule(), name=i, energy=e, lt=lot_opt)
             zpve_list.append(therm['ZPE_vib'].data)
+        
+        print(len(zpve_list), zpve_list)
     
         if len(zpve_list) != 3:
             todelete.append(i)
