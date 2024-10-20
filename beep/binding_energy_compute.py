@@ -4,11 +4,6 @@ import qcfractal.interface as ptl
 from pathlib import Path
 
 
-def print_out(string, out_file):
-    with open(out_file, "a") as f:
-        f.write(string)
-
-
 def rmsd_filter(ds_opt, opt_lot, o_file):
 
     todelete = []
