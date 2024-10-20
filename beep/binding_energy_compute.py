@@ -144,51 +144,33 @@ def compute_be(
 
         ds_be = client.get_collection("ReactionDataset", name_be)
 
-    #if not ds_be.get_values(method=lot.split("_")[0], basis=lot.split("_")[1]).empty:
-    #    print_out(
-    #        "{} Be values already computed in {}\n".format(str(lot), str(database)),
-    #        o_file,
-    #    )
-    #    return None
-
     mol_id = ds_be.get_entries().loc[0].molecule
     mult = client.query_molecules(mol_id)[0].molecular_multiplicity
-    if mult == 2:
-        keywords = ptl.models.KeywordSet(values={"reference": "uks"})
-        ds_be.add_keywords("rad_be", "psi4", keywords, default=True)
-        ds_be.save()
+    print(lot)
+    for l in lot:
+        print(l)
+        if mult == 2:
+            keywords = ptl.models.KeywordSet(values={"reference": "uks"})
+            ds_be.add_keywords("rad_be", "psi4", keywords, default=True)
+            ds_be.save()
 
-        c = ds_be.compute(
-            lot.split("_")[0],
-            lot.split("_")[1],
-            keywords="rad_be",
-            stoich="default",
-            tag=be_tag,
-            program=program,
-        )
-    else:
-        c = ds_be.compute(
-            lot.split("_")[0],
-            lot.split("_")[1],
-            stoich="default",
-            tag=be_tag,
-            program=program,
-        )
+            c = ds_be.compute(
+                l.split("_")[0],
+                l.split("_")[1],
+                keywords="rad_be",
+                stoich="default",
+                tag=be_tag,
+                program=program,
+            )
+        else:
+            c = ds_be.compute(
+                l.split("_")[0],
+                l.split("_")[1],
+                stoich="default",
+                tag=be_tag,
+                program=program,
+            )
     print_out("Collection {}: {}\n".format(name_be, c), o_file)
-
-    #ids_path = Path(
-    #    ".enregy_job_ids/" + ds_be.name + "_" + lot.split("_")[0] + "_idlist.dat"
-    #)
-
-    #if not ids_file.is_file():
-    #    out_file.parent.mkdir(parents=True, exist_ok=True)
-
-    #f_w = open(ids_path, "w")
-    #id_str = ""
-    #for i in c.ids:
-    #    id_str += i + " "
-    #f_w.write(id_str)
-    #f_w.close()
 
 def compute_hessian(
     be_collection,
