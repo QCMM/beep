@@ -456,8 +456,6 @@ def zpve_correction(name_be: List[str], be_methods: List[str], lot_opt: str,
             logger.info("Molecule {mol_list[1]} and {mol_list[2]} have no Hessian. Compute them first.")
             raise IndexError
 
-        #if d == None:
-        #    continue
 
         if not d_bol:
             logger.info(f"Appending structure {entry} into list to delete.")
