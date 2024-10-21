@@ -59,7 +59,7 @@ welcome_msg = """
 ·······················································································
 
 ---------------------------------------------------------------------------------------
-Welcome to the BEEP  data extraction workflow!
+Welcome to the BEEP  binding energy data extraction workflow!
 ---------------------------------------------------------------------------------------
 
 "And now I see. With eye serene. The very. Pulse. Of the machine."
