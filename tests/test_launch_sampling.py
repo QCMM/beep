@@ -84,7 +84,6 @@ def test_sampling_args():
         "program": "test_program",
         "tag": "test_tag",
         "kw_id": 123,
-        "opt_lot": "test_method_test_basis",
         "rmsd_symm": True,
         "store_initial": False,
         "rmsd_val": 0.5,
