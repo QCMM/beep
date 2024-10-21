@@ -178,8 +178,8 @@ def get_optdataset(client: ptl.FractalClient, surf_ds: ptl.collections.Optimizat
             if not opt_ds.data.records:
                 raise ValueError(f"Dataset '{ds_opt_name}' exists but contains no entries.")
         except Exception as e:
-            logger.error(f"Error accessing dataset '{ds_opt_name}': {e}")
-            raise ValueError(f"Could not access dataset '{ds_opt_name}'.") from e
+            logger.info(f"Warning: Error accessing dataset '{ds_opt_name}': {e}, might not exist. Will continue without")
+            continue
 
         # Get entries and their status
         incomplete_entries = get_incomplete_entries(opt_ds, opt_lot)
@@ -303,7 +303,7 @@ def main() -> None:
         padded_log(logger, f"Creating {len(finished_opt_list)} ReactionDatasets for BE computation:")
         all_ids = process_be_computation(client, logger, finished_opt_list, surf_opt_ds, smol_mol, opt_lot, opt_method, mult, args)
         padded_log(logger, f"Checking for completion of ALL binding energy computations")
-        check_jobs_status(client, all_ids, logger, wait_interval=30) 
+        check_jobs_status(client, all_ids, logger, wait_interval=600) 
 
     # Process Hessian computations
     if args.hessian_clusters:
@@ -323,7 +323,7 @@ def main() -> None:
             hess_ids = compute_hessian(client, rdset_name, opt_lot, mult, args.hessian_tag, logger=logger, program=args.program)  # Pass logger
             all_hess_ids.extend(hess_ids)
         padded_log(logger, f"Checking for completion of ALL Hessian computations")
-        check_jobs_status(client, all_hess_ids, logger, wait_interval=30)  # Pass logger
+        check_jobs_status(client, all_hess_ids, logger, wait_interval=600, print_job_ids = True)  # Pass logger
 
     logger.info("\nThank you for using the binding energy and hessian compute suite!")
 
