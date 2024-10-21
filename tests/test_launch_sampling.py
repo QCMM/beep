@@ -94,7 +94,7 @@ def test_sampling_args():
     assert result == expected_result
    
 # Mock the client and its get_collection method behavior
-@patch('scripts.launch_sampling.FractalClient')
+@patch('workflows.launch_sampling.FractalClient')
 def test_check_collection_existence(mock_client):
     # Create a MagicMock for the get_collection method
     mock_client.get_collection = MagicMock()
