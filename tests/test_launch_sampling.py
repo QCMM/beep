@@ -7,7 +7,7 @@ from argparse import Namespace
 from pathlib import Path
 from qcelemental.models.molecule import Molecule
 from beep.errors import DatasetNotFound, LevelOfTheoryNotFound
-from scripts.launch_sampling import (
+from workflows.launch_sampling import (
 parse_arguments,
 sampling_args,
 check_collection_existence,
