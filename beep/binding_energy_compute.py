@@ -34,7 +34,7 @@ def rmsd_filter(ds_opt, opt_lot: str, logger: logging.Logger) -> Dict[str, Molec
                 name=index, specification=opt_lot
             ).get_final_molecule()
         except (ValidationError, TypeError) as e:
-            logger.warning(f"Error retrieving record {index}: {e}")
+            logger.warning(f"Error retrieving record {index}, Optimization finished with ERROR")
             continue
 
     molecule_keys: List[str] = list(molecule_records.keys())
