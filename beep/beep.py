@@ -6,7 +6,6 @@ except ModuleNotFoundError:
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-from .be_tools import zpve_dictionary
 from .exceptions import *
 
 # Author: svogt, gbovolenta
@@ -211,7 +210,9 @@ class BindingParadise(object):
         except AttributeError:
             raise MoleculeNotSetError()
 
-        return zpve_dictionary[self._mol]
+        #return zpve_dictionary[self._mol]
+        return None
+
 
     def get_values(self, method=None, zpve=False, progress_bar=True):
         """Gets binding energy values for a given method.
@@ -262,9 +263,9 @@ class BindingParadise(object):
             en_val_list.append(en_val)
         df_be = pd.concat(en_val_list).dropna()
 
-        if zpve:
-            m, b = zpve_dictionary[self._mol]
-            df_be[str(method.upper()) + " + ZPVE"] = m * df_be + b
+        #if zpve:
+        #    m, b = zpve_dictionary[self._mol]
+        #    df_be[str(method.upper()) + " + ZPVE"] = m * df_be + b
 
         self._df_be = df_be
         return df_be
