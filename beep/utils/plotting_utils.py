@@ -297,3 +297,32 @@ def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_path_plo
     plt.tight_layout()
     plt.savefig(str(folder_path_plots) + f"/ie_vs_de_dft_{mol_name}.svg")
 
+
+def zpve_plot(x: np.ndarray, y: np.ndarray, fit_params: List[float]) -> plt.Figure:
+    """
+    Creates a plot of ZPVE corrected binding energies with a linear fit.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Array of x-values (original binding energies).
+    y : np.ndarray
+        Array of y-values (ZPVE corrected binding energies).
+    fit_params : list of float
+        List containing the slope, intercept, and R-squared of the linear fit.
+
+    Returns
+    -------
+    fig : matplotlib.Figure
+        Plot of ZPVE corrected binding energies.
+    """
+    m, b, r_sq = fit_params
+    fig, ax = plt.subplots(figsize=(12, 10))
+    ax.plot(x, y, 's', markersize=13)
+    ax.plot(x, m * x + b, '--k', label=f'y = {m:.3g}x + {b:.3g}\n$R^2$ = {r_sq:.2g}')
+    ax.set_xlabel('$E_b$ / kcal mol$^{-1}$', size=22)
+    ax.set_ylabel('$E_b$ + $\Delta$ZPVE / kcal mol$^{-1}$', size=22)
+    ax.legend(prop={'size': 20}, loc=2)
+
+    return fig
+
