@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict, List, Tuple, Union, NoReturn
 import pandas as pd
+import qcelemental as qcel
 
 
 def setup_logging(prefix: str, molecule_name: str) -> logging.Logger:
@@ -33,23 +34,6 @@ def setup_logging(prefix: str, molecule_name: str) -> logging.Logger:
     logger.addHandler(console_handler)
 
     return logger
-
-#def log_formatted_list(logger: logging.Logger, my_list: List[str], description: str):
-#    """
-#    Converts a list into a formatted string and logs it using the provided logger.
-#
-#    Parameters:
-#    logger (logging.Logger): The logger object to use for logging the information.
-#    my_list (List[str]): The list to be formatted and logged.
-#    """
-#    # Define the format for each item (e.g., "- Item")
-#    formatted_items = [f"* {item}" for item in my_list]
-#
-#    # Join the formatted items into a single string with line breaks
-#    formatted_string = "\n".join(formatted_items)
-#
-#    # Log the formatted string
-#    logger.info(f"{description}\n{formatted_string}")
 
 
 def log_formatted_list(logger: logging.Logger, my_list: List[str], description: str, max_rows: int = 10):
@@ -258,4 +242,69 @@ def log_energy_mae(logger: logging.Logger, df: pd.DataFrame) -> pd.DataFrame:
         logger.info(log_message_str)
     
     return mae_results
+
+def log_dataframe(logger: logging.Logger, df: pd.DataFrame, title: str = "DataFrame") -> None:
+    """
+    Logs the contents of a DataFrame using the provided logger.
+
+    Args:
+        logger (logging.Logger): The logger to use for logging the DataFrame.
+        df (pd.DataFrame): The DataFrame to be logged.
+        title (str): The title to prepend to the logged DataFrame. Defaults to "DataFrame".
+    
+    Returns:
+        None
+    """
+    # Convert the DataFrame to a string with pretty formatting
+    df_string = df.to_string()
+
+    # Log the DataFrame with the provided title
+    logger.info(f"{title}\n{df_string}")
+
+def log_dictionary(logger: logging.Logger, dictionary: Dict[Any, Any], title: str = "Dictionary") -> None:
+    """
+    Logs the contents of a dictionary using the provided logger.
+
+    Args:
+        logger (logging.Logger): The logger to use for logging the dictionary.
+        dictionary (Dict[Any, Any]): The dictionary to be logged. The values are expected to be tuples 
+                                     in the form (m, n, R^2).
+        title (str): The title to prepend to the logged dictionary. Defaults to "Dictionary".
+
+    Returns:
+        None
+    """
+    # Log the dictionary with the provided title
+    logger.info(f"{title}:")
+    for key, value in dictionary.items():
+        logger.info(f"{key}: m = {value[0]}, n = {value[1]}, R^2 = {value[2]}")
+
+def write_energy_log(df: pd.DataFrame, mol: str, existing_content: str = "", comment: str = "") -> str:
+    """
+    Appends energy values from the DataFrame to a log string.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing energy values.
+        mol (str): Name of the molecule.
+        existing_content (str, optional): Existing log content to append to. Defaults to an empty string.
+        comment (str, optional): Additional comment to add to the log. Defaults to an empty string.
+
+    Returns:
+        str: The updated log content string with appended energy values.
+    """
+    content = existing_content
+    if not content:
+        content += f"{'':<50}{'BE Average':<50}{'BE Standard Deviation'}\n"
+
+    last_two_rows = df.iloc[-2:]
+    content += f"{mol} {comment:<30}"
+    for _, row in last_two_rows.iterrows():
+        mean_values = []
+        for unit in ['kcal/mol', 'K']:
+            mean_val = -1 * round(qcel.constants.conversion_factor('kcal/mol', unit) * row['Mean_Eb_all_dft'], 2)
+            std_val = round(qcel.constants.conversion_factor('kcal/mol', unit) * row['StdDev_all_dft'], 2)
+            mean_values.append(f"{mean_val:.2f} ± {std_val:.2f} [{unit}]")
+        content += f"{'   '.join(mean_values):<50}"
+    content += "\n"
+    return content
 
