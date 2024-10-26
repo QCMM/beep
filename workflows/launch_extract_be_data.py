@@ -329,8 +329,8 @@ def zpve_correction(
     return df_be, fitting_params, todelete
 
 
-def apply_lin_models(df_be: pd.DataFrame, meth_fit_dict: Dict[str, List[float]], be_methods: List[str],
-                     mol: str) -> pd.DataFrame:
+def apply_lin_models(df_be: pd.DataFrame, df_be_zpve: pd.DataFrame, meth_fit_dict: Dict[str, List[float]], be_methods: List[str],
+                     mol: str, be_range: Tuple[float]) -> pd.DataFrame:
     """
     Applies linear models to ZPVE corrected data and plots results for each binding energy method.
 
@@ -338,14 +338,16 @@ def apply_lin_models(df_be: pd.DataFrame, meth_fit_dict: Dict[str, List[float]],
     ----------
     df_be : pd.DataFrame
         Dataframe of binding energies.
+    df_be_zpve : pd.DataFrame
+        Dataframe with ZPVE corrected binding energies.
     meth_fit_dict : dict
         Dictionary with fitting parameters for each method.
     be_methods : list of str
         Binding energy methods.
     mol : str
         Molecule identifier.
-    logger : logging.Logger
-        Logger for output messages.
+    be_range : tuple of float
+        Range of binding energies to filter by.
 
     Returns
     -------
@@ -353,39 +355,43 @@ def apply_lin_models(df_be: pd.DataFrame, meth_fit_dict: Dict[str, List[float]],
         Dataframe with ZPVE corrected binding energies and calculated mean and standard deviation.
     """
     logger = logging.getLogger("beep")
-    zpve_df = pd.DataFrame()
+    lin_zpve_df = pd.DataFrame()
     basis = 'def2-tzvp'
 
     padded_log(logger, "Applying linear model to correct for ZPVE", padding_char=gear)
     for method, factors in meth_fit_dict.items():
         m, n, R2 = factors
         column_name = f"{method}/{basis}"
+        zpve_column_name = f"{column_name}+ZPVE"
 
         logger.info(f"Applying linear model to {column_name} BEs")
-        if column_name in df_be.columns:
-            # Apply linear model and store in the dataframe
+        if column_name in df_be.columns and zpve_column_name in df_be_zpve.columns:
+            # Apply linear model to all rows and store in the dataframe
             scaled_column_name = f"{column_name}_lin_ZPVE"
-            zpve_df[scaled_column_name] = df_be[column_name] * m + n
+            lin_zpve_df[scaled_column_name] = df_be[column_name] * m + n
+
+            # Filter rows only for plotting
+            common_indices = df_be.index.intersection(df_be_zpve.index)
+            df_be_filtered = df_be.loc[common_indices]
+            df_be_zpve_filtered = df_be_zpve.loc[common_indices]
 
             # Convert the columns to NumPy arrays for plotting
-            x = df_be[column_name].to_numpy(dtype=float)
-            y = zpve_df[scaled_column_name].to_numpy(dtype=float)
-            
+            x = df_be_filtered[column_name].to_numpy(dtype=float)
+            y = df_be_zpve_filtered[zpve_column_name].to_numpy(dtype=float)
+
             # Generate the plot for the method
             logger.info(f"Creating BE vs BE + ΔZPVE plot for {column_name} saving as {mol}/zpve_{mol}_{method}.svg")
             fig = zpve_plot(x, y, [m, n, R2])
             fig.savefig(f"{mol}/zpve_{mol}_{method}.svg")
             plt.close(fig)
         else:
-            raise KeyError(f"Column {column_name} not present in the BE dataframe")
+            raise KeyError(f"Column {column_name} or {zpve_column_name} not present in the BE or ZPVE dataframe")
 
-    zpve_df['Mean_Eb_all_dft'] = zpve_df.mean(axis=1)
-    zpve_df['StdDev_all_dft'] = zpve_df.std(axis=1) / np.sqrt(3)
-    zpve_df = zpve_df[zpve_df['Mean_Eb_all_dft'] < -0.1]
+    lin_zpve_df['Mean_Eb_all_dft'] = lin_zpve_df.mean(axis=1)
+    lin_zpve_df['StdDev_all_dft'] = lin_zpve_df.std(axis=1) / np.sqrt(3)
+    lin_zpve_df = lin_zpve_df[(lin_zpve_df['Mean_Eb_all_dft'] >= be_range[1]) & (lin_zpve_df['Mean_Eb_all_dft'] <= be_range[0])]
 
-    #log_dictionary(logger, meth_fit_dict, "ZPVE Fitting models")
-
-    return zpve_df
+    return lin_zpve_df
 
 
 def calculate_mean_std(df_res: pd.DataFrame, mol: str,  logger: logging.Logger) -> str:
@@ -473,7 +479,7 @@ def main():
         )
 
         # Apply linear models and plot results
-        df_zpve_lin = apply_lin_models(df_no_zpve, fit_data_dict, args.be_methods, mol)
+        df_zpve_lin = apply_lin_models(df_no_zpve, df_zpve, fit_data_dict, args.be_methods, mol, tuple(args.be_range))
 
         # Delete structures that have imaginary frequencies
         df_zpve_lin.drop(imag_todelete, inplace=True)
