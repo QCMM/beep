@@ -390,7 +390,7 @@ def apply_lin_models(df_be: pd.DataFrame, df_be_zpve: pd.DataFrame, meth_fit_dic
             raise KeyError(f"Column {column_name} or {zpve_column_name} not present in the BE or ZPVE dataframe")
 
     lin_zpve_df['Mean_Eb_all_dft'] = lin_zpve_df.mean(axis=1)
-    lin_zpve_df['StdDev_all_dft'] = lin_zpve_df.std(axis=1) / np.sqrt(3)
+    lin_zpve_df['StdDev_all_dft'] = lin_zpve_df.std(axis=1) 
     lin_zpve_df = lin_zpve_df[(lin_zpve_df['Mean_Eb_all_dft'] >= be_range[1]) & (lin_zpve_df['Mean_Eb_all_dft'] <= be_range[0])]
 
     return lin_zpve_df
