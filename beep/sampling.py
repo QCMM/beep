@@ -332,7 +332,7 @@ def run_sampling(
             logger.info(
                 f"Initial structure set for visualization will be saved in {str(debug_path)}"
             )
-            filename = f"{debug_path}_{round(shell, 2):.2f}.molden".replace(".", "")
+            filename = f"{debug_path}_{round(shell, 2):.2f}".replace(".", "")+'.mol'
             debug_mol.to_file(filename, "xyz")
 
         # Send sampling computation
@@ -367,7 +367,7 @@ def run_sampling(
 
         # Filter the molecules by RMSD
         logger.info(
-            "Filtering {opt_mol_num} new molecules against existing {len(opt_molecules)} molecules  using an RMSD criteria of {rmsd_val}"
+            f"Filtering {opt_mol_num} new molecules against existing {len(opt_molecules)} molecules  using an RMSD criteria of {rmsd_val}"
         )
         unique_mols = filter_binding_sites(
             opt_molecules_new, opt_molecules, cut_off_val=rmsd_val, rmsd_symm=rmsd_symm
