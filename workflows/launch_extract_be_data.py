@@ -97,6 +97,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--molecules', type=str, nargs='*', default=[], help='List of molecules')
     parser.add_argument('--be-range', type=float, nargs=2, default=[-0.1, -25.0], help='Binding energy range to filter structures (default: [-0.1, -25.0] kcal/mol)')
     parser.add_argument('--scale-factor', type=float, default=0.958, help='Scaling factor for ZPVE corrections (default: 0.958)')
+    parser.add_argument('--basis', type=str, default="def2-tzvp", help='Basis set for BE computation (default: def2-tzvp)')
     parser.add_argument('--exclude-clusters', type=str, nargs='*', default=[], help='List of clusters to exclude from processing')
 
     return parser.parse_args()
@@ -201,9 +202,9 @@ def zpve_correction(
     name_be: List[str],
     be_methods: List[str],
     lot_opt: str,
+    basis: str,
     client: ptl.FractalClient,
     scale_factor: float = 1.0,
-    basis: str = 'def2-tzvp',
     be_range: Tuple[float, float] = (-0.1, -25.0)
 ) -> Tuple[pd.DataFrame, Dict[str, List[float]], List[str]]:
     """
@@ -217,12 +218,12 @@ def zpve_correction(
         List of binding energy methods.
     lot_opt : str
         Level of theory and basis set, e.g., 'HF_6-31G'.
+    basis : str
+        Basis set for the calculation.
     client : ptl.FractalClient
         Fractal client for dataset access.
     scale_factor : float, optional
         Scaling factor for ZPVE corrections, by default 1.0.
-    basis : str, optional
-        Basis set for the calculation, by default 'def2-tzvp'.
     be_range : Tuple[float, float], optional
         Range for filtering binding energies (BEs). Only structures with BEs within this range will be retained.
         Defaults to (-0.1, -25.0) kcal/mol.
@@ -330,7 +331,7 @@ def zpve_correction(
 
 
 def apply_lin_models(df_be: pd.DataFrame, df_be_zpve: pd.DataFrame, meth_fit_dict: Dict[str, List[float]], be_methods: List[str],
-                     mol: str, be_range: Tuple[float]) -> pd.DataFrame:
+                     basis: str, mol: str, be_range: Tuple[float]) -> pd.DataFrame:
     """
     Applies linear models to ZPVE corrected data and plots results for each binding energy method.
 
@@ -344,6 +345,8 @@ def apply_lin_models(df_be: pd.DataFrame, df_be_zpve: pd.DataFrame, meth_fit_dic
         Dictionary with fitting parameters for each method.
     be_methods : list of str
         Binding energy methods.
+    basis: str
+        Basis set for the calculation.
     mol : str
         Molecule identifier.
     be_range : tuple of float
@@ -356,7 +359,6 @@ def apply_lin_models(df_be: pd.DataFrame, df_be_zpve: pd.DataFrame, meth_fit_dic
     """
     logger = logging.getLogger("beep")
     lin_zpve_df = pd.DataFrame()
-    basis = 'def2-tzvp'
 
     padded_log(logger, "Applying linear model to correct for ZPVE", padding_char=gear)
     for method, factors in meth_fit_dict.items():
@@ -473,13 +475,14 @@ def main():
             name_hess_be, 
             args.be_methods, 
             args.opt_method, 
+            args.basis,
             client=client, 
             scale_factor=args.scale_factor,
             be_range=tuple(args.be_range)
         )
 
         # Apply linear models and plot results
-        df_zpve_lin = apply_lin_models(df_no_zpve, df_zpve, fit_data_dict, args.be_methods, mol, tuple(args.be_range))
+        df_zpve_lin = apply_lin_models(df_no_zpve, df_zpve, fit_data_dict, args.be_methods, args.basis, mol, tuple(args.be_range))
 
         # Delete structures that have imaginary frequencies
         df_zpve_lin.drop(imag_todelete, inplace=True)
