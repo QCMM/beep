@@ -6,6 +6,7 @@ from qcfractal.interface.collections.optimization_dataset import OptimizationDat
 from qcfractal.interface.client import FractalClient
 from beep.sampling import run_sampling
 from beep.errors import DatasetNotFound, LevelOfTheoryNotFound
+from beep.utils.logging_utils import *
 
 bcheck = "\u2714"
 mia0911 = "\6"
@@ -49,9 +50,9 @@ Welcome to the BEEP  Set-of-clusters Sampling Workflow
 ---------------------------------------------------------------------------------------
 
 
-"Somewhere, something incredible is waiting to be known"
-                  
-                                            ~ Carl Sagan
+"Adopt the pace of nature: her secret is patience." 
+
+                              – Ralph Waldo Emerson
 
 
 Seek Locate Map
@@ -363,23 +364,25 @@ def process_refinement(
 def main():
     # Call the arguments
     args = parse_arguments()
+    logger = setup_logging("beep_sampling", args.molecule)
 
     # Create a logger
-    logger = logging.getLogger("beep_sampling")
-    logger.setLevel(logging.INFO)
 
-    # File handler for logging to a file
-    log_file = (
-        "beep_sampling_" + args.molecule + "_" + args.surface_model_collection + ".log"
-    )
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(file_handler)
+    #logger = logging.getLogger("beep_sampling")
+    #logger.setLevel(logging.INFO)
 
-    # Console handler for logging to stdout
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(console_handler)
+    ## File handler for logging to a file
+    #log_file = (
+    #    "beep_sampling_" + args.molecule + "_" + args.surface_model_collection + ".log"
+    #)
+    #file_handler = logging.FileHandler(log_file)
+    #file_handler.setFormatter(logging.Formatter("%(message)s"))
+    #logger.addHandler(file_handler)
+
+    ## Console handler for logging to stdout
+    #console_handler = logging.StreamHandler()
+    #console_handler.setFormatter(logging.Formatter("%(message)s"))
+    #logger.addHandler(console_handler)
 
     logger.info(welcome_msg)
 
@@ -399,6 +402,7 @@ def main():
     opt_lot = method + "_" + basis
     ropt_lot = rmethod + "_" + rbasis
     args_dict = sampling_args(args)
+    args_dict['logger'] = logger
 
     try:
         if ("uks" or "uhf") in client.query_keywords()[qc_keyword-1].values.values() and program == "psi4":
