@@ -323,7 +323,8 @@ def main() -> None:
             hess_ids = compute_hessian(client, rdset_name, opt_lot, mult, args.hessian_tag, logger=logger, program=args.program)  # Pass logger
             all_hess_ids.extend(hess_ids)
         padded_log(logger, f"Checking for completion of ALL Hessian computations")
-        check_jobs_status(client, all_hess_ids, logger, wait_interval=600, print_job_ids = True)  # Pass logger
+        logger.info(f"The IDs for the Hessian computations are: {all_hess_ids}\n")
+        check_jobs_status(client, all_hess_ids, logger, wait_interval=3600) 
 
     logger.info("\nThank you for using the binding energy and hessian compute suite!")
 
