@@ -2,31 +2,33 @@
 
 # Function to display usage message
 show_usage() {
-    echo "Usage: bash sampling.sh"
+    echo "Usage: bash sampling_input.sh"
 }
 
 # Check if the "--help" flag is provided
 if [ "$1" == "--help" ]; then
     # Display help message and exit
-    python ../scripts/launch_sampling.py --help
+    python ../workflows/launch_sampling.py --help \
     exit 0
 fi
 
 # Python program invocation
-python ../scripts/launch_sampling.py \
-    --client_address 152.74.10.245:7777 \
+python ../workflows/launch_sampling.py \
+    --client_address localhost:7777 \
     --username '' \
     --password "" \
-    --molecule HF \
-    --surface-model-collection water_22 \
-    --small-molecule-collection small_molecules \
+    --molecule CH4 \
+    --surface-model-collection water_beep_1 \
+    --small-molecule-collection hydrocarbons_beep-1 \
     --sampling-shell 3.0 \
     --sampling-condition normal \
     --sampling-level-of-theory blyp-d3 def2-svp terachem\
-    --refinement-level-of-theory bhandhlyp def2-svp psi4\
+    --refinement-level-of-theory pbe0-d3bj def2-tzpv psi4\
+    --refinement-tag refinement \
     --rmsd-value 0.4 \
     --rmsd-symmetry \
     --store-initial-structures \
     --sampling-tag sampling \
-    --total-binding-sites 250 \
-    --keyword-id 1
+    --total-binding-sites 50 \
+    --keyword-id 1 
+
