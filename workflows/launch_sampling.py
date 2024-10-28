@@ -62,6 +62,7 @@ Seek Locate Map
 
             """
 
+
 def sampling_model_msg(
     surface_model: str, target_mol: str, method: str, basis: str, program: str
 ) -> str:
@@ -232,9 +233,9 @@ def sampling_args(args: argparse.Namespace) -> Dict[str, any]:
         "program": args.sampling_level_of_theory[2],
         "tag": args.sampling_tag,
         "kw_id": args.keyword_id,
-        #"opt_lot": args.sampling_level_of_theory[0]
-        #+ "_"
-        #+ args.sampling_level_of_theory[1],
+        # "opt_lot": args.sampling_level_of_theory[0]
+        # + "_"
+        # + args.sampling_level_of_theory[1],
         "rmsd_symm": args.rmsd_symmetry,
         "store_initial": args.store_initial_structures,
         "rmsd_val": args.rmsd_value,
@@ -300,15 +301,15 @@ def get_or_create_opt_collection(
     client: FractalClient, dset_name: str
 ) -> OptimizationDataset:
     """
-    Get or create an optimization dataset collection.
->>>>>>> c83f9f92b789c9a8ff37f1dd629119b6e00b8488
+        Get or create an optimization dataset collection.
+    >>>>>>> c83f9f92b789c9a8ff37f1dd629119b6e00b8488
 
-    Args:
-    - client: Fractal client instance to use.
-    - dset_name: Name of the OptimizationDataset.
+        Args:
+        - client: Fractal client instance to use.
+        - dset_name: Name of the OptimizationDataset.
 
-    Returns:
-    - An instance of the OptimizationDataset.
+        Returns:
+        - An instance of the OptimizationDataset.
     """
     try:
         ds_opt = client.get_collection("OptimizationDataset", dset_name)
@@ -386,7 +387,6 @@ def process_refinement(
     return None
 
 
-
 def main():
     # Call the arguments
     args = parse_arguments()
@@ -405,18 +405,20 @@ def main():
     # The name of the molecule to be sampled at level of theory opt_lot
     smol_name = args.molecule
     method, basis, program = args.sampling_level_of_theory
-    rmethod, rbasis, rprogram  = args.refinement_level_of_theory
+    rmethod, rbasis, rprogram = args.refinement_level_of_theory
 
     qc_keyword = args.keyword_id
     opt_lot = method + "_" + basis
     ropt_lot = rmethod + "_" + rbasis
     args_dict = sampling_args(args)
-    args_dict['logger'] = logger
+    args_dict["logger"] = logger
 
     try:
-        if ("uks" or "uhf") in client.query_keywords()[qc_keyword-1].values.values() and program == "psi4":
-            opt_lot = "U"+opt_lot
-            ropt_lot = "U"+ropt_lot
+        if ("uks" or "uhf") in client.query_keywords()[
+            qc_keyword - 1
+        ].values.values() and program == "psi4":
+            opt_lot = "U" + opt_lot
+            ropt_lot = "U" + ropt_lot
     except TypeError:
         pass
 
@@ -461,7 +463,9 @@ def main():
 
         ## logging info for sampling cluster
 
-        padded_log(logger, f"Processing cluster: {w}", padding_char=gear, total_length=80)
+        padded_log(
+            logger, f"Processing cluster: {w}", padding_char=gear, total_length=80
+        )
         logger.info(sampling_round_msg(smplg_opt_dset_name, ref_opt_dset_name))
 
         # Path for debugging
@@ -474,7 +478,17 @@ def main():
         run_sampling(**args_dict)
 
         # Do the geometry refinement optimizations
-        process_refinement(client, ropt_lot, rmethod, rbasis, rprogram, qc_keyword ,ds_ref, logger ,args.refinement_tag)
+        process_refinement(
+            client,
+            ropt_lot,
+            rmethod,
+            rbasis,
+            rprogram,
+            qc_keyword,
+            ds_ref,
+            logger,
+            args.refinement_tag,
+        )
 
         # Count number of structures for this model
         ds_ref = get_or_create_opt_collection(client, ref_opt_dset_name)
