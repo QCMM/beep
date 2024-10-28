@@ -86,20 +86,18 @@ The sampling level of theory is method: {method} basis: {basis} program: {progra
     """
 
 
-def sampling_round_msg(name_cluster: str, opt_smplg: str, opt_refine: str) -> str:
+def sampling_round_msg(opt_smplg: str, opt_refine: str) -> str:
     """
     Format a message for the processing of a cluster round.
 
     Args:
-    - name_cluster: Name of the cluster being processed.
     - opt_smplg: Name of the OptimizationDataset for sampling results.
     - opt_refine: Name of the OptimizationDataset for unique structures for refinement.
 
     Returns:
     - Formatted message string.
     """
-    return f"""##############################################################################
-Processing cluster: {name_cluster}
+    return f"""
 The OptimizationDataset for the sampling results: {opt_smplg}
 The OptimizationDataset for the unique structures for refinement: {opt_refine}
     """
@@ -324,24 +322,42 @@ def get_or_create_opt_collection(
 
 
 def process_refinement(
-    client: FractalClient, ropt_lot_name: str, rmethod: str, rbasis: str, program: str , qc_keyword: int,  ds_opt: OptimizationDataset, rtag = "refinement", 
+    client: FractalClient,
+    ropt_lot_name: str,
+    rmethod: str,
+    rbasis: str,
+    program: str,
+    qc_keyword: int,
+    ds_opt: OptimizationDataset,
+    logger: logging.Logger,
+    rtag: str = "refinement",
 ) -> None:
     """
-    Process the refinement optimization at a given level of theory.
+    Process and submit refinement optimizations at a specified level of theory.
+
+    This function sets up and submits refinement optimizations to a given `OptimizationDataset`
+    using specified method, basis, and program settings. The optimizations are configured with
+    geometric optimization specifications and quantum chemical parameters for energy gradient calculations.
 
     Args:
-    - client: Fractal client instance to use.
-    - refine_lot: A tuple containing the refinement level of theory as (method, basis, program).
-    - ds_opt: Optimizationdataset to contain the refinement optimizations.
-
-    Other considerations:
-    - Assumes all optimization entries in ds_opt are unique.
+        client (FractalClient): Instance of the Fractal client to connect to the server.
+        ropt_lot_name (str): Name of the refinement level of theory for this optimization.
+        rmethod (str): Quantum chemical method to use (e.g., "B3LYP").
+        rbasis (str): Basis set to apply in the refinement (e.g., "cc-pVDZ").
+        program (str): Program to run the quantum chemical calculations (e.g., "psi4").
+        qc_keyword (int): Keyword or ID for specifying quantum chemistry options.
+        ds_opt (OptimizationDataset): Dataset where refinement optimizations will be stored.
+        logger (logging.Logger): Logger instance to record process information.
+        rtag (str, optional): Tag for the refinement jobs; defaults to "refinement".
 
     Returns:
-    - None, no return value, this function is expected to execute a procedure that does not need a return.
+        None: This function performs an action but does not return a value.
+
+    Additional Notes:
+        - Assumes all optimization entries in `ds_opt` are unique.
+        - The logger provides a summary of the number of jobs submitted and details of the refinement settings.
+
     """
-    logger = logging.getLogger("beep_logger")
-    #method, basis, program = refine_lot
     spec = {
         "name": ropt_lot_name,
         "description": f"Geometric + {rmethod}/{rbasis}/{program}",
@@ -354,11 +370,21 @@ def process_refinement(
             "program": program,
         },
     }
+
     ds_opt.add_specification(**spec, overwrite=True)
     ds_opt.save()
     c = ds_opt.compute(ropt_lot_name, tag=rtag)
-    logger.info(f"Sending {c} refinement optimizations at {ropt_lot_name} level.")
+
+    # Informative logging statement
+    logger.info(
+        f"\nRefinement optimization initiated with specification '{ropt_lot_name}' \n"
+        f"using {rmethod}/{rbasis} in {program}. \n"
+        f"Description: {spec['description']}. \n"
+        f"Tag applied: '{rtag}'\n"
+        f"Number of optimizations submitted: {c}. {bcheck} \n"
+    )
     return None
+
 
 
 def main():
@@ -366,24 +392,7 @@ def main():
     args = parse_arguments()
     logger = setup_logging("beep_sampling", args.molecule)
 
-    # Create a logger
-
-    #logger = logging.getLogger("beep_sampling")
-    #logger.setLevel(logging.INFO)
-
-    ## File handler for logging to a file
-    #log_file = (
-    #    "beep_sampling_" + args.molecule + "_" + args.surface_model_collection + ".log"
-    #)
-    #file_handler = logging.FileHandler(log_file)
-    #file_handler.setFormatter(logging.Formatter("%(message)s"))
-    #logger.addHandler(file_handler)
-
-    ## Console handler for logging to stdout
-    #console_handler = logging.StreamHandler()
-    #console_handler.setFormatter(logging.Formatter("%(message)s"))
-    #logger.addHandler(console_handler)
-
+    # Create the logger
     logger.info(welcome_msg)
 
     client = ptl.FractalClient(
@@ -451,7 +460,9 @@ def main():
         args_dict["refinement_opt_dset"] = ds_ref
 
         ## logging info for sampling cluster
-        logger.info(sampling_round_msg(w, smplg_opt_dset_name, ref_opt_dset_name))
+
+        padded_log(logger, f"Processing cluster: {w}", padding_char=gear, total_length=80)
+        logger.info(sampling_round_msg(smplg_opt_dset_name, ref_opt_dset_name))
 
         # Path for debugging
         debug_path = Path("./site_finder/" + str(smol_name) + "_w/" + w)
@@ -463,12 +474,11 @@ def main():
         run_sampling(**args_dict)
 
         # Do the geometry refinement optimizations
-        process_refinement(client, ropt_lot, rmethod, rbasis, rprogram, qc_keyword ,ds_ref ,args.refinement_tag)
+        process_refinement(client, ropt_lot, rmethod, rbasis, rprogram, qc_keyword ,ds_ref, logger ,args.refinement_tag)
 
         # Count number of structures for this model
         ds_ref = get_or_create_opt_collection(client, ref_opt_dset_name)
         count += len(ds_ref.data.records)
-
         logger.info(
             f"\nFinished sampling of cluster {w} number of binding sites: {len(ds_ref.data.records)}"
         )

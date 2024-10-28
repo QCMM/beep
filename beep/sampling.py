@@ -110,10 +110,10 @@ def check_for_completion(
 
 
 def wait_for_completion(
-    client: FractalClient, pid_list: List[str], FREQUENCY: int
+    client: FractalClient, pid_list: List[str], FREQUENCY: int, logger: logging.Logger,
 ) -> None:
     jobs_complete = False
-    logger = logging.getLogger("beep_sampling")
+    logger.info("Checking for job completion....")
     while not jobs_complete:
         jobs_complete, counts = check_for_completion(client, pid_list, FREQUENCY)
         status_str = " ".join([f"{s}: {count}, " for s, count in counts.items()])
@@ -203,7 +203,7 @@ def filter_binding_sites(
             )
             if (rmsd_val < cut_off_val) or (rmsd_val_mirror < cut_off_val):
                 min_rmsd = min(rmsd_val, rmsd_val_mirror)
-                logger.info(f"Duplicate found: {mol_list1[i][1]} vs {mol_list1[j][1]}, RMSD: {min_rmsd}")
+                logger.info(f"Duplicate found: {mol_list1[i][0]} vs {mol_list1[j][0]}, RMSD: {min_rmsd}")
                 to_remove_tmp.add(mol_list1[j][0])  # Store identifiers for uniqueness
 
     # Creating unique_tmp list by excluding duplicates found in to_remove_tmp
@@ -331,7 +331,7 @@ def run_sampling(
             logger.debug(f"Procedure IDs of the optimization are: {pid_list}")
 
         # Wait for old jobs to finish
-        wait_for_completion(client, pid_list, FREQUENCY)
+        wait_for_completion(client, pid_list, FREQUENCY, logger)
 
         # If there are no new entries to be generated continue
         if not shell_new_entries:
@@ -382,7 +382,7 @@ def run_sampling(
         )
 
         # Checks if no more jobs are running
-        wait_for_completion(client, pid_list, FREQUENCY)
+        wait_for_completion(client, pid_list, FREQUENCY, logger)
 
         # Gets the optimized molecules for the completed jobs
         opt_molecules_new = get_opt_molecules(
@@ -421,7 +421,7 @@ def run_sampling(
         binding_site_num += new_mols
 
         logger.info(
-            f"A total of {new_mols} unique binding sites were found after filtering for shell {shell} Angstrom. Adding this new binding sites to {refinement_opt_dset.name} for refined optimization."
+            f"A total of {new_mols} unique binding sites were found after filtering for shell {shell} Angstrom. \nAdding this new binding sites to {refinement_opt_dset.name} for refined optimization."
         )
 
     total_bind_sites = len(refinement_opt_dset.data.records)
