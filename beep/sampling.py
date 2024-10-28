@@ -110,10 +110,10 @@ def check_for_completion(
 
 
 def wait_for_completion(
-    client: FractalClient, pid_list: List[str], FREQUENCY: int
+    client: FractalClient, pid_list: List[str], FREQUENCY: int, logger: logging.Logger,
 ) -> None:
     jobs_complete = False
-    logger = logging.getLogger("beep_sampling")
+    logger.info("Checking for job completion....")
     while not jobs_complete:
         jobs_complete, counts = check_for_completion(client, pid_list, FREQUENCY)
         status_str = " ".join([f"{s}: {count}, " for s, count in counts.items()])
@@ -165,31 +165,67 @@ def filter_binding_sites(
     mol_list2: List[Tuple[str, Molecule]],
     cut_off_val: float,
     rmsd_symm: bool,
+    logger: logging.Logger,
 ) -> List[Molecule]:
-    logger = logging.getLogger("beep_sampling")
-    logger.info("\nStarting filtering procedure!!!!!")
-    to_remove_tmp = []
+    """
+    Filters out duplicate binding sites based on RMSD (Root Mean Square Deviation) values between molecules.
+
+    This function compares molecules in `mol_list1` and `mol_list2` to identify and remove duplicates based on
+    a specified RMSD cutoff value. It performs an initial filtering within `mol_list1`, removing molecules
+    with RMSD values below `cut_off_val` between them. Then, it checks the remaining unique molecules in
+    `mol_list1` against `mol_list2` to ensure no duplicates are present between the two lists.
+
+    Parameters:
+        mol_list1 (List[Tuple[str, Molecule]]): A list of tuples, where each tuple contains an identifier
+            (str) and a Molecule object to be filtered based on binding site uniqueness.
+        mol_list2 (List[Tuple[str, Molecule]]): A secondary list of tuples, where each tuple contains an
+            identifier (str) and a Molecule object used to verify binding site uniqueness with `mol_list1`.
+        cut_off_val (float): The RMSD threshold value; molecules with RMSD less than this value are considered duplicates.
+        rmsd_symm (bool): If True, considers molecular symmetry when computing RMSD, comparing both regular
+            and mirror-image RMSD values.
+
+    Returns:
+        List[Molecule]: A list of unique Molecule objects from `mol_list1`, with duplicates filtered out based on RMSD.
+
+    Logs:
+        Logs the total number of duplicate binding sites removed.
+
+    """
+    logger.info("\nStarting filtering procedure:")
+
+    logger.info("Comparing within structures found in this round:")
+    # Initial filtering within mol_list1
+    to_remove_tmp = set()  
     for i in range(len(mol_list1)):
         for j in range(i + 1, len(mol_list1)):
             rmsd_val, rmsd_val_mirror = compute_rmsd(
                 mol_list1[i][1], mol_list1[j][1], rmsd_symm
             )
             if (rmsd_val < cut_off_val) or (rmsd_val_mirror < cut_off_val):
-                to_remove_tmp.append(mol_list1[j])
-    unique_tmp = [mol for mol in mol_list1 if mol not in to_remove_tmp]
+                min_rmsd = min(rmsd_val, rmsd_val_mirror)
+                logger.info(f"Duplicate found: {mol_list1[i][0]} vs {mol_list1[j][0]}, RMSD: {min_rmsd}")
+                to_remove_tmp.add(mol_list1[j][0])  # Store identifiers for uniqueness
 
-    to_remove_final = []
-    for i in range(len(unique_tmp)):
-        for j in range(len(mol_list2)):
+    # Creating unique_tmp list by excluding duplicates found in to_remove_tmp
+    unique_tmp = [mol for mol in mol_list1 if mol[0] not in to_remove_tmp]
+
+    logger.info("Comparing with strucutres already present in the Optimization Dataset")
+    # Further filtering against mol_list2
+    to_remove_final = set()  
+    for unique_mol in unique_tmp:
+        for mol in mol_list2:
             rmsd_val, rmsd_val_mirror = compute_rmsd(
-                unique_tmp[i][1], mol_list2[j][1], rmsd_symm
+                unique_mol[1], mol[1], rmsd_symm
             )
             if (rmsd_val < cut_off_val) or (rmsd_val_mirror < cut_off_val):
-                print(unique_tmp[i][0], mol_list2[j][0], rmsd_val)
-                to_remove_final.append(unique_tmp[i])
+                min_rmsd = min(rmsd_val, rmsd_val_mirror)
+                logger.info(f"Duplicate found: {unique_mol[0]} vs. {mol[0]}, RMSD: {min_rmsd}")
+                to_remove_final.add(unique_mol[0])
+
+    # Calculate final unique molecules, excluding those in to_remove_final
     total_removed = len(to_remove_tmp) + len(to_remove_final)
-    logger.info(f"{total_removed} are duplicate binding sites\n")
-    unique_final = [mol for mol in unique_tmp if mol not in to_remove_final]
+    unique_final = [mol for mol in unique_tmp if mol[0] not in to_remove_final]
+    logger.info(f"{total_removed} duplicate  and {len(unique_final)} unique binding sites.")
     return unique_final
 
 
@@ -211,8 +247,8 @@ def run_sampling(
     client: FractalClient,
     sampling_shell: float,
     sampling_condition: str,
+    logger: logging.Logger,
 ):
-    logger = logging.getLogger("beep_sampling")
 
     # Defining initial variables
     FREQUENCY = 600
@@ -295,7 +331,7 @@ def run_sampling(
             logger.debug(f"Procedure IDs of the optimization are: {pid_list}")
 
         # Wait for old jobs to finish
-        wait_for_completion(client, pid_list, FREQUENCY)
+        wait_for_completion(client, pid_list, FREQUENCY, logger)
 
         # If there are no new entries to be generated continue
         if not shell_new_entries:
@@ -332,7 +368,7 @@ def run_sampling(
             logger.info(
                 f"Initial structure set for visualization will be saved in {str(debug_path)}"
             )
-            filename = f"{debug_path}_{round(shell, 2):.2f}.molden".replace(".", "")
+            filename = f"{debug_path}_{round(shell, 2):.2f}".replace(".", "")+'.mol'
             debug_mol.to_file(filename, "xyz")
 
         # Send sampling computation
@@ -346,7 +382,7 @@ def run_sampling(
         )
 
         # Checks if no more jobs are running
-        wait_for_completion(client, pid_list, FREQUENCY)
+        wait_for_completion(client, pid_list, FREQUENCY, logger)
 
         # Gets the optimized molecules for the completed jobs
         opt_molecules_new = get_opt_molecules(
@@ -367,10 +403,10 @@ def run_sampling(
 
         # Filter the molecules by RMSD
         logger.info(
-            "Filtering {opt_mol_num} new molecules against existing {len(opt_molecules)} molecules  using an RMSD criteria of {rmsd_val}"
+            f"Filtering {opt_mol_num} new molecules against existing {len(opt_molecules)} molecules  using an RMSD criteria of {rmsd_val}"
         )
         unique_mols = filter_binding_sites(
-            opt_molecules_new, opt_molecules, cut_off_val=rmsd_val, rmsd_symm=rmsd_symm
+            opt_molecules_new, opt_molecules, cut_off_val=rmsd_val, rmsd_symm=rmsd_symm, logger=logger
         )
 
         # Add the molecules to the refinement OptimizationDataset
@@ -385,7 +421,7 @@ def run_sampling(
         binding_site_num += new_mols
 
         logger.info(
-            f"A total of {new_mols} unique binding sites were found after filtering for shell {shell} Angstrom. Adding this new binding sites to {refinement_opt_dset.name} for refined optimization."
+            f"A total of {new_mols} unique binding sites were found after filtering for shell {shell} Angstrom. \nAdding this new binding sites to {refinement_opt_dset.name} for refined optimization."
         )
 
     total_bind_sites = len(refinement_opt_dset.data.records)
