@@ -16,7 +16,11 @@ import qcelemental as qcel
 from collections import Counter
 from pathlib import Path
 from qcfractal.interface.client import FractalClient
-from qcfractal.interface.collections import Dataset, OptimizationDataset, ReactionDataset
+from qcfractal.interface.collections import (
+    Dataset,
+    OptimizationDataset,
+    ReactionDataset,
+)
 from qcelemental.models.molecule import Molecule
 from typing import Any, Dict, List, Tuple, Union, NoReturn
 
@@ -148,12 +152,12 @@ of the Binding Energy Evaluation Platform (BEEP).
         nargs="+",
         help="The optimiziation levels of theory for which the DFT energies should be computed in the format method_basis (e.g. M05_def2-svp)",
     )
-    #parser.add_argument(
+    # parser.add_argument(
     #    "--reference-energy-level-of-theory",
     #    nargs=3,
     #    default=["ccsd(t)", "cbs", "psi4"],
     #    help="The level of theory and program for the geometry refinement in the format: method_basis (default: df-ccsd(t) cc-pvdz molpro)",
-    #)
+    # )
     return parser.parse_args()
 
 
@@ -173,7 +177,9 @@ def get_or_create_collection(
     logger = logging.getLogger("beep")
     try:
         ds = client.get_collection(collection_type.__name__, dset_name)
-        logger.info(f"Collection of type {collection_type.__name__} with name {dset_name} already exists. {bcheck}\n")
+        logger.info(
+            f"Collection of type {collection_type.__name__} with name {dset_name} already exists. {bcheck}\n"
+        )
     except KeyError:
         ds = collection_type(dset_name, client=client)
         ds.save()
@@ -208,14 +214,15 @@ def check_collection_existence(
             )
         logger.info(f"The {collection_type} named {collection} exsits {bcheck}\n")
 
+
 def create_benchmark_dataset_dict(benchmark_structs: list[str]) -> dict[str, str]:
     """
     Creates a dictionary of simplified dataset names from a list of benchmark structure names.
 
-    This function processes each benchmark structure name in the provided list. It splits each name 
-    into its constituent parts, assuming a structure of 'molecule_surface_other'. 
-    It then creates a simplified name consisting of only the 'molecule' and 'surface' parts. 
-    These simplified names are stored in a dictionary, with the original benchmark structure 
+    This function processes each benchmark structure name in the provided list. It splits each name
+    into its constituent parts, assuming a structure of 'molecule_surface_other'.
+    It then creates a simplified name consisting of only the 'molecule' and 'surface' parts.
+    These simplified names are stored in a dictionary, with the original benchmark structure
     names as keys.
 
     Parameters:
@@ -229,6 +236,7 @@ def create_benchmark_dataset_dict(benchmark_structs: list[str]) -> dict[str, str
         mol, surf, _ = bchmk_struc_name.split("_")
         dataset_dict[bchmk_struc_name] = f"{mol}_{surf}"
     return dataset_dict
+
 
 def get_molecular_multiplicity(
     client: FractalClient, dataset: OptimizationDataset, molecule_name: str
@@ -250,11 +258,11 @@ def get_molecular_multiplicity(
 
 
 def populate_dataset_with_structures(
-    cbs_col: Dataset, 
-    ref_geom_fmols: Dict[str, Molecule],  
+    cbs_col: Dataset,
+    ref_geom_fmols: Dict[str, Molecule],
     bchmk_structs: List[str],
-    odset_dict: Dict[str, OptimizationDataset],  
-    geom_ref_opt_lot: str
+    odset_dict: Dict[str, OptimizationDataset],
+    geom_ref_opt_lot: str,
 ) -> None:
     """
     Populates a dataset with molecular structures, including fragments if applicable.
@@ -290,7 +298,7 @@ def populate_dataset_with_structures(
         else:
             cbs_col.add_entry(name, fmol)
             logger.info(f"Adding molecule {name} to {cbs_col.name}")
-            
+
             cbs_col.save()
 
 
@@ -307,19 +315,17 @@ def add_cc_keywords(cbs_col: Dataset, mol_mult: int) -> None:
     """
     logger = logging.getLogger("beep")
     if mol_mult == 1:
-        logger.info(f"\n\nCreating keywords for closed shell coupled cluster computation")
+        logger.info(
+            f"\n\nCreating keywords for closed shell coupled cluster computation"
+        )
         kw_dict = {"scf_type": "df", "cc_type": "df", "freeze_core": "true"}
         logger.info(f"Keywords dictionary: {kw_dict}")
-        kw_dfit = ptl.models.KeywordSet(
-            values = kw_dict
-        )
+        kw_dfit = ptl.models.KeywordSet(values=kw_dict)
     elif mol_mult == 2:
         logger.info(f"\n\nCreating keywords for open shell coupled cluster computation")
         kw_dict = {"reference": "uhf", "freeze_core": "true"}
         logger.info(f"Keywords dictionary: {kw_dict}")
-        kw_dfit = ptl.models.KeywordSet(
-            values=kw_dict
-        )
+        kw_dfit = ptl.models.KeywordSet(values=kw_dict)
 
     try:
         cbs_col.add_keywords("df", "psi4", kw_dfit)
@@ -327,7 +333,6 @@ def add_cc_keywords(cbs_col: Dataset, mol_mult: int) -> None:
         logger.info("Added keywords to Dataset\n")
     except KeyError:
         logger.info("Keyword already set in Dataset, nothing to add\n")
-
 
 
 def compute_all_cbs(cbs_col: Dataset, cbs_list: List[str], mol_mult: int) -> List[str]:
@@ -348,13 +353,13 @@ def compute_all_cbs(cbs_col: Dataset, cbs_list: List[str], mol_mult: int) -> Lis
 
     all_cbs_ids = []
     logger = logging.getLogger("beep")
-    id_str = ''
-    dir_path = Path('cbs_ids')
+    id_str = ""
+    dir_path = Path("cbs_ids")
 
     # Check if the directory exists, if not create it
     if not dir_path.exists():
         dir_path.mkdir()
-    file_path = dir_path / 'cbs_ids.dat'
+    file_path = dir_path / "cbs_ids.dat"
 
     for lot in cbs_list:
         # Splitting the level of theory into method and basis
@@ -366,27 +371,21 @@ def compute_all_cbs(cbs_col: Dataset, cbs_list: List[str], mol_mult: int) -> Lis
 
         # Check if "scf" is not in the level of theory
         if "scf" not in lot:
-            c = cbs_col.compute(
-                method, basis, tag=tag, keywords="df", program="psi4"
-            )
+            c = cbs_col.compute(method, basis, tag=tag, keywords="df", program="psi4")
         else:
-            c = cbs_col.compute(
-                method, basis, tag=tag, program="psi4"
-            )
+            c = cbs_col.compute(method, basis, tag=tag, program="psi4")
 
-        id_li = c.submitted +  c.existing
-        id_str += f'{method}_{basis}: {id_li}\n'
+        id_li = c.submitted + c.existing
+        id_str += f"{method}_{basis}: {id_li}\n"
         logger.info(f"Submited {len(c.submitted)} Computation to tag {tag}.")
         if len(c.existing) > 0:
             logger.info(f"{len(c.existing)} have already been computed {bcheck}")
 
     # Writing IDs to file for restart
-    with file_path.open(mode='w') as file:
+    with file_path.open(mode="w") as file:
         file.write(id_str)
 
-
     return all_cbs_ids
-
 
 
 def check_dataset_status(
@@ -397,10 +396,10 @@ def check_dataset_status(
     """
     Continuously monitors and reports the status of computations in a dataset.
 
-    This function checks the status of computational records in the given ReactionDataset 
-    for various methods and bases specified in `cbs_list`. It categorizes the status of each 
-    record as COMPLETE, INCOMPLETE, or ERROR. The function keeps running until all records are 
-    complete or if there's an error in any record, and it prints the status summary for each 
+    This function checks the status of computational records in the given ReactionDataset
+    for various methods and bases specified in `cbs_list`. It categorizes the status of each
+    record as COMPLETE, INCOMPLETE, or ERROR. The function keeps running until all records are
+    complete or if there's an error in any record, and it prints the status summary for each
     method every 600 seconds.
 
     Parameters:
@@ -425,11 +424,13 @@ def check_dataset_status(
                     method=method, basis=basis, program="psi4", keywords="df"
                 )
             else:
-                df = dataset.get_records(method=method, basis=basis, program="psi4", keywords=None)
+                df = dataset.get_records(
+                    method=method, basis=basis, program="psi4", keywords=None
+                )
 
             # Count the statuses for the current method
             for index, row in df.iterrows():
-                #print(index, row["record"])
+                # print(index, row["record"])
                 status = row["record"].status.upper()
                 if status not in status_counts[method]:
                     continue  # If status is not one of the expected statuses, skip it
@@ -498,17 +499,17 @@ def get_energy_record(ds: Dataset, struct: str, method: str, basis: str) -> Any:
     - If the method is not 'scf', a 'df' keyword is added to the retrieval arguments.
     - The function assumes that 'ds.get_records' can handle the provided arguments and return the desired record.
     """
-    kwargs = {"method": method, "basis": basis, "program": "Psi4", "keywords":None}
+    kwargs = {"method": method, "basis": basis, "program": "Psi4", "keywords": None}
     if not "scf" in method:
         kwargs["keywords"] = "df"
 
-    #ds.get_records(**kwargs).index = ds.get_records(**kwargs).index.str.upper()
+    # ds.get_records(**kwargs).index = ds.get_records(**kwargs).index.str.upper()
     df_records = ds.get_records(**kwargs)
     df_records.index = df_records.index.str.upper()
     records = df_records.loc[struct.upper()]
 
-    #print(ds.get_records(**kwargs).index )
-    #records = ds.get_records(**kwargs).loc[struct.upper()]
+    # print(ds.get_records(**kwargs).index )
+    # records = ds.get_records(**kwargs).loc[struct.upper()]
 
     # Check if the result is a DataFrame (multiple records) or not (single record) and retrive the first record
     if isinstance(records, pd.DataFrame):
@@ -518,8 +519,8 @@ def get_energy_record(ds: Dataset, struct: str, method: str, basis: str) -> Any:
     return rec
 
 
-def get_cbs_energy(ds: Dataset, struct: str, cbs_lot_list: List[str]) -> pd.DataFrame :
-    '''Calculates the CBS (Complete Basis Set) energy for a given structure based on
+def get_cbs_energy(ds: Dataset, struct: str, cbs_lot_list: List[str]) -> pd.DataFrame:
+    """Calculates the CBS (Complete Basis Set) energy for a given structure based on
     a list of computational levels of theory.
 
     Parameters:
@@ -535,67 +536,83 @@ def get_cbs_energy(ds: Dataset, struct: str, cbs_lot_list: List[str]) -> pd.Data
       for extrapolation calculations. These functions should be defined and accessible in the current scope.
     - The energy calculations are based on extrapolation methods and might include multiple steps of calculation.
     - The function assumes 'ccsd' in the method requires special handling.
-    '''
+    """
     cbs_lot_en = {}
     # Initialize an empty DataFrame
     columns = ["SCF", "MP2", "CCSD", "CCSD(T)"]
     index = ["aug-cc-pVDZ", "aug-cc-pVTZ", "aug-cc-pVQZ", "CBS"]
     cbs_lot_df = pd.DataFrame(index=index, columns=columns)
-    
+
     # Data extraction and computation
     for lot in cbs_lot_list:
         method, basis = lot.split("_")
         rec = get_energy_record(ds, struct, method, basis)
-        
-        if 'mp2' in method:
-            cbs_lot_df.at[basis, "MP2"] = rec.dict()["extras"]["qcvars"]["MP2 CORRELATION ENERGY"]
-        elif 'ccsd(t)' in method:
-            cbs_lot_df.at[basis, "MP2"] = rec.dict()["extras"]["qcvars"]["MP2 CORRELATION ENERGY"] 
-            cbs_lot_df.at[basis, "CCSD"] = rec.dict()["extras"]["qcvars"]["CCSD CORRELATION ENERGY"]
-            cbs_lot_df.at[basis, "CCSD(T)"] = rec.dict()["extras"]["qcvars"]["CCSD(T) CORRELATION ENERGY"]
+
+        if "mp2" in method:
+            cbs_lot_df.at[basis, "MP2"] = rec.dict()["extras"]["qcvars"][
+                "MP2 CORRELATION ENERGY"
+            ]
+        elif "ccsd(t)" in method:
+            cbs_lot_df.at[basis, "MP2"] = rec.dict()["extras"]["qcvars"][
+                "MP2 CORRELATION ENERGY"
+            ]
+            cbs_lot_df.at[basis, "CCSD"] = rec.dict()["extras"]["qcvars"][
+                "CCSD CORRELATION ENERGY"
+            ]
+            cbs_lot_df.at[basis, "CCSD(T)"] = rec.dict()["extras"]["qcvars"][
+                "CCSD(T) CORRELATION ENERGY"
+            ]
         else:
             cbs_lot_df.at[basis, method.upper()] = rec.return_result
-    
+
     # Update CCSD and CCSD(T) to get the delta correlation
     cbs_lot_df["CCSD(T)"] -= cbs_lot_df["CCSD"]
     cbs_lot_df["CCSD"] -= cbs_lot_df["MP2"]
 
-
-    #Do CBS Extrapolations and contributions calculation
+    # Do CBS Extrapolations and contributions calculation
     cbs_lot_df.at["CBS", "SCF"] = scf_xtpl_helgaker_3(
-        "scf_dtq_xtpl", 
-        2, cbs_lot_df.at["aug-cc-pVDZ", "SCF"], 
-        3, cbs_lot_df.at["aug-cc-pVTZ", "SCF"], 
-        4, cbs_lot_df.at["aug-cc-pVQZ", "SCF"]
-    )
-    
-    cbs_lot_df.at["CBS", "MP2"] = corl_xtpl_helgaker_2(
-        "mp2_tq", 
-        3, cbs_lot_df.at["aug-cc-pVTZ", "MP2"], 
-        4, cbs_lot_df.at["aug-cc-pVQZ", "MP2"]
-    )
-    
-    cbs_lot_df.at["CBS", "CCSD"] = corl_xtpl_helgaker_2(
-        "ccsd_dt", 
-        2, cbs_lot_df.at["aug-cc-pVDZ", "CCSD"], 
-        3, cbs_lot_df.at["aug-cc-pVTZ", "CCSD"]
-    )
-    
-    cbs_lot_df.at["CBS", "CCSD(T)"] = corl_xtpl_helgaker_2(
-        "ccsd(t)_dt", 
-        2, cbs_lot_df.at["aug-cc-pVDZ", "CCSD(T)"], 
-        3, cbs_lot_df.at["aug-cc-pVTZ", "CCSD(T)"]
+        "scf_dtq_xtpl",
+        2,
+        cbs_lot_df.at["aug-cc-pVDZ", "SCF"],
+        3,
+        cbs_lot_df.at["aug-cc-pVTZ", "SCF"],
+        4,
+        cbs_lot_df.at["aug-cc-pVQZ", "SCF"],
     )
 
+    cbs_lot_df.at["CBS", "MP2"] = corl_xtpl_helgaker_2(
+        "mp2_tq",
+        3,
+        cbs_lot_df.at["aug-cc-pVTZ", "MP2"],
+        4,
+        cbs_lot_df.at["aug-cc-pVQZ", "MP2"],
+    )
+
+    cbs_lot_df.at["CBS", "CCSD"] = corl_xtpl_helgaker_2(
+        "ccsd_dt",
+        2,
+        cbs_lot_df.at["aug-cc-pVDZ", "CCSD"],
+        3,
+        cbs_lot_df.at["aug-cc-pVTZ", "CCSD"],
+    )
+
+    cbs_lot_df.at["CBS", "CCSD(T)"] = corl_xtpl_helgaker_2(
+        "ccsd(t)_dt",
+        2,
+        cbs_lot_df.at["aug-cc-pVDZ", "CCSD(T)"],
+        3,
+        cbs_lot_df.at["aug-cc-pVTZ", "CCSD(T)"],
+    )
 
     # Sum up all energies to get NET CBS energy
-    cbs_lot_df['NET'] = cbs_lot_df.sum(axis=1)
+    cbs_lot_df["NET"] = cbs_lot_df.sum(axis=1)
 
     return cbs_lot_df
 
 
-
-def get_reference_be_result(bchmk_structs: dict[str, str], cbs_col: Dataset, cbs_list: List[str]) -> pd.DataFrame:
+def get_reference_be_result(
+    bchmk_structs: dict[str, str], cbs_col: Dataset, cbs_list: List[str]
+) -> pd.DataFrame:
     """
     Calculate reference energies for binding energy (be), interaction energy (ie),
     and deformation energy (de) for a set of benchmark structures.
@@ -610,15 +627,17 @@ def get_reference_be_result(bchmk_structs: dict[str, str], cbs_col: Dataset, cbs
     """
     logger = logging.getLogger("beep")
     df_dict = {
-        'IE': None,
-        'DE': None,
-        'BE': None,
+        "IE": None,
+        "DE": None,
+        "BE": None,
     }
     result_df = pd.DataFrame(columns=list(df_dict.keys()))
 
     for bench_struct in bchmk_structs:
         padded_log(logger, f"Calculating CBS extrapolations for {bench_struct}")
-        logger.info("\nInteraction Energy : IE\nDeformation Energy : DE\nBinding Energy : BE\n")
+        logger.info(
+            "\nInteraction Energy : IE\nDeformation Energy : DE\nBinding Energy : BE\n"
+        )
         mol_name, surf_name, _ = bench_struct.split("_")
         struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list)
         mol_cbs_en = get_cbs_energy(cbs_col, mol_name.upper(), cbs_list)
@@ -626,35 +645,50 @@ def get_reference_be_result(bchmk_structs: dict[str, str], cbs_col: Dataset, cbs
         struct_cbs_en_f1 = get_cbs_energy(cbs_col, bench_struct + "_f1", cbs_list)
         struct_cbs_en_f2 = get_cbs_energy(cbs_col, bench_struct + "_f2", cbs_list)
 
-        ie = (struct_cbs_en - (struct_cbs_en_f1 + struct_cbs_en_f2)) * qcel.constants.hartree2kcalmol
-        be = (struct_cbs_en - (mol_cbs_en + surf_cbs_en)) * qcel.constants.hartree2kcalmol
-        de = (((struct_cbs_en_f1 + struct_cbs_en_f2) - (mol_cbs_en + surf_cbs_en)) * qcel.constants.hartree2kcalmol)
+        ie = (
+            struct_cbs_en - (struct_cbs_en_f1 + struct_cbs_en_f2)
+        ) * qcel.constants.hartree2kcalmol
+        be = (
+            struct_cbs_en - (mol_cbs_en + surf_cbs_en)
+        ) * qcel.constants.hartree2kcalmol
+        de = (
+            (struct_cbs_en_f1 + struct_cbs_en_f2) - (mol_cbs_en + surf_cbs_en)
+        ) * qcel.constants.hartree2kcalmol
 
-        logger.info(f'\nCCSD(T)/CBS result for structure: {bench_struct}')
-        df_dict.update({
-            'IE': ie,
-            'DE': de,
-            'BE': be,
-        })
+        logger.info(f"\nCCSD(T)/CBS result for structure: {bench_struct}")
+        df_dict.update(
+            {
+                "IE": ie,
+                "DE": de,
+                "BE": be,
+            }
+        )
         for key, df in df_dict.items():
-            logger.info(f"\nThe CCSD(T)/CBS incremental table for the {wstar} {key}{wstar} :")
+            logger.info(
+                f"\nThe CCSD(T)/CBS incremental table for the {wstar} {key}{wstar} :"
+            )
             # Replace NaN values with a dash
-            df_formatted = df.fillna('-')
+            df_formatted = df.fillna("-")
             logger.info(f"\n{df_formatted.to_string()}\n")
 
         # Extract the 'NET CBS' values and store them in a temporary dictionary
-        temp_row = {key: df.loc['CBS', 'NET'] for key, df in df_dict.items()}
+        temp_row = {key: df.loc["CBS", "NET"] for key, df in df_dict.items()}
 
         # Append the new row to the DataFrame with the identifier as the index
-        result_df = pd.concat([result_df, pd.DataFrame(temp_row, index=[bench_struct])], axis=0, join='outer')
+        result_df = pd.concat(
+            [result_df, pd.DataFrame(temp_row, index=[bench_struct])],
+            axis=0,
+            join="outer",
+        )
     padded_log(logger, "\n FINAL CCSD(T)/CBS RESULTS\n")
     logger.info(result_df)
-
 
     return result_df
 
 
-def create_or_load_reaction_dataset(client, smol_name, surf_dset_name, bchmk_structs, dft_opt_lot, odset_dict):
+def create_or_load_reaction_dataset(
+    client, smol_name, surf_dset_name, bchmk_structs, dft_opt_lot, odset_dict
+):
     """
     Create or update a ReactionDataset with benchmark structures and levels of theory.
 
@@ -665,7 +699,7 @@ def create_or_load_reaction_dataset(client, smol_name, surf_dset_name, bchmk_str
     - bchmk_structs (list): A list of benchmark structures.
     - final_opt_lot (list): A list of levels of theory.
     - odset_dict (dict): A dictionary containing dataset information.
-    
+
     Returns:
     - ds_be (ReactionDataset): The created or updated ReactionDataset object.
     """
@@ -673,19 +707,21 @@ def create_or_load_reaction_dataset(client, smol_name, surf_dset_name, bchmk_str
     # Create or get benchmark binding energy dataset
     rdset_name = f"bchmk_be_{smol_name}_{surf_dset_name}"
     logger.info(f"Creating a loading ReactionDataset: {rdset_name}\n")
-    try: 
+    try:
         ds_be = client.delete_collection("ReactionDataset", rdset_name)
     except KeyError:
         pass
-    #try:
+    # try:
     #    ds_be = ReactionDataset(rdset_name, ds_type="rxn", client=client, default_program="psi4")
     #    ds_be.save()
-    #except KeyError:
+    # except KeyError:
     #    ds_be = client.get_collection("ReactionDataset", rdset_name)
 
-    #ds_be = client.get_collection("ReactionDataset", rdset_name)
+    # ds_be = client.get_collection("ReactionDataset", rdset_name)
     # Add reactions to the dataset
-    ds_be = ReactionDataset(rdset_name, ds_type="rxn", client=client, default_program="psi4")
+    ds_be = ReactionDataset(
+        rdset_name, ds_type="rxn", client=client, default_program="psi4"
+    )
     ds_be.save()
     n_entries = 0
     for bench_struct in bchmk_structs:
@@ -703,11 +739,13 @@ def create_or_load_reaction_dataset(client, smol_name, surf_dset_name, bchmk_str
     # Save changes to the dataset
     ds_be.save()
     logger.info(f"Created a total of {n_entries} in {rdset_name} {bcheck}")
-    
+
     return ds_be
 
 
-def create_be_stoichiometry(odset: OptimizationDataset, bench_struct: str, lot_geom: str) -> dict:
+def create_be_stoichiometry(
+    odset: OptimizationDataset, bench_struct: str, lot_geom: str
+) -> dict:
     """
     Generates the Binding Energy (BE) stoichiometry for a given molecular system.
 
@@ -734,8 +772,8 @@ def create_be_stoichiometry(odset: OptimizationDataset, bench_struct: str, lot_g
     """
     mol_name, surf_name, _ = bench_struct.split("_")
     bench_mol = (
-        #odset[mol_name]
-        #.get_record(name=mol_name, specification=lot_geom)
+        # odset[mol_name]
+        # .get_record(name=mol_name, specification=lot_geom)
         odset[mol_name.upper()]
         .get_record(name=mol_name.upper(), specification=lot_geom)
         .get_final_molecule()
@@ -790,7 +828,10 @@ def create_be_stoichiometry(odset: OptimizationDataset, bench_struct: str, lot_g
     }
     return be_stoic
 
-def compute_be_dft_energies(ds_be, all_dft, basis="def2-tzvp", program="psi4", tag="bench_dft"):
+
+def compute_be_dft_energies(
+    ds_be, all_dft, basis="def2-tzvp", program="psi4", tag="bench_dft"
+):
     """
     Submits DFT computation jobs for Binding Energy (BE) calculations for various stoichiometries and functionals.
 
@@ -808,10 +849,15 @@ def compute_be_dft_energies(ds_be, all_dft, basis="def2-tzvp", program="psi4", t
 
     logger = logging.getLogger("beep")
     stoich_list = ["default", "de", "ie", "be_nocp"]
-    logger.info(f"Computing energies for the following stoichiometries: {' '.join(stoich_list)} (defualt = be)")
-    #logger.info(f"Sending DFT energy computations for the following functionals:")
-    log_formatted_list(logger, all_dft,"Sending DFT energy computations for the following functionals:")
-
+    logger.info(
+        f"Computing energies for the following stoichiometries: {' '.join(stoich_list)} (defualt = be)"
+    )
+    # logger.info(f"Sending DFT energy computations for the following functionals:")
+    log_formatted_list(
+        logger,
+        all_dft,
+        "Sending DFT energy computations for the following functionals:",
+    )
 
     c_list_sub = []
     c_list_exis = []
@@ -830,17 +876,19 @@ def compute_be_dft_energies(ds_be, all_dft, basis="def2-tzvp", program="psi4", t
             c_per_func_sub.extend(list(c)[1][1])
             c_list_exis.extend(list(c)[0][1])
             c_per_func_exis.extend(list(c)[0][1])
-        logger.info(f"\n{func}: Existing {len(c_per_func_exis)}  Submitted {len(c_per_func_sub)}")
+        logger.info(
+            f"\n{func}: Existing {len(c_per_func_exis)}  Submitted {len(c_per_func_sub)}"
+        )
         log_progress(logger, i, len(all_dft))
 
-    logger.info(f"Submitted a total of {len(c_list_sub)} DFT computations. {len(c_list_exis)} are already computed")
+    logger.info(
+        f"Submitted a total of {len(c_list_sub)} DFT computations. {len(c_list_exis)} are already computed"
+    )
     return c_list_sub + c_list_exis
 
 
 def check_jobs_status(
-    client: FractalClient,
-    job_ids: List[str],
-    wait_interval: int = 600
+    client: FractalClient, job_ids: List[str], wait_interval: int = 600
 ) -> None:
     """
     Continuously monitors and reports the status of computations for given job IDs.
@@ -858,7 +906,6 @@ def check_jobs_status(
 
     while not all_complete:
         status_counts = {"COMPLETE": 0, "INCOMPLETE": 0, "ERROR": 0}
-
 
         job_stats = client.query_procedures(job_ids)
         for job in job_stats:
@@ -887,7 +934,9 @@ def check_jobs_status(
             time.sleep(wait_interval)  # Wait before the next check
 
 
-def get_errors_dataframe(df: pd.DataFrame, ref_en_dict: Dict[str, float]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def get_errors_dataframe(
+    df: pd.DataFrame, ref_en_dict: Dict[str, float]
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Calculate the absolute and relative errors between DataFrame values and reference energies.
 
@@ -902,7 +951,7 @@ def get_errors_dataframe(df: pd.DataFrame, ref_en_dict: Dict[str, float]) -> Tup
 
     # Function to construct the key from the row index
     def construct_key(index: str) -> str:
-        return '_'.join(index.split('_')[:3])
+        return "_".join(index.split("_")[:3])
 
     # Filter the DataFrame to only include rows where the index is present in ref_en_dict
     df = df[df.index.map(construct_key).isin(ref_en_dict.keys())]
@@ -923,8 +972,6 @@ def get_errors_dataframe(df: pd.DataFrame, ref_en_dict: Dict[str, float]) -> Tup
 
     # The abs_error_df now contains the absolute errors, and rel_error_df contains the relative errors
     return abs_error_df, rel_error_df
-
-
 
 
 def average_over_row(df, methods):
@@ -948,7 +995,6 @@ def average_over_row(df, methods):
     return average_df
 
 
-
 def main():
     # Call the arguments
     args = parse_arguments()
@@ -965,7 +1011,7 @@ def main():
 
     # The name of the molecule to be sampled at level of theory opt_lot
     smol_name = args.molecule
-    gr_method, gr_basis, gr_program  = args.reference_geometry_level_of_theory
+    gr_method, gr_basis, gr_program = args.reference_geometry_level_of_theory
     geom_ref_opt_lot = gr_method + "_" + gr_basis
 
     bchmk_structs = args.benchmark_structures
@@ -983,9 +1029,10 @@ def main():
     smol_dset = client.get_collection("OptimizationDataset", smol_dset_name)
     mol_mult = get_molecular_multiplicity(client, smol_dset, smol_name)
     logger.info(f"\nThe molecular multiplicity of {smol_name} is {mol_mult}\n\n")
-    
 
-    logger.info(f"Retriving data of the reference equilibirum geometries at {gr_method}/{gr_basis}:\n")
+    logger.info(
+        f"Retriving data of the reference equilibirum geometries at {gr_method}/{gr_basis}:\n"
+    )
 
     # Defining lists and Dictionaries
     odset_dict = {}
@@ -999,7 +1046,6 @@ def main():
     check_collection_existence(client, smol_dset_name)
     check_collection_existence(client, surf_dset_name)
 
-
     # Populate the odset_dict with different collections
     odset_dict = {smol_name: smol_dset}
 
@@ -1012,13 +1058,11 @@ def main():
             "OptimizationDataset", surf_dset_name
         )
 
-
     ## Retrive optimized molecules of the reference structures
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
         record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
         ref_geom_fmols[struct_name] = record.get_final_molecule()
-
 
     padded_log(logger, "CCSD(T)/CBS computations:")
 
@@ -1031,9 +1075,12 @@ def main():
         "ccsd(t)_aug-cc-pVDZ",
         "ccsd(t)_aug-cc-pVTZ",
     ]
-    
-    log_formatted_list(logger, cbs_list, "Energies to compute for CCSD(T)/CBS (Semi-enlightend listing) : ")
 
+    log_formatted_list(
+        logger,
+        cbs_list,
+        "Energies to compute for CCSD(T)/CBS (Semi-enlightend listing) : ",
+    )
 
     # Creat Dataset collection for CCSD(T)/CBS calculation
     logger.info("\nCreating Dataset collection for CCSD(T)/CBS:")
@@ -1041,12 +1088,14 @@ def main():
         client, "cbs" + "_" + smol_name + "_" + surf_dset_name, Dataset
     )
 
-
     # Populate dataset with structures and add keywords
-    logger.info(f"\nAdding molecules and fragments to {cbs_col.name} Database collection:\n")
-    populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs, odset_dict, geom_ref_opt_lot)
+    logger.info(
+        f"\nAdding molecules and fragments to {cbs_col.name} Database collection:\n"
+    )
+    populate_dataset_with_structures(
+        cbs_col, ref_geom_fmols, bchmk_structs, odset_dict, geom_ref_opt_lot
+    )
     add_cc_keywords(cbs_col, mol_mult)
-
 
     ## Send al computations for CCSD(T)/CBS
     compute_all_cbs(cbs_col, cbs_list, mol_mult)
@@ -1056,33 +1105,47 @@ def main():
 
     # Assemble reference energy DF:
     ref_df = get_reference_be_result(bchmk_structs, cbs_col, cbs_list)
-    logger.info(f"\nFinsihed the Calculation of the CCSD(T)/CBS reference energies:  {bcheck}\n")
+    logger.info(
+        f"\nFinsihed the Calculation of the CCSD(T)/CBS reference energies:  {bcheck}\n"
+    )
 
     # DFT energy computations
 
-    padded_log(logger, 'Initializing DFT Binding Energy Computations')
+    padded_log(logger, "Initializing DFT Binding Energy Computations")
 
     # Load optimization levels of theory for BE computations
     dft_opt_lot = args.optimization_level_of_theory
-    logger.info(f"The BE will be computed on the following Geometries: {' '.join(dft_opt_lot)}\n")
-    ds_be = create_or_load_reaction_dataset(client, smol_name, surf_dset_name, bchmk_structs, dft_opt_lot, odset_dict)
+    logger.info(
+        f"The BE will be computed on the following Geometries: {' '.join(dft_opt_lot)}\n"
+    )
+    ds_be = create_or_load_reaction_dataset(
+        client, smol_name, surf_dset_name, bchmk_structs, dft_opt_lot, odset_dict
+    )
 
     # Compute BE for all functionals
 
-    #dft_func = { "Meta_hybrid_gga" : meta_hybrid_gga() }
-    dft_func = {"Hybrid GGA" : hybrid_gga(), "Long range corrected" : lrc(), "Meta Hybrid GGA" : meta_hybrid_gga()}
+    # dft_func = { "Meta_hybrid_gga" : meta_hybrid_gga() }
+    dft_func = {
+        "Hybrid GGA": hybrid_gga(),
+        "Long range corrected": lrc(),
+        "Meta Hybrid GGA": meta_hybrid_gga(),
+    }
 
     for name, dft_f_list in dft_func.items():
-        padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvp basis")
-        dft_ids = compute_be_dft_energies(ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_en_dft")
+        padded_log(
+            logger,
+            f"Sending computations for {name} functionals with a def2-tzvp basis",
+        )
+        dft_ids = compute_be_dft_energies(
+            ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_en_dft"
+        )
         check_jobs_status(client, dft_ids)
 
-   
     # Create dataframe with results:
     ds_be._disable_query_limit = True
     ds_be.save()
 
-    warnings.filterwarnings('ignore')
+    warnings.filterwarnings("ignore")
 
     padded_log(logger, "Retriving energies from ReactionDataset")
     df_be = ds_be.get_values(stoich="default").dropna(axis=1)
@@ -1093,76 +1156,85 @@ def main():
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())
     df_de_ae, df_de_re = get_errors_dataframe(df_de, ref_df["DE"].to_dict())
 
-
-
     # Define the folder path for 'json_data' in the current working directory
-    folder_path_json = Path.cwd() / Path('en_json_data_' + smol_name)
+    folder_path_json = Path.cwd() / Path("en_json_data_" + smol_name)
 
     # Check if the folder exists, if not, create it
     if not folder_path_json.is_dir():
         folder_path_json.mkdir(parents=True, exist_ok=True)
-    
-    padded_log(logger, 'Saving BE data in json files')
+
+    padded_log(logger, "Saving BE data in json files")
     # Save the DataFrames to JSON files in the 'json_data' folder
-    df_be.to_json(folder_path_json / 'BE_DFT.json', orient='index')
+    df_be.to_json(folder_path_json / "BE_DFT.json", orient="index")
     logger.info(f"Saved BE dataframe in BE_DFT.json. {bcheck}\n")
-    df_be_ae.to_json(folder_path_json / 'BE_AE_DFT.json', orient='index')
+    df_be_ae.to_json(folder_path_json / "BE_AE_DFT.json", orient="index")
     logger.info(f"Saved BE absolute error  dataframe in BE_AE_DFT.json. {bcheck}\n")
-    df_be_re.to_json(folder_path_json / 'BE_RE_DFT.json', orient='index')
+    df_be_re.to_json(folder_path_json / "BE_RE_DFT.json", orient="index")
     logger.info(f"Saved BE relative error  dataframe in BE_AE_DFT.json. {bcheck}\n")
-    
-    df_ie.to_json(folder_path_json / 'IE_DFT.json', orient='index')
+
+    df_ie.to_json(folder_path_json / "IE_DFT.json", orient="index")
     logger.info(f"Saved IE dataframe in iE_DFT.json. {bcheck}\n")
-    df_ie_ae.to_json(folder_path_json / 'IE_AE_DFT.json', orient='index')
+    df_ie_ae.to_json(folder_path_json / "IE_AE_DFT.json", orient="index")
     logger.info(f"Saved IE absolute error  dataframe in IE_AE_DFT.json. {bcheck}\n")
-    df_ie_re.to_json(folder_path_json / 'IE_RE_DFT.json', orient='index')
+    df_ie_re.to_json(folder_path_json / "IE_RE_DFT.json", orient="index")
     logger.info(f"Saved IE relative error  dataframe in IE_AE_DFT.json. {bcheck}\n")
-    
-    df_de.to_json(folder_path_json / 'DE_DFT.json', orient='index')
+
+    df_de.to_json(folder_path_json / "DE_DFT.json", orient="index")
     logger.info(f"Saved DE dataframe in DE_DFT.json. {bcheck}\n")
-    df_de_ae.to_json(folder_path_json / 'DE_AE_DFT.json', orient='index')
+    df_de_ae.to_json(folder_path_json / "DE_AE_DFT.json", orient="index")
     logger.info(f"Saved DE absolute error  dataframe in DE_AE_DFT.json. {bcheck}\n")
-    df_de_re.to_json(folder_path_json / 'DE_RE_DFT.json', orient='index')
+    df_de_re.to_json(folder_path_json / "DE_RE_DFT.json", orient="index")
     logger.info(f"Saved DE relative error  dataframe in DE_AE_DFT.json. {bcheck}\n")
 
     # Create energy benchmark plots
-    padded_log(logger, 'Generating BE benchmark plots')
+    padded_log(logger, "Generating BE benchmark plots")
 
     # Define the folder path for 'json_data' in the current working directory
-    folder_path_plots = Path.cwd() / Path('en_bchmk_plots_' + smol_name)
-    
+    folder_path_plots = Path.cwd() / Path("en_bchmk_plots_" + smol_name)
+
     # Check if the folder exists, if not, create it
     if not folder_path_plots.is_dir():
         folder_path_plots.mkdir(parents=True, exist_ok=True)
-    
+
     # Reading plotting data from json
 
-    df_be_plt = pd.read_json(folder_path_json / 'BE_DFT.json', orient='index')
-    df_be_ae_plt = pd.read_json(folder_path_json / 'BE_AE_DFT.json', orient='index')
+    df_be_plt = pd.read_json(folder_path_json / "BE_DFT.json", orient="index")
+    df_be_ae_plt = pd.read_json(folder_path_json / "BE_AE_DFT.json", orient="index")
 
-    df_de_re_plt = pd.read_json(folder_path_json / 'DE_RE_DFT.json', orient='index')
-    df_ie_re_plt = pd.read_json(folder_path_json / 'IE_RE_DFT.json', orient='index')
+    df_de_re_plt = pd.read_json(folder_path_json / "DE_RE_DFT.json", orient="index")
+    df_ie_re_plt = pd.read_json(folder_path_json / "IE_RE_DFT.json", orient="index")
 
     # Generating plots
 
     plot_violins(df_be_plt, bchmk_structs, smol_name, folder_path_plots, ref_df)
-    padded_log(logger, 'Generating violin plots')
-    plot_density_panels(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-    padded_log(logger, 'Generating density plots')
-    plot_mean_errors(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-    padded_log(logger, 'Generating MAE plots')
-    plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-    padded_log(logger, 'Generating IE vs DE plots')
+    padded_log(logger, "Generating violin plots")
+    plot_density_panels(
+        df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots
+    )
+    padded_log(logger, "Generating density plots")
+    plot_mean_errors(
+        df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots
+    )
+    padded_log(logger, "Generating MAE plots")
+    plot_ie_vs_de(
+        df_de_re_plt,
+        df_ie_re_plt,
+        bchmk_structs,
+        dft_opt_lot,
+        smol_name,
+        folder_path_plots,
+    )
+    padded_log(logger, "Generating IE vs DE plots")
 
-    #Log benchmark results
-    padded_log(logger, 'BINDING ENERGY BENCHMARK RESULTS', padding_char=gear)
-    padded_log(logger, 'BINDING ENERGY MAE')
+    # Log benchmark results
+    padded_log(logger, "BINDING ENERGY BENCHMARK RESULTS", padding_char=gear)
+    padded_log(logger, "BINDING ENERGY MAE")
     log_energy_mae(logger, df_be_ae)
-    padded_log(logger, 'INTERACTION ENERGY MAE')
+    padded_log(logger, "INTERACTION ENERGY MAE")
     log_energy_mae(logger, df_ie_ae)
-    padded_log(logger, 'DEFORMATION ENERGY MAE')
+    padded_log(logger, "DEFORMATION ENERGY MAE")
     log_energy_mae(logger, df_de_ae)
-   
+
 
 if __name__ == "__main__":
     main()

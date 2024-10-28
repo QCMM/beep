@@ -15,7 +15,11 @@ import qcfractal.interface as ptl
 from collections import Counter
 from pathlib import Path
 from qcfractal.interface.client import FractalClient
-from qcfractal.interface.collections import Dataset, OptimizationDataset, ReactionDataset
+from qcfractal.interface.collections import (
+    Dataset,
+    OptimizationDataset,
+    ReactionDataset,
+)
 from qcelemental.models.molecule import Molecule
 from typing import Any, Dict, List, Tuple, Union, NoReturn
 
@@ -147,7 +151,7 @@ of the Binding Energy Evaluation Platform (BEEP).
     )
     parser.add_argument(
         "--dft-optimization-program",
-        default='psi4',
+        default="psi4",
         help="The program to use for the DFT geometry optimization (default: psi4)",
     )
     parser.add_argument(
@@ -161,7 +165,6 @@ of the Binding Energy Evaluation Platform (BEEP).
         help="The tag for the dft geometry optimization with a QCFractal manager",
     )
     return parser.parse_args()
-
 
 
 def get_or_create_collection(
@@ -192,10 +195,10 @@ def create_benchmark_dataset_dict(benchmark_structs: list[str]) -> dict[str, str
     """
     Creates a dictionary of simplified dataset names from a list of benchmark structure names.
 
-    This function processes each benchmark structure name in the provided list. It splits each name 
-    into its constituent parts, assuming a structure of 'molecule_surface_other'. 
-    It then creates a simplified name consisting of only the 'molecule' and 'surface' parts. 
-    These simplified names are stored in a dictionary, with the original benchmark structure 
+    This function processes each benchmark structure name in the provided list. It splits each name
+    into its constituent parts, assuming a structure of 'molecule_surface_other'.
+    It then creates a simplified name consisting of only the 'molecule' and 'surface' parts.
+    These simplified names are stored in a dictionary, with the original benchmark structure
     names as keys.
 
     Parameters:
@@ -265,9 +268,11 @@ def create_and_add_specification(
     spec_name = f"{method}_{basis}"
     if qc_keyword:
         kw_name = client.query_keywords()[qc_keyword].values.values()
-        logger.debug(f"Using the following keyword for the specification {kw_name} to {odset.name}")
+        logger.debug(
+            f"Using the following keyword for the specification {kw_name} to {odset.name}"
+        )
         if ("uks" or "uhf") in kw_name and program == "psi4":
-            spec_name = "U"+spec_name
+            spec_name = "U" + spec_name
     print(spec_name)
     spec = {
         "name": spec_name,
@@ -307,7 +312,11 @@ def get_molecular_multiplicity(
 
 
 def optimize_reference_molecule(
-    odset: OptimizationDataset, struct_name: str, geom_ref_opt_lot: str, mol_mult: int, opt_tag: str,
+    odset: OptimizationDataset,
+    struct_name: str,
+    geom_ref_opt_lot: str,
+    mol_mult: int,
+    opt_tag: str,
 ) -> None:
     """
     Optimize a molecule in the dataset based on its molecular multiplicity.
@@ -330,7 +339,14 @@ def optimize_reference_molecule(
 
 
 def optimize_dft_molecule(
-    client: FractalClient, odset: OptimizationDataset, struct_name: str, method: str, basis: str, program: str, dft_keyword: int, opt_tag: str
+    client: FractalClient,
+    odset: OptimizationDataset,
+    struct_name: str,
+    method: str,
+    basis: str,
+    program: str,
+    dft_keyword: int,
+    opt_tag: str,
 ) -> int:
     """
     Create and submit a computation job for a given structure with specified method and basis.
@@ -346,7 +362,9 @@ def optimize_dft_molecule(
     - int: The number of jobs submitted.
     """
     logger = logging.getLogger("beep")
-    spec_name = create_and_add_specification(client, odset, method, basis, program, dft_keyword)
+    spec_name = create_and_add_specification(
+        client, odset, method, basis, program, dft_keyword
+    )
     cr = odset.compute(spec_name, tag=opt_tag, subset={struct_name})
     return cr
 
@@ -356,7 +374,7 @@ def wait_for_completion(
     odset_dict: Dict[str, "OptimizationDataset"],
     opt_lot: Union[str, List[str]],
     program: str,
-    qc_keyword: int =  None,
+    qc_keyword: int = None,
     wait_interval: int = 600,
     check_errors: bool = False,
 ) -> int:
@@ -381,14 +399,18 @@ def wait_for_completion(
     if isinstance(opt_lot, str):
         opt_lot = [opt_lot]
 
-    logger.info("\nChecking if the computations have finished") # for the following levels of theory:")
+    logger.info(
+        "\nChecking if the computations have finished"
+    )  # for the following levels of theory:")
     logger.info("\n")
     while True:
         statuses = []
         for lot in opt_lot:
             try:
-                if ("uks" or "uhf") in client.query_keywords()[qc_keyword].values.values() and program == "psi4":
-                    lot = "U"+lot
+                if ("uks" or "uhf") in client.query_keywords()[
+                    qc_keyword
+                ].values.values() and program == "psi4":
+                    lot = "U" + lot
             except TypeError:
                 pass
             for struct_name, odset in odset_dict.items():
@@ -406,8 +428,10 @@ def wait_for_completion(
             status_message = ", ".join(
                 [f"{status}: {count}" for status, count in status_counts.items()]
             )
-            logger.info(f"All entries have been processed. (Complete: {status_counts['COMPLETE']}, ERROR: {status_counts['ERROR']}) {bcheck}")
-            return status_counts['COMPLETE']
+            logger.info(
+                f"All entries have been processed. (Complete: {status_counts['COMPLETE']}, ERROR: {status_counts['ERROR']}) {bcheck}"
+            )
+            return status_counts["COMPLETE"]
 
         logger.info(
             f"Waiting for {wait_interval} seconds before rechecking statuses... (Incomplete: {status_counts['INCOMPLETE']})"
@@ -424,10 +448,10 @@ def check_dataset_status(
     """
     Continuously monitors and reports the status of computations in a dataset.
 
-    This function checks the status of computational records in the given ReactionDataset 
-    for various methods and bases specified in `cbs_list`. It categorizes the status of each 
-    record as COMPLETE, INCOMPLETE, or ERROR. The function keeps running until all records are 
-    complete or if there's an error in any record, and it prints the status summary for each 
+    This function checks the status of computational records in the given ReactionDataset
+    for various methods and bases specified in `cbs_list`. It categorizes the status of each
+    record as COMPLETE, INCOMPLETE, or ERROR. The function keeps running until all records are
+    complete or if there's an error in any record, and it prints the status summary for each
     method every 600 seconds.
 
     Parameters:
@@ -486,23 +510,22 @@ def check_dataset_status(
 
         time.sleep(600)  # Wait for 600 seconds before the next check
 
+
 def compute_rmsd(
-    mol1: Molecule, 
-    mol2: Molecule, 
-    rmsd_symm: bool
+    mol1: Molecule, mol2: Molecule, rmsd_symm: bool
 ) -> Tuple[float, float]:
     """
     Computes the root-mean-square deviation (RMSD) between two molecular structures.
 
-    This function calculates the RMSD between two Molecule objects. If rmsd_symm is True, 
-    it also calculates the RMSD considering the mirror image of the first molecule. It returns a 
-    tuple containing the RMSD value and the mirrored RMSD value (which defaults to 10.0 
+    This function calculates the RMSD between two Molecule objects. If rmsd_symm is True,
+    it also calculates the RMSD considering the mirror image of the first molecule. It returns a
+    tuple containing the RMSD value and the mirrored RMSD value (which defaults to 10.0
     if rmsd_symm is False).
 
     Parameters:
     mol1 (Molecule): The first molecule object.
     mol2 (Molecule): The second molecule object to which the first is compared.
-    rmsd_symm (bool): A boolean indicating whether to compute the RMSD for the mirrored structure 
+    rmsd_symm (bool): A boolean indicating whether to compute the RMSD for the mirrored structure
     of mol1 as well.
 
     Returns:
@@ -526,14 +549,14 @@ def compute_rmsd(
 def compare_rmsd(
     dft_lot: List[str],
     odset_dict: Dict[str, OptimizationDataset],
-    ref_geom_fmols: Dict[str, Molecule]
+    ref_geom_fmols: Dict[str, Molecule],
 ) -> Tuple[Dict[str, float], Dict[str, float], pd.DataFrame]:
     """
     Compares RMSD values for different levels of theory in a DFT optimization lot.
 
-    This function calculates the RMSD and mirrored RMSD of final molecules in an 
-    optimization dataset against reference geometries. It then averages these values 
-    for each level of theory (opt_lot) in the DFT optimization lot and determines the 
+    This function calculates the RMSD and mirrored RMSD of final molecules in an
+    optimization dataset against reference geometries. It then averages these values
+    for each level of theory (opt_lot) in the DFT optimization lot and determines the
     level of theory that yields the lowest average RMSD.
 
     Parameters:
@@ -542,8 +565,8 @@ def compare_rmsd(
     ref_geom_fmols (Dict[str, Molecule]): A dictionary mapping structure names to reference geometry molecules.
 
     Returns:
-    Tuple[Dict[str, float], Dict[str, float]]: A tuple containing two dictionaries. The first dictionary maps 
-    the best level of theory to its average RMSD value of the different groups. The second dictionary maps all 
+    Tuple[Dict[str, float], Dict[str, float]]: A tuple containing two dictionaries. The first dictionary maps
+    the best level of theory to its average RMSD value of the different groups. The second dictionary maps all
     levels of theory to their respective average RMSD values.
     """
     logger = logging.getLogger("beep")
@@ -559,7 +582,9 @@ def compare_rmsd(
             record = odset.get_record(struct_name, specification=opt_lot)
             err = record.get_error()
             if err:
-                logger.info(f"Calculation for {struct_name} at the {opt_lot} level of theory finished with error. It will be skipped")
+                logger.info(
+                    f"Calculation for {struct_name} at the {opt_lot} level of theory finished with error. It will be skipped"
+                )
                 break
             fmol = record.get_final_molecule()
             rmsd = compute_rmsd(ref_geom_fmols[struct_name], fmol, rmsd_symm=True)
@@ -567,7 +592,7 @@ def compare_rmsd(
             rmsd_df.at[struct_name, opt_lot] = rmsd
 
         if err:
-           continue
+            continue
         rmsd_tot = list(rmsd_tot_dict.values())
         final_opt_lot[opt_lot] = np.mean(rmsd_tot)
         log_progress(logger, i + 1, total_operations)
@@ -578,28 +603,29 @@ def compare_rmsd(
 
     return best_geom_lot, final_opt_lot, rmsd_df
 
+
 def compare_all_rmsd(
-    functional_groups: Dict[str, List[str]], 
-    odset_dict: Dict[str, OptimizationDataset], 
-    ref_geom_fmols: Dict[str, Molecule]
+    functional_groups: Dict[str, List[str]],
+    odset_dict: Dict[str, OptimizationDataset],
+    ref_geom_fmols: Dict[str, Molecule],
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, float]]:
     """
     Compares RMSD values across different functional groups and their respective functionals.
 
-    This function iterates over various functional groups, each with a list of functionals. 
-    For each functional group, it calls the 'compare_rmsd' function to determine the best 
-    optimization level of theory and gathers all final optimization levels of theory. 
-    It returns a dictionary mapping each functional group to its best optimization level 
+    This function iterates over various functional groups, each with a list of functionals.
+    For each functional group, it calls the 'compare_rmsd' function to determine the best
+    optimization level of theory and gathers all final optimization levels of theory.
+    It returns a dictionary mapping each functional group to its best optimization level
     and a dictionary with all final optimization levels of theory.
 
     Parameters:
-    functional_groups (Dict[str, List[str]]): A dictionary mapping functional group names 
+    functional_groups (Dict[str, List[str]]): A dictionary mapping functional group names
     to lists of strings representing different levels of theory.
     odset_dict (Dict[str, Any]): A dictionary mapping structure names to optimization dataset objects.
     ref_geom_fmols (Dict[str, Molecule]): A dictionary mapping structure names to reference geometry molecules.
 
     Returns:
-    Tuple[Dict[str, Dict[str, float]], Dict[str, float]]: A tuple containing two dictionaries. The first maps each functional group 
+    Tuple[Dict[str, Dict[str, float]], Dict[str, float]]: A tuple containing two dictionaries. The first maps each functional group
     to its best optimization level of theory. The second contains all final optimization levels of theory for each functional group.
     """
     logger = logging.getLogger("beep")
@@ -624,7 +650,6 @@ def compare_all_rmsd(
     return best_opt_lot, combined_rmsd_df
 
 
-
 def save_df_to_json(logger, df, filename):
     """
     Save a pandas DataFrame to a JSON file.
@@ -647,8 +672,7 @@ def main():
     # Call the arguments
     args = parse_arguments()
 
-
-    logger = setup_logging("bchmk_geom",args.molecule)
+    logger = setup_logging("bchmk_geom", args.molecule)
     logger.info(welcome_msg)
 
     client = ptl.FractalClient(
@@ -658,8 +682,8 @@ def main():
         password=args.password,
     )
 
-    # Tags for the optimization 
-    hl_tag  = args.tag_reference_geometry
+    # Tags for the optimization
+    hl_tag = args.tag_reference_geometry
     dft_tag = args.tag_dft_geometry
 
     # The name of the molecule to be sampled at level of theory opt_lot
@@ -674,7 +698,7 @@ def main():
     logger.info(f"Molecule: {smol_name}")
     logger.info(f"Surface Model: {smol_dset_name}")
     logger.info(f"Benchmark Structures: {bchmk_structs}")
-    
+
     # Defining lists and Dictionaries
     w_list = []
     odset_dict = {}
@@ -729,10 +753,19 @@ def main():
             odset, struct_name, geom_ref_opt_lot, mol_mult, hl_tag
         )
 
-    logger.info(f"\nSend a total of {ct} structures to compute at the {geom_ref_opt_lot} level of theory to the tag {hl_tag}\n")
+    logger.info(
+        f"\nSend a total of {ct} structures to compute at the {geom_ref_opt_lot} level of theory to the tag {hl_tag}\n"
+    )
 
     ## Wait for the Opimizations to finish
-    wait_for_completion(client, odset_dict, geom_ref_opt_lot, gr_program, wait_interval=600, check_errors=True)
+    wait_for_completion(
+        client,
+        odset_dict,
+        geom_ref_opt_lot,
+        gr_program,
+        wait_interval=600,
+        check_errors=True,
+    )
 
     padded_log(logger, "Start of the DFT geometry computations")
 
@@ -755,7 +788,7 @@ def main():
         for functionals in dft_geom_functionals.values()
         for functional in functionals
     ]
-   
+
     logger.info(f"Program: {dft_program}")
     logger.info(f"DFT and SQM geometry methods:")
     dict_to_log(logger, dft_geom_functionals)
@@ -763,22 +796,37 @@ def main():
     # Sending all DFT geometry optimizations
     ct = 0
     c = 0
-    padded_log(logger,'Start sending DFT optimizations')
+    padded_log(logger, "Start sending DFT optimizations")
     for struct_name, odset in odset_dict.items():
         logger.info(f"\nSending geometry optimizations for {struct_name}")
         cs = 0
         for functionals in dft_geom_functionals.values():
             for functional in functionals:
                 method, basis = functional.split("_")
-                cs += optimize_dft_molecule(client, odset, struct_name, method, basis, dft_program, dft_keyword, dft_tag)
+                cs += optimize_dft_molecule(
+                    client,
+                    odset,
+                    struct_name,
+                    method,
+                    basis,
+                    dft_program,
+                    dft_keyword,
+                    dft_tag,
+                )
                 ct += cs
-                c+=1
+                c += 1
         logger.info(f"Send {cs} geometry optimizations for structure {struct_name}")
 
     logger.info(f"\nSend {c}/{ct} to the tag {dft_tag}")
 
     wait_for_completion(
-        client, odset_dict, all_dft_functionals, dft_program, dft_keyword, wait_interval=200, check_errors=False
+        client,
+        odset_dict,
+        all_dft_functionals,
+        dft_program,
+        dft_keyword,
+        wait_interval=200,
+        check_errors=False,
     )
 
     # Save optimized molecules of the reference structures
@@ -787,11 +835,20 @@ def main():
         record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
         ref_geom_fmols[struct_name] = record.get_final_molecule()
 
-    padded_log(logger, "Start of RMSD comparsion between DFT and {} geometries", geom_ref_opt_lot)
+    padded_log(
+        logger,
+        "Start of RMSD comparsion between DFT and {} geometries",
+        geom_ref_opt_lot,
+    )
     # Compare RMSD for all functional groups
     try:
-        if ("uks" or "uhf") in client.query_keywords()[dft_keyword].values.values() and dft_program == "psi4":
-            dft_geom_functionals = {key: ['U' + item for item in value] for key, value in dft_geom_functionals.items()}
+        if ("uks" or "uhf") in client.query_keywords()[
+            dft_keyword
+        ].values.values() and dft_program == "psi4":
+            dft_geom_functionals = {
+                key: ["U" + item for item in value]
+                for key, value in dft_geom_functionals.items()
+            }
     except TypeError:
         pass
     best_opt_lot, rmsd_df = compare_all_rmsd(
@@ -802,23 +859,30 @@ def main():
     log_dataframe_averages(logger, rmsd_df)
 
     # Define the folder path for 'json_data' in the current working directory
-    folder_path_json = Path.cwd() / Path('geom_json_data_' + smol_name)
+    folder_path_json = Path.cwd() / Path("geom_json_data_" + smol_name)
     if not folder_path_json.is_dir():
         folder_path_json.mkdir(parents=True, exist_ok=True)
 
     # Save json with all the results
-    save_df_to_json(logger, rmsd_df, str(folder_path_json)+"/results_geom_benchmark.json")
+    save_df_to_json(
+        logger, rmsd_df, str(folder_path_json) + "/results_geom_benchmark.json"
+    )
 
-    folder_path_plots = Path.cwd() / Path('geom_bchmk_plots_' + smol_name)
+    folder_path_plots = Path.cwd() / Path("geom_bchmk_plots_" + smol_name)
     if not folder_path_plots.is_dir():
         folder_path_plots.mkdir(parents=True, exist_ok=True)
 
     rmsd_histograms(rmsd_df, smol_name, str(folder_path_plots))
 
-    padded_log(logger, "Geometry Benchmark finished successfully! Hasta pronto!", padding_char=mia0911)
+    padded_log(
+        logger,
+        "Geometry Benchmark finished successfully! Hasta pronto!",
+        padding_char=mia0911,
+    )
 
     # END GEOMETRY BENCHMARK, INCLUDE SOME RMSD PLOTS IN THE FUTURE.
     return None
+
 
 if __name__ == "__main__":
     main()
