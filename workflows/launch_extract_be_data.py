@@ -600,8 +600,8 @@ def main():
         )
 
         # Delete structures that have imaginary frequencies
-        df_zpve_lin.drop(imag_todelete, inplace=True)
-        df_no_zpve.drop(imag_todelete, inplace=True)
+        df_zpve_lin.drop(imag_todelete, inplace=True, errors='ignore')
+        df_no_zpve.drop(imag_todelete, inplace=True, errors='ignore')
 
         # Calculate and log mean and standard deviation
         res_be_no_zpve, mean, sdev = calculate_mean_std(df_no_zpve, mol, logger)
