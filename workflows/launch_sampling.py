@@ -170,7 +170,8 @@ of the Binding Energy Evaluation Platform (BEEP).
     parser.add_argument(
         "--sampling-level-of-theory",
         nargs=3,
-        default=["blyp", "def2-svp", "terachem"],
+        #default=["blyp", "def2-svp", "terachem"],
+        default=["gfn2-xtb", None, "xtb"],
         help="The level of theory in the format: method basis program (default: blyp def2-svp terachem)",
     )
     parser.add_argument(
@@ -406,21 +407,26 @@ def main():
     smol_name = args.molecule
     method, basis, program = args.sampling_level_of_theory
     rmethod, rbasis, rprogram = args.refinement_level_of_theory
+    print(method,basis,program)
 
     qc_keyword = args.keyword_id
-    opt_lot = method + "_" + basis
+    args.keyword_id = None
+    if basis:
+        opt_lot = method + "_" + basis
+    else:
+        opt_lot = method
     ropt_lot = rmethod + "_" + rbasis
     args_dict = sampling_args(args)
     args_dict["logger"] = logger
 
-    try:
-        if ("uks" or "uhf") in client.query_keywords()[
-            qc_keyword - 1
-        ].values.values() and program == "psi4":
-            opt_lot = "U" + opt_lot
-            ropt_lot = "U" + ropt_lot
-    except TypeError:
-        pass
+    #try:
+    #    if ("uks" or "uhf") in client.query_keywords()[
+    #        qc_keyword - 1
+    #    ].values.values() and program == "psi4":
+    #        opt_lot = "U" + opt_lot
+    #        ropt_lot = "U" + ropt_lot
+    #except TypeError:
+    #    pass
 
     args_dict["opt_lot"] = opt_lot
 
