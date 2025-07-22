@@ -319,11 +319,12 @@ def compute_hessian(
     log_formatted_list(logger, u_mols, "Sending Hessian computations for the following molecules:", max_rows=5)
 
     # Set keywords depending on the multiplicity
+    logger.info(f"\nWill compute Hessian at {method}/{basis} level of theory")
     if mult == 2:
         kw = ptl.models.KeywordSet(
             **{"values": {"function_kwargs": {"dertype": 1}, "reference": "uks"}}
         )
-        method = method[1:]  # Adjust method for unrestricted cases
+        #method = method[1:]  # Adjust method for unrestricted cases
     else:
         kw = ptl.models.KeywordSet(
             **{"values": {"function_kwargs": {"dertype": 1}}}
