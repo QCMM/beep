@@ -153,7 +153,7 @@ def compute_rmsd(
 ) -> Tuple[float, float]:
     rmsd_val_mirror = 10.0
     if rmsd_symm:
-        align_mols_mirror = mol1.align(mol2, run_mirror=True)
+        align_mols_mirror = mol1.align(mol2, atoms_map=True, run_mirror=True)
         rmsd_val_mirror = align_mols_mirror[1]["rmsd"]
     align_mols = mol1.align(mol2, atoms_map=True)
     rmsd_val = align_mols[1]["rmsd"]
@@ -251,7 +251,7 @@ def run_sampling(
 ):
 
     # Defining initial variables
-    FREQUENCY = 600
+    FREQUENCY = 120
     ATOMS_PER_CLUSTER_MOL = 3
     binding_site_num = 0
     n_smpl_mol = 0
