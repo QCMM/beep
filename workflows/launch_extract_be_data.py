@@ -147,6 +147,11 @@ def parse_arguments() -> argparse.Namespace:
         default=[],
         help="List of clusters to exclude from processing",
     )
+    parser.add_argument(
+    "--no-zpve",
+    action="store_true",
+    help="Only compute and print binding energies without ZPVE corrections (skip ZPVE processing)",
+    )
 
     return parser.parse_args()
 
@@ -186,7 +191,7 @@ def concatenate_frames(
     """
     logger = logging.getLogger("beep")
     df_be = pd.DataFrame()
-    method = opt_method.split("_")[0]
+    method , basis = opt_method.split("_")
 
     logger.info("Joining the energies of the different clusters.")
 
@@ -196,7 +201,7 @@ def concatenate_frames(
             logger.info(f"Skipping excluded cluster: {w}")
             continue
 
-        name_be = f"be_{mol}_{w}_{method}"
+        name_be = f"be_{mol}_{w}_{method}_{basis}"
         try:
             ds_be = client.get_collection("ReactionDataset", name_be)
         except KeyError:
@@ -314,6 +319,7 @@ def zpve_correction(
     zpve_corr_dict, todelete = {}, []
     logger.info(f"Extracting Hessian for the following structures:")
 
+
     for entry in entry_list:
         logger.info(f"Processing structure {entry}")
         mol_list = df_nocp[df_nocp["name"] == entry]["molecule"].tolist()
@@ -334,10 +340,16 @@ def zpve_correction(
             todelete.append(entry)
             continue
 
-        zpve_corr_dict[entry] = (d - m1 - m2) * qcel.constants.hartree2kcalmol
-        logger.info(
-            f"Finished processing structure {entry}, the ZPVE correction is: {zpve_corr_dict[entry]}"
-        )
+        if d:
+            zpve_corr_dict[entry] = (d - m1 - m2) * qcel.constants.hartree2kcalmol
+            logger.info(
+                f"Finished processing structure {entry}, the ZPVE correction is: {zpve_corr_dict[entry]}"
+            )
+        else:
+            logger.info(
+                f"Structure {entry}, has no Hessian yet, wait for completion or send the computation."
+            )
+        
 
     # DataFrame with ZPVE correction
     df_zpve = pd.DataFrame.from_dict(
@@ -361,8 +373,8 @@ def zpve_correction(
 
     # Apply the scale factor to Delta_ZPVE and calculate Eb_ZPVE
     logger.info(f"Applying scaling factor {scale_factor} to the ZPVE correction")
+    df_zpve["Delta_ZPVE"] *= scale_factor
     for bm in be_methods:
-        df_zpve["Delta_ZPVE"] *= scale_factor
         zpve_col_name = f"{bm}/{basis}+ZPVE"
 
         # Sum with the Delta_ZPVE
@@ -370,8 +382,15 @@ def zpve_correction(
 
         logger.info(f"Fitting procedure for level of theory {bm} (units: kcal/mol)")
         # Convert columns to NumPy arrays and calculate fit parameters
-        x = df_be[f"{bm}/{basis}"].to_numpy(dtype=float)
-        y = df_be[zpve_col_name].to_numpy(dtype=float)
+        # Extract columns
+        x_raw = df_be[f"{bm}/{basis}"].to_numpy(dtype=float)
+        y_raw = df_be[zpve_col_name].to_numpy(dtype=float)
+        
+        # Remove NaNs from both x and y
+        mask = ~np.isnan(x_raw) & ~np.isnan(y_raw)
+        x = x_raw[mask]
+        y = y_raw[mask]
+
         m, b = np.polyfit(x, y, 1)
         r_sq = np.corrcoef(x, y)[0, 1] ** 2
         fitting_params[bm] = [m, b, r_sq]
@@ -395,7 +414,7 @@ def zpve_correction(
     ]
 
     # Join Delta_ZPVE with df_be
-    df_be = pd.concat([df_be, df_zpve], axis=1)
+    df_be = pd.concat([df_be, df_zpve], axis=1, join='inner')
 
     # Reorder columns to ensure Delta_ZPVE is the last column
     columns_order = [col for col in df_be.columns if col != "Delta_ZPVE"] + [
@@ -506,21 +525,46 @@ def calculate_mean_std(df_res: pd.DataFrame, mol: str, logger: logging.Logger) -
     str
         Updated log content string.
     """
-    mean_row = df_res.mean()
-    stddev_values = df_res.loc[
-        ~df_res.index.str.startswith(("Mean_", "StdDev_")), "StdDev_all_dft"
-    ].values
-    sem = np.sqrt((1 / len(stddev_values) ** 2) * np.sum(stddev_values**2))
-    std_row = df_res.std()
+    # Create a copy to avoid modifying the original DataFrame.
+    df_with_stats = df_res.copy()
+
+    # Filter out any existing summary rows to ensure calculations are on raw data only.
+    data_only_df = df_res.loc[~df_res.index.str.startswith(("Mean_", "StdDev_"))]
+
+    # Perform calculations only on the filtered data.
+    mean_row = data_only_df.mean()
+    std_row = data_only_df.std()
+
+    # Filter values.
+    stddev_values = data_only_df["StdDev_all_dft"].values
+    sem = np.sqrt((1 / len(stddev_values) ** 2) * np.sum(stddev_values**2)) 
+
+    # Update the 'StdDev_all_dft' value in the new standard deviation series.
     std_row["StdDev_all_dft"] = sem
 
-    df_res.loc[f"Mean_{mol}"] = mean_row
-    df_res.loc[f"StdDev_{mol}"] = std_row
+    # Add or overwrite the summary rows in the copied DataFrame.
+    df_with_stats.loc[f"Mean_{mol}"] = mean_row
+    df_with_stats.loc[f"StdDev_{mol}"] = std_row
 
-    mean_val = df_res.loc[f"Mean_{mol}", "Mean_Eb_all_dft"]
-    std_val = df_res.loc[f"StdDev_{mol}", "StdDev_all_dft"]
+    mean_val = df_with_stats.loc[f"Mean_{mol}", "Mean_Eb_all_dft"]
+    std_val = df_with_stats.loc[f"StdDev_{mol}", "StdDev_all_dft"]
 
-    return df_res, mean_val, std_val
+    return df_with_stats, mean_val, std_val 
+    #mean_row = df_res.mean()
+    #stddev_values = df_res.loc[
+    #    ~df_res.index.str.startswith(("Mean_", "StdDev_")), "StdDev_all_dft"
+    #].values
+    #sem = np.sqrt((1 / len(stddev_values) ** 2) * np.sum(stddev_values**2))
+    #std_row = df_res.std()
+    #std_row["StdDev_all_dft"] = sem
+
+    #df_res.loc[f"Mean_{mol}"] = mean_row
+    #df_res.loc[f"StdDev_{mol}"] = std_row
+
+    #mean_val = df_res.loc[f"Mean_{mol}", "Mean_Eb_all_dft"]
+    #std_val = df_res.loc[f"StdDev_{mol}", "StdDev_all_dft"]
+
+    #return df_res, mean_val, std_val
 
 
 def main():
@@ -563,6 +607,20 @@ def main():
         if not success:
             logger.warning(f"No valid binding energies found for {mol}. Skipping...")
             continue
+        
+        # Always compute stats and print for BE without ZPVE
+        res_be_no_zpve, mean, sdev = calculate_mean_std(df_no_zpve, mol, logger)
+        log_dataframe(
+            logger,
+            res_be_no_zpve,
+            f"\nBinding energies without ZPVE correction for {mol}\n",
+        )
+        res_be_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
+
+        if args.no_zpve:
+            logger.info("Skipping ZPVE correction and model fitting due to --no-zpve flag.")
+            final_result_nz = write_energy_log(res_be_no_zpve, mol, final_result_nz, "(NO ZPVE):")
+            continue
 
         log_dataframe(
             logger,
@@ -573,7 +631,7 @@ def main():
 
         # Process ZPVE data
         name_hess_be = [
-            f"be_{mol}_{cluster}_{args.opt_method.split('_')[0]}"
+            f"be_{mol}_{cluster}_{args.opt_method.split('_')[0]}_{args.opt_method.split('_')[1]}"
             for cluster in args.hessian_clusters
         ]
 
@@ -650,9 +708,13 @@ def main():
         res_be_lin_zpve.to_csv(f"{res_folder}/be_lin_zpve_{mol}.csv")
 
     padded_log(logger, "Summary of binding energy results", padding_char=gear)
-    logger.info(final_result_nz)
-    logger.info(final_result_dz)
-    logger.info(final_result_lz)
+    if args.no_zpve:
+        logger.info(final_result_nz)
+    else:
+        logger.info(final_result_nz)
+        logger.info(final_result_dz)
+        logger.info(final_result_lz)
+
 
 
 if __name__ == "__main__":
