@@ -206,7 +206,6 @@ def process_be_computation(
     surf_opt_ds: ReactionDataset,
     smol_mol: ptl.Molecule,
     opt_lot: str,
-    opt_method: str,
     mult: int,
     args
 ) -> list:
@@ -227,6 +226,9 @@ def process_be_computation(
     """
     logger = logging.getLogger("beep")
     all_ids = []
+    opt_method = opt_lot.split("_")[0]
+    opt_basis = opt_lot.split("_")[1]
+
     for ds_opt in finished_opt_list:
         padded_log(logger, f"Checking {ds_opt.name} for repeated structures", padding_char="*", total_length=60)
         opt_stru = rmsd_filter(ds_opt, opt_lot, logger)  # Pass logger to rmsd_filter
@@ -235,7 +237,7 @@ def process_be_computation(
         padded_log(logger, f"Building name for the new ReactionDataset", padding_char="*", total_length=60)
         cluster_name = "_".join(list(opt_stru.keys())[0].split("_")[1:3])
         cluster_mol = surf_opt_ds.get_record(cluster_name, opt_lot).get_final_molecule()
-        rdset_name = f"be_{args.molecule.upper()}_{cluster_name.upper()}_{opt_method.upper()}"
+        rdset_name = f"be_{args.molecule.upper()}_{cluster_name.upper()}_{opt_method.upper()}_{opt_basis.upper()}"
         logger.info(f"ReactionDataset name for {ds_opt.name} is: {rdset_name}")
 
         padded_log(logger, f"Creating the dataset {rdset_name}", padding_char="*", total_length=60)
@@ -301,7 +303,7 @@ def main() -> None:
         padded_log(logger, f"Extracting OptimizationDatasets with no INCOMPLETE optimization")
         finished_opt_list = get_optdataset(client, surf_opt_ds, args.molecule, opt_lot, args.exclude_clusters)
         padded_log(logger, f"Creating {len(finished_opt_list)} ReactionDatasets for BE computation:")
-        all_ids = process_be_computation(client, logger, finished_opt_list, surf_opt_ds, smol_mol, opt_lot, opt_method, mult, args)
+        all_ids = process_be_computation(client, logger, finished_opt_list, surf_opt_ds, smol_mol, opt_lot,  mult, args)
         padded_log(logger, f"Checking for completion of ALL binding energy computations")
         check_jobs_status(client, all_ids, logger, wait_interval=600) 
 
@@ -319,7 +321,7 @@ def main() -> None:
         logger.info(hessian_parameters)
         all_hess_ids = []
         for cluster_name in args.hessian_clusters:
-            rdset_name = f"be_{args.molecule.upper()}_{cluster_name.upper()}_{opt_method.upper()}"
+            rdset_name = f"be_{args.molecule.upper()}_{cluster_name.upper()}_{opt_method.upper()}_{opt_basis.upper()}"
             hess_ids = compute_hessian(client, rdset_name, opt_lot, mult, args.hessian_tag, logger=logger, program=args.program)  # Pass logger
             all_hess_ids.extend(hess_ids)
         padded_log(logger, f"Checking for completion of ALL Hessian computations")
