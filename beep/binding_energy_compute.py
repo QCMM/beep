@@ -316,6 +316,13 @@ def compute_hessian(
     mols = df_all[df_all['stoichiometry'] == 'be_nocp']['molecule']
     u_mols = list(set(mols))
 
+    # Special case for atoms: removes id if its an atom
+    mol_list = client.query_molecules(u_mols)
+    for m in mol_list:
+        if len(m.symbols) == 1:
+            logger.info(f"\nAtom id {m.id} removed")
+            u_mols.remove(m.id)
+
     log_formatted_list(logger, u_mols, "Sending Hessian computations for the following molecules:", max_rows=5)
 
     # Set keywords depending on the multiplicity

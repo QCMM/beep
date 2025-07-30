@@ -326,14 +326,22 @@ def zpve_correction(
 
         # Extracting ZPVE for the three molecules
         d, d_bol = get_zpve_mol(client, mol_list[0], lot_opt)
-        m1, _ = get_zpve_mol(client, mol_list[1], lot_opt, on_imaginary="raise")
+        m1, _ = get_zpve_mol(client, mol_list[1], lot_opt, on_imaginary="raise") 
         m2, _ = get_zpve_mol(client, mol_list[2], lot_opt, on_imaginary="raise")
 
-        if not (m1 and m2):
-            logger.info(
-                f"Molecules {mol_list[1]} and {mol_list[2]} have no Hessian. Compute them first."
-            )
-            raise IndexError
+        # Ignoring Hessian check if m2 is an atom 
+        if len(client.query_molecules(mol_list[2])[0].symbols) == 1:
+            if not (m1):
+                logger.info(
+                    f"Molecules {mol_list[1]} have no Hessian. Compute them first."
+                )
+                raise IndexError
+        else:
+            if not (m1 and m2):
+                logger.info(
+                    f"Molecules {mol_list[1]} and {mol_list[2]} have no Hessian. Compute them first."
+                )
+                raise IndexError
 
         if not d_bol:
             logger.info(f"Appending structure {entry} to the list for deletion.")
