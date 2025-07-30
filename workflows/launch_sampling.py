@@ -438,10 +438,15 @@ def main():
     ds_wc = client.get_collection("OptimizationDataset", args.surface_model_collection)
 
     # Check if all the molecules are optimized at the requested level of theory
-    check_optimized_molecule(ds_sm, opt_lot, [smol_name])
-    check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
+    # If cycle for atom exemption
+    if len(ds_sm.get_record(smol_name, opt_lot).get_initial_molecule().symbols) == 1:
+        check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
+        args_dict["target_mol"] = ds_sm.get_record(smol_name, opt_lot).get_initial_molecule()
+    else:
+        check_optimized_molecule(ds_sm, opt_lot, [smol_name])
+        check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
+        args_dict["target_mol"] = ds_sm.get_record(smol_name, opt_lot).get_final_molecule()
 
-    args_dict["target_mol"] = ds_sm.get_record(smol_name, opt_lot).get_final_molecule()
     args_dict["client"] = client
 
     count = 0
