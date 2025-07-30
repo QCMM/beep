@@ -284,7 +284,8 @@ def populate_dataset_with_structures(
             mol_name, surf_name, _ = name.split("_")
             surf_mod_mol = (
                 odset_dict[surf_name.upper()]
-                .get_record(name=surf_name.upper(), specification=geom_ref_opt_lot)
+                .get_record(name=surf_name.upper(), specification="ccsd(t)_cc-pvtz")
+                #.get_record(name=surf_name.upper(), specification=geom_ref_opt_lot)
                 .get_final_molecule()
             )
             len_f1 = len(surf_mod_mol.symbols)
@@ -830,7 +831,7 @@ def create_be_stoichiometry(
 
 
 def compute_be_dft_energies(
-    ds_be, all_dft, basis="def2-tzvp", program="psi4", tag="bench_dft"
+    ds_be, all_dft, basis="def2-tzvpd", program="psi4", tag="bench_dft"
 ):
     """
     Submits DFT computation jobs for Binding Energy (BE) calculations for various stoichiometries and functionals.
@@ -838,7 +839,7 @@ def compute_be_dft_energies(
     Parameters:
     ds_be (DataSet): The QCFractal DataSet object for BE computations.
     all_dft (list): List of hybrid GGA functional names.
-    basis (str, optional): Basis set to be used for DFT computations. Defaults to 'def2-tzvp'.
+    basis (str, optional): Basis set to be used for DFT computations. Defaults to 'def2-tzvpd'.
     program (str, optional): Quantum chemistry program to use. Defaults to 'psi4'.
     tag (str, optional): Tag for categorizing the computation jobs. Defaults to 'ench_dft'.
 
@@ -1061,8 +1062,14 @@ def main():
     ## Retrive optimized molecules of the reference structures
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
-        record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
-        ref_geom_fmols[struct_name] = record.get_final_molecule()
+        print(struct_name)
+        #record = odset.get_record(struct_name, specification="ccsd(t)_cc-pvtz")
+        if struct_name in ["CO",  "W2", "W3"] :
+            record = odset.get_record(struct_name, specification="ccsd(t)_cc-pvtz")
+            ref_geom_fmols[struct_name] = record.get_final_molecule()
+        else:
+            record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
+            ref_geom_fmols[struct_name] = record.get_final_molecule()
 
     padded_log(logger, "CCSD(T)/CBS computations:")
 
@@ -1134,10 +1141,10 @@ def main():
     for name, dft_f_list in dft_func.items():
         padded_log(
             logger,
-            f"Sending computations for {name} functionals with a def2-tzvp basis",
+            f"Sending computations for {name} functionals with a def2-tzvpd basis",
         )
         dft_ids = compute_be_dft_energies(
-            ds_be, dft_f_list, basis="def2-tzvp", program="psi4", tag="bench_en_dft"
+            ds_be, dft_f_list, basis="def2-tzvpd", program="psi4", tag="bench_en_dft"
         )
         check_jobs_status(client, dft_ids)
 
