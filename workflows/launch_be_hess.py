@@ -139,7 +139,10 @@ def check_collections(client: ptl.FractalClient, surface_model_name: str, molecu
         raise KeyError
     
     try:
-        final_molecule = molecule_dataset.get_record(molecule_name, optimization_level).get_final_molecule()
+        if len(molecule_dataset.get_record(molecule_name, optimization_level).get_initial_molecule().symbols) == 1:
+            final_molecule = molecule_dataset.get_record(molecule_name, optimization_level).get_initial_molecule()
+        else:
+            final_molecule = molecule_dataset.get_record(molecule_name, optimization_level).get_final_molecule()
     except KeyError:
         logger.info(f"{molecule_name} is not optimized at the requested level of theory, please optimize them first.")
         raise KeyError
