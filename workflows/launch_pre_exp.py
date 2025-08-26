@@ -1,17 +1,62 @@
-import sys, time, argparse, logging
+import sys, time, argparse, logging, os
 import math
 import numpy as np       # needed by molsym
+import pandas as pd	
 import qcfractal.interface as ptl
 import qcelemental as qcel # needed by molsym
 import molsym # for the symmetry point
+from typing import Dict, Tuple, List
 from beep.utils import logging_utils as bp_log
+from qcfractal.interface.collections.optimization_dataset import OptimizationDataset
+from qcfractal.interface.client import FractalClient
 
 welcome_msg = """       
-                  Welcome to the Pre-Exponential factor calculator! 
+·······················································································
+:                                                                                     :
+:  ██████╗ ██╗███╗   ██╗██████╗ ██╗███╗   ██╗ ██████╗                                 :
+:  ██╔══██╗██║████╗  ██║██╔══██╗██║████╗  ██║██╔════╝                                 :
+:  ██████╔╝██║██╔██╗ ██║██║  ██║██║██╔██╗ ██║██║  ███╗                                :
+:  ██╔══██╗██║██║╚██╗██║██║  ██║██║██║╚██╗██║██║   ██║                                :
+:  ██████╔╝██║██║ ╚████║██████╔╝██║██║ ╚████║╚██████╔╝                                :
+:  ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝                                 :
+:                                                                                     :
+:  ███████╗███╗   ██╗███████╗██████╗  ██████╗ ██╗   ██╗                               :
+:  ██╔════╝████╗  ██║██╔════╝██╔══██╗██╔════╝ ╚██╗ ██╔╝                               :
+:  █████╗  ██╔██╗ ██║█████╗  ██████╔╝██║  ███╗ ╚████╔╝                                :
+:  ██╔══╝  ██║╚██╗██║██╔══╝  ██╔══██╗██║   ██║  ╚██╔╝                                 :
+:  ███████╗██║ ╚████║███████╗██║  ██║╚██████╔╝   ██║                                  :
+:  ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝                                  :
+:                                                                                     :
+:  ███████╗██╗   ██╗ █████╗ ██╗     ██╗   ██╗ █████╗ ████████╗██╗ ██████╗ ███╗   ██╗  :
+:  ██╔════╝██║   ██║██╔══██╗██║     ██║   ██║██╔══██╗╚══██╔══╝██║██╔═══██╗████╗  ██║  :
+:  █████╗  ██║   ██║███████║██║     ██║   ██║███████║   ██║   ██║██║   ██║██╔██╗ ██║  :
+:  ██╔══╝  ╚██╗ ██╔╝██╔══██║██║     ██║   ██║██╔══██║   ██║   ██║██║   ██║██║╚██╗██║  :
+:  ███████╗ ╚████╔╝ ██║  ██║███████╗╚██████╔╝██║  ██║   ██║   ██║╚██████╔╝██║ ╚████║  :
+:  ╚══════╝  ╚═══╝  ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝  :
+:                                                                                     :
+:  ██████╗ ██╗      █████╗ ████████╗███████╗ ██████╗ ██████╗ ███╗   ███╗              :
+:  ██╔══██╗██║     ██╔══██╗╚══██╔══╝██╔════╝██╔═══██╗██╔══██╗████╗ ████║              :
+:  ██████╔╝██║     ███████║   ██║   █████╗  ██║   ██║██████╔╝██╔████╔██║              :
+:  ██╔═══╝ ██║     ██╔══██║   ██║   ██╔══╝  ██║   ██║██╔══██╗██║╚██╔╝██║              :
+:  ██║     ███████╗██║  ██║   ██║   ██║     ╚██████╔╝██║  ██║██║ ╚═╝ ██║              :
+:  ╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝      ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝              :
+:                                                                                     :
+·······················································································
 
-Description: The pre-ext uses the xxxxxx formula uses xxxxxxx
+---------------------------------------------------------------------------------------
+Welcome to the BEEP Range of temperature Pre-Exponential Factor Workflow
+---------------------------------------------------------------------------------------
 
-Author: b-unnit, namrata-rani10
+
+To deny our impulses is to deny the very thing that makes us human.”
+
+                              – Lana and Lilly Wachowski
+
+
+---------------------------------------------------------------------------------------
+
+                            By:  Gabriela Silva-Vera  and  Namrata Rani
+
             """
 
 
@@ -30,10 +75,13 @@ def calculation_msg(
     - Formatted message string.
     """
     return f"""
------------------------------------------------------------------------------------------
-Starting the calculation of the pre-exponential factor of the molecule {mol} in the collection {mol_col} optimized at the {level_theory} level of theory
------------------------------------------------------------------------------------------
-    """
+---------------------------------
+Starting new calculation for {mol} 
+---------------------------------
+Collection: {mol_col}
+Molecule: {mol}
+Level of theory: {level_theory}
+   """
 
 
 def parse_arguments(
@@ -46,12 +94,11 @@ def parse_arguments(
     """
     parser = argparse.ArgumentParser(
         description="""
-A command line interface to calculate the pre-exponential factor of a given molecule inside of a collcetion.
+A command line interface to calculate the pre-exponential factor of a given molecule or a complete collection.
     """
     )
-
     parser.add_argument(
-        "--client_address",
+        "--client-address",
         default="localhost:7777",
         help="The URL address and port of the QCFractal server (default: localhost:7777)",
     )
@@ -72,20 +119,35 @@ A command line interface to calculate the pre-exponential factor of a given mole
         help="Molecule to be sampled (from a QCFractal OptimizationDataSet collection). None calculates all molecules in a collection (default: None)",
     )
     parser.add_argument(
-        "--molecule_collection",
-        default="Small_molecules",
-        help="The name of the collection containing molecules or radicals (default: Small_molecules)",
+        "--molecule-collection",
+        default="small_molecules",
+        help="The name of the collection containing molecules or radicals (default: small_molecules)",
     )
     parser.add_argument(
-        "--level_of_theory",
+        "--level-of-theory",
         default="blyp_def2-svp",
         help="The level of theory in which the molecule is optimized, in the format: method_basis (default: blyp_def2-svp)",
     )          
     parser.add_argument(
-        "--range_of_temperature",
-        default="10 273",
+        "--range-of-temperature",
+        type=int,
+        nargs="+",
+        default=[10, 273],
         help="Range of temperature in K (default: 10 273)",
-    )  
+    ) 
+    parser.add_argument(
+        "--temperature-step",
+        type=int,
+        default=1,
+        help="Size of the temperature step on K (default: 1)",
+    )
+    parser.add_argument(
+        "--molecule-surface-area",
+        type=float,
+        default= 10e-19,
+        help="Surface area of each adsorbed molecule, for most molecules is 10e-19 m^(-2) (default: 10e-19)",
+    )
+ 
 
   
     return parser.parse_args()
@@ -143,7 +205,7 @@ def check_optimized_molecule(
 
 
 def get_xyz(
-    dataset: str, mol_name: str, level_theory: str, collection_type: str = "OptimizationDataset"
+    client: str, dataset: str, mol_name: str, level_theory: str, collection_type: str = "OptimizationDataset"
 ) -> str:
     """
     Extract the xyz of the molecule
@@ -157,7 +219,6 @@ def get_xyz(
     Returns:
     - XYZ file, excluding total number of atoms, charge, multiplicity and number of atom for each element present
     """
-    #client = ptl.FractalClient(address=client_address, username = username, password = password, verify=False)
     ds_opt = client.get_collection(collection_type,dataset)
     rr = ds_opt.get_record(mol_name, level_theory)
     mol = rr.get_final_molecule()    
@@ -179,12 +240,12 @@ def get_mass(
     return(mass)
 
 
-def sym_num(
+def get_sym_num(
     xyz: str
 ) -> int:
     """
-    Gives the symmetry number from the xyz (doesnt work with linear molecules)
-    Symmetry numbers given by tables By P. W. ATKINS, M. S. CHILD, and C. S. G. PHILLIPS
+    Gives the symmetry number from the xyz using the Molsym package.
+    If statements added for linear molecule excemptions
     
     Args:
     - xyz: xyz file (only coordinates, no multiplicity, charge, etc)
@@ -192,28 +253,16 @@ def sym_num(
     Returns:
     - Symmetry number
     """
-    
-    group_to_number = {
-        "C1": 1, "Cs": 1, "Ch": 1, "Ci": 1, "S2": 1,
-        "C2": 2, "C3": 3, "C4": 4, "C5": 5, "C6": 6, "C7": 7, "C8": 8,
-        "D2": 4, "D3": 6, "D4": 8, "D5": 10, "D6": 12,
-        "C2v": 2, "C3v": 3, "C4v": 4, "C5v": 5, "C6v": 6,
-        "C2h": 2, "C3h": 3, "C4h": 4, "C5h": 5, "C6h": 6,
-        "D2h": 4, "D3h": 6, "D4h": 8, "D5h": 10, "D6h": 12,
-        "D2d": 4, "D3d": 6, "D4d": 8, "D5d": 10, "D6d": 12,
-        "S4": 2, "S6": 3, "S8": 4,
-        "T": 12, "Td": 12, "Th": 12, "O": 24, "Oh": 24,
-        "I": 60, "Ih": 60,
-    }
-
     schema = qcel.models.Molecule.from_data(xyz).dict()
     mol = molsym.Molecule.from_schema(schema)
     pg, (paxis, saxis) = molsym.find_point_group(mol)
-
-    if pg not in group_to_number:
-        raise Keyerror(f"Group {pg} not found in the dictionary... that shouldn't happen")
-
-    return(group_to_number.get(pg))
+    if pg == 'D0h':
+        return(pg, 2)
+    if pg == 'C0v':
+        return(pg, 1)
+    else:
+        s_m = molsym.Symtext.from_molecule(mol).rotational_symmetry_number
+        return(pg, s_m)
 
 
 def parse_coordinates(
@@ -224,7 +273,7 @@ def parse_coordinates(
     """
   
     symbols, coordinates = [], []
-    for line in input_string.strip().splitlines():
+    for line in xyz.strip().splitlines():
         parts = line.split()
         symbols.append(parts[0])
         coordinates.append(list(map(float, parts[1:])))
@@ -289,7 +338,7 @@ def get_moments_of_inertia(
 
 
 def pre_exponential_factor(
-  m: float, T_list: list, sigma: int, Ia: float, Ib: float, Ic: float
+  m: float, T_list: list, sigma: int, Ia: float, Ib: float, Ic: float, A: float
 ) -> list:
     """
     Calculate the pre-exponential factor (v) for desorption.
@@ -307,7 +356,7 @@ def pre_exponential_factor(
         Runs the calculation for v of a single temperature value
         """
         # Translational contribution
-        translational_part = ((2 * pi * m * kB * T) / h**2)**(3 / 2)
+        translational_part = (((2 * pi * m * kB * T) / h**2)**(3 / 2))*A
 
         # Rotational contribution (considering Ia = 0 for linear molecules)
         if Ia == 0:
@@ -325,20 +374,6 @@ def main():
     # Call the arguments
     args = parse_arguments()
 
-    # Create a logger
-    main_logger = logging.getLogger("preexpt_calc")
-    main_logger.setLevel(logging.INFO)
-
-    # File handler for logging to a file
-    log_file = (
-        "pre_exp_factor_" + args.molecule + "_" + args.level_of_theory + ".log"
-    )
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(logging.Formatter("%(message)s"))
-    main_logger.addHandler(file_handler)
-
-    main_logger.info(welcome_msg)
-
     #Client from where the xyz will be retrived
     client = ptl.FractalClient(  
         address=args.client_address,
@@ -347,46 +382,76 @@ def main():
         password=args.password,
     )
 
-    #Name of the molecule and level of theory    
+    #Defining different parameters     
     mol_col = args.molecule_collection
     mol_lot = args.level_of_theory
-    temperature_range = args.range_of_temperature.split()
-    T_list = list(range(int(temperature_range[0]), int(temperature_range[1]), 1))
-    mol = args.molecule
-
-    #Check for collection existence
-    check_collection_existence(client, mol_col)
-
-    if mol == None: 
-        mol = [mol_col.df.index]
     
+    if len(args.range_of_temperature) == 1:
+        T_min = T_max = args.range_of_temperature
+        T_list = T_min
+        T_step = args.temperature_step
+    else:
+        T_min, T_max = args.range_of_temperature
+        T_step = args.temperature_step 
+        T_list = list(range(T_min, T_max, T_step))
+    mol = args.molecule
+    A = args.molecule_surface_area
+ 
+    #Check for collection existence
+    ds = client.get_collection("OptimizationDataset", mol_col)
+    check_collection_existence(client, mol_col)
+    
+    # Create a logger
+    main_logger = bp_log.setup_logging("log_v", f"{mol_col}")
+    main_logger.info(welcome_msg)
+
+    #Create the mol list based on the collection if no argument is given 
+    if mol == None:
+        mol = ds.df.index
+    
+    #Create folder for the pre-exponential factor logs
+    v_folder = f"./v_{mol_col}"
+    os.makedirs(v_folder, exist_ok=True)
+  
     for molecule in mol:
-        # Check if all the molecule is optimized at the requested level of theory
-        check_optimized_molecule(mol_col, mol_lot, molecule)
+        # Check if the molecule is optimized at the requested level of theory
+        check_optimized_molecule(ds, mol_lot, molecule)
         main_logger.info(
             calculation_msg(mol_col, molecule, mol_lot)
         )    
+
         #Define basic variables of the molecule
-        mol_xyz = get_xyz(mol_col,molecule,mol_lot)  
-        sym_num = sym_num(mol_xyz)
+        mol_xyz = get_xyz(client,mol_col,molecule,mol_lot)  
+        point_group, sym_num = get_sym_num(mol_xyz)
         symbols, coordinates = parse_coordinates(mol_xyz)
         mol_mass = get_mass(mol_xyz)
-    
-        #Alings cords with the z axis
+        main_logger.info(f"Point group = {point_group}\nSymmetry number = {sym_num}")
+
+        #Alings cords with the z axis and calculate I
         align_coors = align_to_z_axis(symbols, coordinates)
-    
-        #Calculate moment of inertia and add it to the main log file and an individual one
         Ia, Ib, Ic = get_moments_of_inertia(symbols, coordinates)
-        main_logger.info(f"Principal moments of inertia for {molecule} (kg·m²): Ia={Ia:.3e}, Ib={Ib:.3e}, Ic={Ic:.3e}")
-        bp_log.setup_logging("I",molecule)
-        logger.info(f"{Ia} {Ib} {Ic}")
-    
-        #Calculate the preexponential factor and add it to the main log file and an individual one
-        v = pre_exponential_factor(mol_mass, T_list, sym_num, Ia, Ib, Ic)
-        main_logger.info(f"Pre-exponential factor for {molecule} (v): {v:.3e} s⁻¹")
-        bp_log.setup_logging("v", molecule)
-        logger.info(f"{v}")
+        main_logger.info(f"Principal moments of inertia for {molecule} (kg·m^(2)): Ia={Ia:.3e}, Ib={Ib:.3e}, Ic={Ic:.3e}")
+        
+        #Calculate v and create the log file with the information
+        v = pre_exponential_factor(mol_mass, T_list, sym_num, Ia, Ib, Ic, A)
+        main_logger.info(f"Pre-exponential factor for {molecule} in the range of {T_min}K to {T_max}K with steps of {T_step}K has been calculated")
+        
+        v_log_file = f"v_{mol_col}/v_{molecule}.dat"
+        v_logger = logging.getLogger(f"v_{molecule}")
+        v_logger.setLevel(logging.INFO)
+
+        v_handler = logging.FileHandler(v_log_file)
+        v_handler.setFormatter(logging.Formatter(" %(message)s"))
+        v_logger.addHandler(v_handler)
+
+        table = pd.DataFrame({"T":T_list, "v":v })
+        v_logger.info("\n" + table.to_string(index=False))
+        
+        #main_logger.info(f"Pre-exponential factor for {molecule} (v): {v} s^(-1)")
+        # logger = bp_log.setup_logging("v", molecule)
+        #logger.info(f"{v}")
         
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
+
