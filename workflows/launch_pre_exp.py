@@ -148,8 +148,6 @@ A command line interface to calculate the pre-exponential factor of a given mole
         help="Surface area of each adsorbed molecule, for most molecules is 10e-19 m^(-2) (default: 10e-19)",
     )
  
-
-  
     return parser.parse_args()
 
 
@@ -446,11 +444,8 @@ def main():
 
         table = pd.DataFrame({"T":T_list, "v":v })
         v_logger.info("\n" + table.to_string(index=False))
-        
-        #main_logger.info(f"Pre-exponential factor for {molecule} (v): {v} s^(-1)")
-        # logger = bp_log.setup_logging("v", molecule)
-        #logger.info(f"{v}")
-        
+
+
 
 if __name__ == "__main__":
     main()
