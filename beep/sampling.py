@@ -415,7 +415,7 @@ def run_sampling(
             try:
                 refinement_opt_dset.add_entry(entry_name, mol_obj, save=True)
             except KeyError as e:
-                logger.info(f"{e} in {refinement_ds_opt.name}")
+                logger.info(f"{e} in {refinement_opt_dset.name}")
 
         new_mols = len(unique_mols)
         binding_site_num += new_mols
