@@ -209,6 +209,7 @@ def concatenate_frames(
             continue
 
         ds_be._disable_query_limit = True
+
         try:
             df = ds_be.get_values(stoich="default")
         except KeyError:
