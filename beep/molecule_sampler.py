@@ -193,6 +193,18 @@ def random_molecule_sampler(
     logger.debug(f"Sampled molecule: {target_molecule}")
     logger.debug(f"Size of the sampling shell: {sampling_shell}\n")
 
+    # Center cluster (so norms in calculate_displacements are meaningful)
+    cluster = cluster.scramble(
+        do_shift=-com(cluster.geometry, list(cluster.symbols)),
+        do_rotate=False, do_resort=False
+    )[0]
+
+    # Center target molecule to its own COM before sampling
+    target_molecule = target_molecule.scramble(
+        do_shift=-com(target_molecule.geometry, list(target_molecule.symbols)),
+        do_rotate=False, do_resort=False
+    )[0]
+
     dis_min, dis_max = calculate_displacements(cluster, sampling_shell)
     target_mol_diam = calculate_diameter(target_molecule.geometry)
     cluster_diam = calculate_diameter(cluster.geometry)
