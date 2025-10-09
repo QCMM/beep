@@ -43,7 +43,7 @@ def calculate_diameter(cluster_xyz: np.ndarray) -> float:
     cluster_xyz (numpy.ndarray): A NumPy array where each row represents an atom and each column represents X, Y, and Z values.
 
     Returns:
-    float: The diameter of the cluster in angstroms.
+    float: The diameter of the cluster in bohr.
     """
     # Check if there's only one water molecule in the cluster
     if cluster_xyz.shape == (3, 3):
@@ -76,7 +76,7 @@ def surface_distance_check(
 
     Returns:
     - bool : False if any atom in the molecule is too close to the cluster based on the cutoff distance,
-             None otherwise (which evaluates to False in a boolean context).
+             True otherwise.
     """
     for a1 in mol.geometry:
         for a2 in cluster.geometry:
@@ -156,8 +156,6 @@ def create_molecule(cluster: Molecule, mol_shift: Molecule) -> Molecule:
 
     return Molecule(symbols=atms, geometry=geom, fix_com=False, fix_orientation=False)
 
-
-attempts = 0
 
 
 def random_molecule_sampler(
