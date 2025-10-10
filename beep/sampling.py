@@ -7,7 +7,7 @@ from qcfractal.interface.collections.optimization_dataset import OptimizationDat
 from qcelemental.models.molecule import Molecule
 from qcfractal.interface.client import FractalClient
 from typing import List, Tuple, Optional
-from collections import Counter
+from collections import Counter, defaultdict
 from .molecule_sampler import random_molecule_sampler as mol_sample
 
 
@@ -156,14 +156,13 @@ def compute_rmsd_conditional(m1, m2, rmsd_symm: bool, cutoff: float):
         rm = 10.0
     return r, rm
 
-
 def filter_binding_sites(
     mol_list1: List[Tuple[str, Molecule]],
     mol_list2: List[Tuple[str, Molecule]],
     cut_off_val: float,
     rmsd_symm: bool,
-    ligand_size: int,
     logger: logging.Logger,
+    ligand_size: int,
     grid: float = 0.5,
 ) -> List[Tuple[str, Molecule]]:
     """
@@ -175,14 +174,18 @@ def filter_binding_sites(
     logger.info("\nStarting filtering procedure:")
     logger.info("Comparing within structures found in this round:")
 
-    # ---- 1) Bucket mol_list1 by quantized ligand COM ----
+    # --- 1) Bucket mol_list1 by ligand COM ---
     buckets1 = defaultdict(list)
     for name, mol in mol_list1:
         com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
         key = tuple((com / grid).astype(int))
         buckets1[key].append((name, mol))
+    logger.debug(f"[filter] Bucketing {len(mol_list1)} new structures into {len(buckets1)} COM bins (grid={grid} Å)")
 
     to_remove_tmp = set()
+    rmsd_calls = 0
+    mirror_calls = 0
+
     for items in buckets1.values():
         for i in range(len(items)):
             ni, mi = items[i]
@@ -196,44 +199,52 @@ def filter_binding_sites(
                 com_j = np.asarray(mj.geometry)[-ligand_size:].mean(axis=0)
                 if np.linalg.norm(com_i - com_j) >= cut_off_val:
                     continue
+                rmsd_calls += 1
                 r, rm = compute_rmsd_conditional(mi, mj, rmsd_symm, cut_off_val)
+                if rm != 10.0:
+                    mirror_calls += 1
                 if min(r, rm) < cut_off_val:
                     logger.info(f"Duplicate found: {ni} vs {nj}, RMSD: {min(r, rm):.3f}")
                     to_remove_tmp.add(nj)
 
     unique_tmp = [pair for pair in mol_list1 if pair[0] not in to_remove_tmp]
 
-    # ---- 2) Compare against mol_list2 (reference set) ----
+    # --- 2) Compare against reference set ---
     logger.info("Comparing with structures already present in the Optimization Dataset")
     buckets2 = defaultdict(list)
     for name, mol in mol_list2:
         com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
         key = tuple((com / grid).astype(int))
         buckets2[key].append((name, mol))
+    logger.debug(f"[filter] Reference set: {len(mol_list2)} molecules in {len(buckets2)} COM bins")
 
     to_remove_final = set()
     for name, mol in unique_tmp:
         com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
         key = tuple((com / grid).astype(int))
         candidates = buckets2.get(key, [])
-        drop = False
         for ref_name, ref_mol in candidates:
             com_ref = np.asarray(ref_mol.geometry)[-ligand_size:].mean(axis=0)
             if np.linalg.norm(com - com_ref) >= cut_off_val:
                 continue
+            rmsd_calls += 1
             r, rm = compute_rmsd_conditional(mol, ref_mol, rmsd_symm, cut_off_val)
+            if rm != 10.0:
+                mirror_calls += 1
             if min(r, rm) < cut_off_val:
                 logger.info(f"Duplicate found: {name} vs. {ref_name}, RMSD: {min(r, rm):.3f}")
                 to_remove_final.add(name)
-                drop = True
                 break
-        if drop:
-            continue
 
     total_removed = len(to_remove_tmp) + len(to_remove_final)
     unique_final = [pair for pair in unique_tmp if pair[0] not in to_remove_final]
-    logger.info(f"{total_removed} duplicate and {len(unique_final)} unique binding sites.")
+
+    logger.info(
+        f"{total_removed} duplicates removed. {len(unique_final)} unique binding sites remain "
+        f"({rmsd_calls} RMSD calls, {mirror_calls} mirror calls)."
+    )
     return unique_final
+
 
 def run_sampling(
     method: str,
