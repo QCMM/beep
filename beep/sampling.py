@@ -148,16 +148,13 @@ def get_opt_molecules(
     return mol_list
 
 
-def compute_rmsd(
-    mol1: Molecule, mol2: Molecule, rmsd_symm: bool
-) -> Tuple[float, float]:
-    rmsd_val_mirror = 10.0
-    if rmsd_symm:
-        align_mols_mirror = mol1.align(mol2, atoms_map=True, run_mirror=True)
-        rmsd_val_mirror = align_mols_mirror[1]["rmsd"]
-    align_mols = mol1.align(mol2, atoms_map=True)
-    rmsd_val = align_mols[1]["rmsd"]
-    return rmsd_val, rmsd_val_mirror
+def compute_rmsd_conditional(m1, m2, rmsd_symm: bool, cutoff: float):
+    r = m1.align(m2, atoms_map=True)[1]["rmsd"]
+    if rmsd_symm and r >= cutoff:
+        rm = m1.align(m2, atoms_map=True, run_mirror=True)[1]["rmsd"]
+    else:
+        rm = 10.0
+    return r, rm
 
 
 def filter_binding_sites(
@@ -165,69 +162,78 @@ def filter_binding_sites(
     mol_list2: List[Tuple[str, Molecule]],
     cut_off_val: float,
     rmsd_symm: bool,
+    ligand_size: int,
     logger: logging.Logger,
-) -> List[Molecule]:
+    grid: float = 0.5,
+) -> List[Tuple[str, Molecule]]:
     """
-    Filters out duplicate binding sites based on RMSD (Root Mean Square Deviation) values between molecules.
-
-    This function compares molecules in `mol_list1` and `mol_list2` to identify and remove duplicates based on
-    a specified RMSD cutoff value. It performs an initial filtering within `mol_list1`, removing molecules
-    with RMSD values below `cut_off_val` between them. Then, it checks the remaining unique molecules in
-    `mol_list1` against `mol_list2` to ensure no duplicates are present between the two lists.
-
-    Parameters:
-        mol_list1 (List[Tuple[str, Molecule]]): A list of tuples, where each tuple contains an identifier
-            (str) and a Molecule object to be filtered based on binding site uniqueness.
-        mol_list2 (List[Tuple[str, Molecule]]): A secondary list of tuples, where each tuple contains an
-            identifier (str) and a Molecule object used to verify binding site uniqueness with `mol_list1`.
-        cut_off_val (float): The RMSD threshold value; molecules with RMSD less than this value are considered duplicates.
-        rmsd_symm (bool): If True, considers molecular symmetry when computing RMSD, comparing both regular
-            and mirror-image RMSD values.
-
-    Returns:
-        List[Molecule]: A list of unique Molecule objects from `mol_list1`, with duplicates filtered out based on RMSD.
-
-    Logs:
-        Logs the total number of duplicate binding sites removed.
-
+    Filters duplicate binding sites using ligand-centric prefilters:
+      - Ligand COM bucketing
+      - COM distance lower bound
+      - Conditional mirror RMSD
     """
     logger.info("\nStarting filtering procedure:")
-
     logger.info("Comparing within structures found in this round:")
-    # Initial filtering within mol_list1
-    to_remove_tmp = set()  
-    for i in range(len(mol_list1)):
-        for j in range(i + 1, len(mol_list1)):
-            rmsd_val, rmsd_val_mirror = compute_rmsd(
-                mol_list1[i][1], mol_list1[j][1], rmsd_symm
-            )
-            if (rmsd_val < cut_off_val) or (rmsd_val_mirror < cut_off_val):
-                min_rmsd = min(rmsd_val, rmsd_val_mirror)
-                logger.info(f"Duplicate found: {mol_list1[i][0]} vs {mol_list1[j][0]}, RMSD: {min_rmsd}")
-                to_remove_tmp.add(mol_list1[j][0])  # Store identifiers for uniqueness
 
-    # Creating unique_tmp list by excluding duplicates found in to_remove_tmp
-    unique_tmp = [mol for mol in mol_list1 if mol[0] not in to_remove_tmp]
+    # ---- 1) Bucket mol_list1 by quantized ligand COM ----
+    buckets1 = defaultdict(list)
+    for name, mol in mol_list1:
+        com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
+        key = tuple((com / grid).astype(int))
+        buckets1[key].append((name, mol))
 
-    logger.info("Comparing with strucutres already present in the Optimization Dataset")
-    # Further filtering against mol_list2
-    to_remove_final = set()  
-    for unique_mol in unique_tmp:
-        for mol in mol_list2:
-            rmsd_val, rmsd_val_mirror = compute_rmsd(
-                unique_mol[1], mol[1], rmsd_symm
-            )
-            if (rmsd_val < cut_off_val) or (rmsd_val_mirror < cut_off_val):
-                min_rmsd = min(rmsd_val, rmsd_val_mirror)
-                logger.info(f"Duplicate found: {unique_mol[0]} vs. {mol[0]}, RMSD: {min_rmsd}")
-                to_remove_final.add(unique_mol[0])
+    to_remove_tmp = set()
+    for items in buckets1.values():
+        for i in range(len(items)):
+            ni, mi = items[i]
+            if ni in to_remove_tmp:
+                continue
+            com_i = np.asarray(mi.geometry)[-ligand_size:].mean(axis=0)
+            for j in range(i + 1, len(items)):
+                nj, mj = items[j]
+                if nj in to_remove_tmp:
+                    continue
+                com_j = np.asarray(mj.geometry)[-ligand_size:].mean(axis=0)
+                if np.linalg.norm(com_i - com_j) >= cut_off_val:
+                    continue
+                r, rm = compute_rmsd_conditional(mi, mj, rmsd_symm, cut_off_val)
+                if min(r, rm) < cut_off_val:
+                    logger.info(f"Duplicate found: {ni} vs {nj}, RMSD: {min(r, rm):.3f}")
+                    to_remove_tmp.add(nj)
 
-    # Calculate final unique molecules, excluding those in to_remove_final
+    unique_tmp = [pair for pair in mol_list1 if pair[0] not in to_remove_tmp]
+
+    # ---- 2) Compare against mol_list2 (reference set) ----
+    logger.info("Comparing with structures already present in the Optimization Dataset")
+    buckets2 = defaultdict(list)
+    for name, mol in mol_list2:
+        com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
+        key = tuple((com / grid).astype(int))
+        buckets2[key].append((name, mol))
+
+    to_remove_final = set()
+    for name, mol in unique_tmp:
+        com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
+        key = tuple((com / grid).astype(int))
+        candidates = buckets2.get(key, [])
+        drop = False
+        for ref_name, ref_mol in candidates:
+            com_ref = np.asarray(ref_mol.geometry)[-ligand_size:].mean(axis=0)
+            if np.linalg.norm(com - com_ref) >= cut_off_val:
+                continue
+            r, rm = compute_rmsd_conditional(mol, ref_mol, rmsd_symm, cut_off_val)
+            if min(r, rm) < cut_off_val:
+                logger.info(f"Duplicate found: {name} vs. {ref_name}, RMSD: {min(r, rm):.3f}")
+                to_remove_final.add(name)
+                drop = True
+                break
+        if drop:
+            continue
+
     total_removed = len(to_remove_tmp) + len(to_remove_final)
-    unique_final = [mol for mol in unique_tmp if mol[0] not in to_remove_final]
-    logger.info(f"{total_removed} duplicate  and {len(unique_final)} unique binding sites.")
+    unique_final = [pair for pair in unique_tmp if pair[0] not in to_remove_final]
+    logger.info(f"{total_removed} duplicate and {len(unique_final)} unique binding sites.")
     return unique_final
-
 
 def run_sampling(
     method: str,
@@ -405,8 +411,9 @@ def run_sampling(
         logger.info(
             f"Filtering {opt_mol_num} new molecules against existing {len(opt_molecules)} molecules  using an RMSD criteria of {rmsd_val}"
         )
+        mol_size = len(target_mol.symbols)
         unique_mols = filter_binding_sites(
-            opt_molecules_new, opt_molecules, cut_off_val=rmsd_val, rmsd_symm=rmsd_symm, logger=logger
+            opt_molecules_new, opt_molecules, cut_off_val=rmsd_val, rmsd_symm=rmsd_symm, ligand_size=mol_size, logger=logger
         )
 
         # Add the molecules to the refinement OptimizationDataset
