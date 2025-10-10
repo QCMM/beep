@@ -230,11 +230,14 @@ def get_mass(
     xyz: str
 ) -> float:
     """
-    Calculates the mass of a molecule using the xyz.
+    Calculates the mass of a molecule in kg using the xyz.
     """
+    kg_convert = qcel.constants.get("na")*1000
+
     mol = qcel.models.Molecule.from_data(xyz)
     m = mol.masses
-    mass = m.sum()
+    mass_sum = m.sum()
+    mass = mass_sum/kg_convert
     return(mass)
 
 
@@ -311,9 +314,12 @@ def get_moments_of_inertia(
     """
     Calculate the moments of inertia after alignment.
     """
-  
-    masses = np.array([qcel.periodictable.to_mass(sym) for sym in symbols])
+    
+    kg_convert = qcel.constants.get("na")*1000                                                                                                                                                      
+    amu_masses = np.array([qcel.periodictable.to_mass(sym) for sym in symbols])                  
+    masses = amu_masses/kg_convert                                                                     
     coords = coordinates * qcel.constants.conversion_factor("Angstrom", "m")  # Convert to meters
+
 
     # Initialize the inertia tensor
     I = np.zeros((3, 3))
@@ -354,13 +360,13 @@ def pre_exponential_factor(
         Runs the calculation for v of a single temperature value
         """
         # Translational contribution
-        translational_part = (((2 * pi * m * kB * T) / h**2)**(3 / 2))*A
+        translational_part = ((2 * pi * m * kB * T) / h**2)*A
 
         # Rotational contribution (considering Ia = 0 for linear molecules)
         if Ia == 0:
-            rotational_part = (8 * pi**2 * kB * T / h**2) * (Ib / sigma)
+            rotational_part = (8 * pi**(5/2) * kB * T / h**2) * (Ib / sigma)
         else:
-            rotational_part = (pi**0.5 / sigma)*(8 * pi**2 * kB * T / h**2)**(3 / 2) * math.sqrt(Ia * Ib * Ic)
+            rotational_part = (pi**0.5 / (sigma * h**3))*(8 * pi**2 * kB * T)**(3 / 2) * math.sqrt(Ia * Ib * Ic)
 
         # Final pre-exponential factor
         return ((kB * T) / h) * translational_part * rotational_part
