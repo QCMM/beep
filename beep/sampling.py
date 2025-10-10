@@ -156,6 +156,27 @@ def compute_rmsd_conditional(m1, m2, rmsd_symm: bool, cutoff: float):
         rm = 10.0
     return r, rm
 
+
+def _key_and_com(mol: Molecule, ligand_size: int, grid: float):
+    xyz = np.asarray(mol.geometry)[-ligand_size:]
+    com = xyz.mean(axis=0)
+    key = tuple((com / grid).astype(int))
+    return key, com
+
+
+def _neighbors(key):
+    ix, iy, iz = key
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                yield (ix + dx, iy + dy, iz + dz)
+
+def _keys_adjacent(k1, k2):
+    # Chebyshev distance in key space <= 1
+    return (abs(k1[0]-k2[0]) <= 1 and
+            abs(k1[1]-k2[1]) <= 1 and
+            abs(k1[2]-k2[2]) <= 1)
+
 def filter_binding_sites(
     mol_list1: List[Tuple[str, Molecule]],
     mol_list2: List[Tuple[str, Molecule]],
@@ -166,83 +187,75 @@ def filter_binding_sites(
     grid: float = 0.5,
 ) -> List[Tuple[str, Molecule]]:
     """
-    Filters duplicate binding sites using ligand-centric prefilters:
-      - Ligand COM bucketing
-      - COM distance lower bound
-      - Conditional mirror RMSD
+    Filters duplicate binding sites using ligand-centric spatial hashing:
+      - Bucket by quantized ligand COM (grid)
+      - Compare within same bucket AND 26 adjacent buckets
+      - Conditional mirror RMSD (only if needed)
+    Returns: list of (name, Molecule) that are unique vs same-round and reference set.
     """
     logger.info("\nStarting filtering procedure:")
     logger.info("Comparing within structures found in this round:")
 
-    # --- 1) Bucket mol_list1 by ligand COM ---
-    buckets1 = defaultdict(list)
+    # Precompute key+COM for list1
+    list1_info = []
     for name, mol in mol_list1:
-        com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
-        key = tuple((com / grid).astype(int))
-        buckets1[key].append((name, mol))
-    logger.debug(f"[filter] Bucketing {len(mol_list1)} new structures into {len(buckets1)} COM bins (grid={grid} Å)")
+        key, com = _key_and_com(mol, ligand_size, grid)
+        list1_info.append((name, mol, key, com))
 
+    # --- 1) Deduplicate within mol_list1 using adjacent buckets ---
     to_remove_tmp = set()
-    rmsd_calls = 0
-    mirror_calls = 0
 
-    for items in buckets1.values():
-        for i in range(len(items)):
-            ni, mi = items[i]
-            if ni in to_remove_tmp:
+    # Compare each pair once; only if keys are adjacent (incl. same)
+    for i in range(len(list1_info)):
+        ni, mi, ki, _ = list1_info[i]
+        if ni in to_remove_tmp:
+            continue
+        for j in range(i + 1, len(list1_info)):
+            nj, mj, kj, _ = list1_info[j]
+            if nj in to_remove_tmp:
                 continue
-            com_i = np.asarray(mi.geometry)[-ligand_size:].mean(axis=0)
-            for j in range(i + 1, len(items)):
-                nj, mj = items[j]
-                if nj in to_remove_tmp:
-                    continue
-                com_j = np.asarray(mj.geometry)[-ligand_size:].mean(axis=0)
-                if np.linalg.norm(com_i - com_j) >= cut_off_val:
-                    continue
-                rmsd_calls += 1
-                r, rm = compute_rmsd_conditional(mi, mj, rmsd_symm, cut_off_val)
-                if rm != 10.0:
-                    mirror_calls += 1
-                if min(r, rm) < cut_off_val:
-                    logger.info(f"Duplicate found: {ni} vs {nj}, RMSD: {min(r, rm):.3f}")
-                    to_remove_tmp.add(nj)
+            if not _keys_adjacent(ki, kj):
+                continue
+            r, rm = compute_rmsd_conditional(mi, mj, rmsd_symm, cut_off_val)
+            if min(r, rm) < cut_off_val:
+                logger.info(f"Duplicate found: {ni} vs {nj}, RMSD: {min(r, rm):.3f}")
+                to_remove_tmp.add(nj)
 
-    unique_tmp = [pair for pair in mol_list1 if pair[0] not in to_remove_tmp]
+    unique_tmp = [(name, mol) for (name, mol, _, _) in list1_info
+                  if name not in to_remove_tmp]
 
-    # --- 2) Compare against reference set ---
+    # --- 2) Compare against mol_list2 (reference set) with adjacent buckets ---
     logger.info("Comparing with structures already present in the Optimization Dataset")
-    buckets2 = defaultdict(list)
+
+    # Bucket reference set
+    buckets2: dict = defaultdict(list)
     for name, mol in mol_list2:
-        com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
-        key = tuple((com / grid).astype(int))
+        key, com = _key_and_com(mol, ligand_size, grid)
         buckets2[key].append((name, mol))
-    logger.debug(f"[filter] Reference set: {len(mol_list2)} molecules in {len(buckets2)} COM bins")
 
     to_remove_final = set()
     for name, mol in unique_tmp:
-        com = np.asarray(mol.geometry)[-ligand_size:].mean(axis=0)
-        key = tuple((com / grid).astype(int))
-        candidates = buckets2.get(key, [])
+        key, _ = _key_and_com(mol, ligand_size, grid)
+        # gather candidates from this bucket + all neighbors
+        candidates = []
+        for nk in _neighbors(key):
+            if nk in buckets2:
+                candidates.extend(buckets2[nk])
+
+        drop = False
         for ref_name, ref_mol in candidates:
-            com_ref = np.asarray(ref_mol.geometry)[-ligand_size:].mean(axis=0)
-            if np.linalg.norm(com - com_ref) >= cut_off_val:
-                continue
-            rmsd_calls += 1
             r, rm = compute_rmsd_conditional(mol, ref_mol, rmsd_symm, cut_off_val)
-            if rm != 10.0:
-                mirror_calls += 1
             if min(r, rm) < cut_off_val:
                 logger.info(f"Duplicate found: {name} vs. {ref_name}, RMSD: {min(r, rm):.3f}")
                 to_remove_final.add(name)
+                drop = True
                 break
+        if drop:
+            continue
 
     total_removed = len(to_remove_tmp) + len(to_remove_final)
     unique_final = [pair for pair in unique_tmp if pair[0] not in to_remove_final]
-
-    logger.info(
-        f"{total_removed} duplicates removed. {len(unique_final)} unique binding sites remain "
-        f"({rmsd_calls} RMSD calls, {mirror_calls} mirror calls)."
-    )
+    logger.info(f"{total_removed} duplicates removed. {len(unique_final)} unique binding sites remain.")
     return unique_final
 
 
