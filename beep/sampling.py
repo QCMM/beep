@@ -156,101 +156,112 @@ def compute_rmsd_conditional(m1, m2, rmsd_symm: bool, cutoff: float):
         rm = 10.0
     return r, rm
 
+def ligand_dm_ok(m1: Molecule, m2: Molecule, ligand_size: int, tau: float = 1e-3) -> bool:
+    """Cheap, rotation/translation-invariant gate based on the ligand distance matrix."""
+    X1 = np.asarray(m1.geometry)[-ligand_size:]
+    X2 = np.asarray(m2.geometry)[-ligand_size:]
+    d1 = X1[:, None, :] - X1[None, :, :]
+    d2 = X2[:, None, :] - X2[None, :, :]
+    D1 = np.linalg.norm(d1, axis=2)
+    D2 = np.linalg.norm(d2, axis=2)
+    # Frobenius norm tolerance in Å (tune tau as needed)
+    return np.linalg.norm(D1 - D2) <= tau
 
-def _key_and_com(mol: Molecule, ligand_size: int, grid: float):
-    xyz = np.asarray(mol.geometry)[-ligand_size:]
-    com = xyz.mean(axis=0)
-    key = tuple((com / grid).astype(int))
-    return key, com
+def _key_for_grid(mol: Molecule, ligand_size: int, grid: float) -> Tuple[int, int, int]:
+    lig = np.asarray(mol.geometry)[-ligand_size:]
+    com = lig.mean(axis=0)
+    return tuple((com / grid).astype(int))
 
-
-def _neighbors(key):
+def _neighbor_keys(key: Tuple[int, int, int], radius: int):
     ix, iy, iz = key
-    for dx in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            for dz in (-1, 0, 1):
+    for dx in range(-radius, radius + 1):
+        for dy in range(-radius, radius + 1):
+            for dz in range(-radius, radius + 1):
                 yield (ix + dx, iy + dy, iz + dz)
 
-def _keys_adjacent(k1, k2):
-    # Chebyshev distance in key space <= 1
-    return (abs(k1[0]-k2[0]) <= 1 and
-            abs(k1[1]-k2[1]) <= 1 and
-            abs(k1[2]-k2[2]) <= 1)
+# ---------- main filter ----------
 
 def filter_binding_sites(
     mol_list1: List[Tuple[str, Molecule]],
     mol_list2: List[Tuple[str, Molecule]],
     cut_off_val: float,
     rmsd_symm: bool,
-    logger: logging.Logger,
     ligand_size: int,
+    logger: logging.Logger,
     grid: float = 0.5,
+    nb_radius: int = 3,
+    dm_tau: float = 1e-3,
 ) -> List[Tuple[str, Molecule]]:
     """
-    Filters duplicate binding sites using ligand-centric spatial hashing:
-      - Bucket by quantized ligand COM (grid)
-      - Compare within same bucket AND 26 adjacent buckets
-      - Conditional mirror RMSD (only if needed)
-    Returns: list of (name, Molecule) that are unique vs same-round and reference set.
+    Filters duplicates using:
+      1) Ligand distance-matrix gate (invariant, very cheap).
+      2) Spatial hashing by ligand COM (grid=0.5 Å) + neighbor buckets (radius=3).
+      3) Conditional mirror RMSD only when needed.
+
+    Returns list of (name, Molecule) from mol_list1 that are unique.
     """
     logger.info("\nStarting filtering procedure:")
     logger.info("Comparing within structures found in this round:")
 
-    # Precompute key+COM for list1
-    list1_info = []
-    for name, mol in mol_list1:
-        key, com = _key_and_com(mol, ligand_size, grid)
-        list1_info.append((name, mol, key, com))
+    # Precompute keys for list1
+    l1 = [(name, mol, _key_for_grid(mol, ligand_size, grid)) for (name, mol) in mol_list1]
 
-    # --- 1) Deduplicate within mol_list1 using adjacent buckets ---
+    # 1) Within-round dedup (search across neighbor voxels)
     to_remove_tmp = set()
-
-    # Compare each pair once; only if keys are adjacent (incl. same)
-    for i in range(len(list1_info)):
-        ni, mi, ki, _ = list1_info[i]
+    for i in range(len(l1)):
+        ni, mi, ki = l1[i]
         if ni in to_remove_tmp:
             continue
-        for j in range(i + 1, len(list1_info)):
-            nj, mj, kj, _ = list1_info[j]
+        for j in range(i + 1, len(l1)):
+            nj, mj, kj = l1[j]
             if nj in to_remove_tmp:
                 continue
-            if not _keys_adjacent(ki, kj):
+            # compare only if keys are within the neighbor radius (Chebyshev metric)
+            if (abs(ki[0] - kj[0]) > nb_radius or
+                abs(ki[1] - kj[1]) > nb_radius or
+                abs(ki[2] - kj[2]) > nb_radius):
                 continue
+            # invariant ligand gate first
+            if not ligand_dm_ok(mi, mj, ligand_size, tau=dm_tau):
+                continue
+            # then the real RMSD
             r, rm = compute_rmsd_conditional(mi, mj, rmsd_symm, cut_off_val)
             if min(r, rm) < cut_off_val:
                 logger.info(f"Duplicate found: {ni} vs {nj}, RMSD: {min(r, rm):.3f}")
                 to_remove_tmp.add(nj)
 
-    unique_tmp = [(name, mol) for (name, mol, _, _) in list1_info
-                  if name not in to_remove_tmp]
+    unique_tmp = [(name, mol) for (name, mol, _) in l1 if name not in to_remove_tmp]
 
-    # --- 2) Compare against mol_list2 (reference set) with adjacent buckets ---
+    # 2) Against reference set (neighbor buckets + invariant gate)
     logger.info("Comparing with structures already present in the Optimization Dataset")
 
-    # Bucket reference set
-    buckets2: dict = defaultdict(list)
-    for name, mol in mol_list2:
-        key, com = _key_and_com(mol, ligand_size, grid)
-        buckets2[key].append((name, mol))
+    # Bucket refs
+    buckets2 = defaultdict(list)
+    for rname, rmol in mol_list2:
+        k = _key_for_grid(rmol, ligand_size, grid)
+        buckets2[k].append((rname, rmol))
 
     to_remove_final = set()
     for name, mol in unique_tmp:
-        key, _ = _key_and_com(mol, ligand_size, grid)
-        # gather candidates from this bucket + all neighbors
+        k = _key_for_grid(mol, ligand_size, grid)
+        # gather candidates from neighbor voxels
         candidates = []
-        for nk in _neighbors(key):
+        for nk in _neighbor_keys(k, nb_radius):
             if nk in buckets2:
                 candidates.extend(buckets2[nk])
 
-        drop = False
-        for ref_name, ref_mol in candidates:
-            r, rm = compute_rmsd_conditional(mol, ref_mol, rmsd_symm, cut_off_val)
+        # neighbor pass
+        dropped = False
+        for rname, rmol in candidates:
+            if not ligand_dm_ok(mol, rmol, ligand_size, tau=dm_tau):
+                continue
+            r, rm = compute_rmsd_conditional(mol, rmol, rmsd_symm, cut_off_val)
             if min(r, rm) < cut_off_val:
-                logger.info(f"Duplicate found: {name} vs. {ref_name}, RMSD: {min(r, rm):.3f}")
+                logger.info(f"Duplicate found: {name} vs. {rname}, RMSD: {min(r, rm):.3f}")
                 to_remove_final.add(name)
-                drop = True
+                dropped = True
                 break
-        if drop:
+        if dropped:
             continue
 
     total_removed = len(to_remove_tmp) + len(to_remove_final)
@@ -437,7 +448,8 @@ def run_sampling(
         )
         mol_size = len(target_mol.symbols)
         unique_mols = filter_binding_sites(
-            opt_molecules_new, opt_molecules, cut_off_val=rmsd_val, rmsd_symm=rmsd_symm, ligand_size=mol_size, logger=logger
+            opt_molecules_new, opt_molecules, cut_off_val=rmsd_val, rmsd_symm=rmsd_symm, ligand_size=mol_size, logger=logger,
+            grid=0.5, nb_radius=3, dm_tau=1e-3 
         )
 
         # Add the molecules to the refinement OptimizationDataset
