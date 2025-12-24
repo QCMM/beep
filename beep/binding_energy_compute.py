@@ -101,6 +101,7 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
     f_struc_mol = ptl.Molecule(
         symbols=symbols,
         geometry=geom,
+        molecular_multiplicity=smol_mol.molecular_multiplicity,
         fragments=[
             list(range(0, len(surf_symbols))),
             list(range(len(surf_symbols), len(symbols))),

@@ -154,8 +154,9 @@ def create_molecule(cluster: Molecule, mol_shift: Molecule) -> Molecule:
     geom.extend(list(cluster.geometry.flatten()))
     geom.extend(list(mol_shift.geometry.flatten()))
 
-    return Molecule(symbols=atms, geometry=geom, fix_com=False, fix_orientation=False)
+    mult = mol_shift.molecular_multiplicity
 
+    return Molecule(symbols=atms, geometry=geom, molecular_multiplicity = mult, fix_com=False, fix_orientation=False)
 
 
 def random_molecule_sampler(
