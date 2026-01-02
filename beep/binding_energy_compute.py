@@ -101,10 +101,12 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
     f_struc_mol = ptl.Molecule(
         symbols=symbols,
         geometry=geom,
+        molecular_multiplicity=smol_mol.molecular_multiplicity,
         fragments=[
             list(range(0, len(surf_symbols))),
             list(range(len(surf_symbols), len(symbols))),
         ],
+        fragment_multiplicities = [1, smol_mol.molecular_multiplicity]
     )
 
     # Fragment extraction
@@ -114,6 +116,13 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
     j6 = f_struc_mol.get_fragment(1, 0)  # Alternative combined fragment
 
     logger.debug(f"Fragments generated: j4={j4}, j5={j5}, j6={j6}, j7={j7}")
+    logger.debug(
+    "Fragment multiplicities: "
+    f"j4 (small molecule) = {j4.molecular_multiplicity}, "
+    f"j5 (surface) = {j5.molecular_multiplicity}, "
+    f"j6 (combined 1,0) = {j6.molecular_multiplicity}, "
+    f"j7 (combined 0,1) = {j7.molecular_multiplicity}"
+)
 
     # Binding energy stoichiometry dictionary
     be_stoic = {
