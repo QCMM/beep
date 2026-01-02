@@ -106,6 +106,7 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
             list(range(0, len(surf_symbols))),
             list(range(len(surf_symbols), len(symbols))),
         ],
+        fragment_multiplicities = [1, smol_mol.molecular_multiplicity]
     )
 
     # Fragment extraction
