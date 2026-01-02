@@ -238,7 +238,7 @@ def process_be_computation(
 
         # Create or get benchmark binding energy dataset
         padded_log(logger, f"Building name for the new ReactionDataset", padding_char="*", total_length=60)
-        cluster_name = "_".join(list(opt_stru.keys())[0].split("_")[1:3])
+        cluster_name = "_".join(list(opt_stru.keys())[0].split("_")[-3:-1])
         cluster_mol = surf_opt_ds.get_record(cluster_name, opt_lot).get_final_molecule()
         rdset_name = f"be_{args.molecule.upper()}_{cluster_name.upper()}_{opt_method.upper()}_{opt_basis.upper()}"
         logger.info(f"ReactionDataset name for {ds_opt.name} is: {rdset_name}")
