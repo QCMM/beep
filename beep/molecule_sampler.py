@@ -155,8 +155,38 @@ def create_molecule(cluster: Molecule, mol_shift: Molecule) -> Molecule:
     geom.extend(list(mol_shift.geometry.flatten()))
 
     mult = mol_shift.molecular_multiplicity
+    chg = mol_shift.molecular_charge
 
-    return Molecule(symbols=atms, geometry=geom, molecular_multiplicity = mult, fix_com=False, fix_orientation=False)
+    new_mol = Molecule(symbols=atms, 
+                       geometry=geom, 
+                       molecular_multiplicity = mult, 
+                       molecular_charge = chg, 
+                       fix_com=False, 
+                       fix_orientation=False)
+
+    return new_mol
+
+def create_debug_molecule(cluster: Molecule, sampled_mol: list[Molecule]) -> Molecule:
+    """
+    Create a visualization-only molecule consisting of the cluster plus
+    all sampled molecules placed on it.
+
+    No fragments, no spin bookkeeping, no charge reconciliation.
+    """
+
+    atms = list(cluster.symbols)
+    geom = list(cluster.geometry.flatten())
+
+    for mol in sampled_mol:
+        atms.extend(list(mol.symbols))
+        geom.extend(list(mol.geometry.flatten()))
+
+    return Molecule(
+        symbols=atms,
+        geometry=geom,
+        fix_com=False,
+        fix_orientation=False,
+    )
 
 
 def random_molecule_sampler(
@@ -217,7 +247,7 @@ def random_molecule_sampler(
     binding_site_size = 3
     atoms_per_cluster_mol = 3
     total_attempts = 500
-    surface_closness_cutoff = 1.52  # Angstrom vdW radius of Oxygen
+    surface_closness_cutoff = float(qcel.VanderWaalsRadii('MANTINA2009').vdwr["O"].data) * 1.5 #  Angstrom vdW radius of Oxygen + a buffer
 
     logger.debug(f"Maximum number of structures to be sampled: {max_structures }")
     fill_num = len(str(max_structures))
@@ -267,12 +297,10 @@ def random_molecule_sampler(
         molecule = create_molecule(cluster, mol_shift)
         cluster_with_sampled_mol.append(molecule)
 
-        if debug:
-            if not debug_molecule:
-                debug_molecule = molecule
-            else:
-                debug_molecule = create_molecule(debug_molecule, mol_shift)
         c += 1
+
+    if debug:
+        debug_molecule = create_debug_molecule(cluster, sampled_mol)
 
     final_num_struc = len(cluster_with_sampled_mol)
     logger.info(f"Number of generated initial structures: {final_num_struc} ")
