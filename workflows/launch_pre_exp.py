@@ -256,6 +256,7 @@ def get_sym_num(
     """
     schema = qcel.models.Molecule.from_data(xyz).dict()
     mol = molsym.Molecule.from_schema(schema)
+    mol.tol = 1e-3
     pg, (paxis, saxis) = molsym.find_point_group(mol)
     if pg == 'D0h':
         return(pg, 2)
