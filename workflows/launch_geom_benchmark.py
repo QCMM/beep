@@ -757,15 +757,15 @@ def main():
         f"\nSend a total of {ct} structures to compute at the {geom_ref_opt_lot} level of theory to the tag {hl_tag}\n"
     )
 
-    ## Wait for the Opimizations to finish
-    wait_for_completion(
-        client,
-        odset_dict,
-        geom_ref_opt_lot,
-        gr_program,
-        wait_interval=600,
-        check_errors=True,
-    )
+ #   ## Wait for the Opimizations to finish
+ #   wait_for_completion(
+ #       client,
+ #       odset_dict,
+ #       geom_ref_opt_lot,
+ #       gr_program,
+ #       wait_interval=600,
+ #       check_errors=True,
+ #   )
 
     padded_log(logger, "Start of the DFT geometry computations")
 
@@ -833,7 +833,7 @@ def main():
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
         record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
-        ref_geom_fmols[struct_name] = record.get_final_molecule()
+        ref_geom_fmols[struct_name] = record.get_initial_molecule()
 
     padded_log(
         logger,
