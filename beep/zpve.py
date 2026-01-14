@@ -148,7 +148,15 @@ def get_zpve_mol(client: ptl.FractalClient, mol: int, lot_opt: str, on_imaginary
         If `on_imaginary='raise'` and imaginary frequencies are found.
     """
     logger = logging.getLogger("beep")
-    mol_form = client.query_molecules(mol)[0].dict()['identifiers']['molecular_formula']
+
+    mol_obj = client.query_molecules(mol)[0]
+    num_atm = len(mol_obj.symbols)
+
+    if num_atm == 1:
+        logger.info(f"Molecule {mol} is an atom, will retrun 0.0 for ZPVE")
+        return 0.0, True
+
+    mol_form = mol_obj.dict()['identifiers']['molecular_formula']
     method = lot_opt.split("_")[0]
     basis = lot_opt.split("_")[1]
     if method[0] == 'U':
