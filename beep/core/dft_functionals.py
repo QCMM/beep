@@ -275,7 +275,6 @@ def double_hybrid():
         'DSD-PBEPBE',
         'DSD-PBEPBE-D3BJ',
         'DSD-PBEPBE-NL',
-        'DSD-PBEPBE-NL',
         'MP2D',
         'MP2MP2',
         'PBE0-2',

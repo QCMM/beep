@@ -54,7 +54,7 @@ def check_collection_existence(client, *collections, collection_type="Optimizati
             raise DatasetNotFound(
                 f"Collection {collection} does not exist. Please create it first. Exiting..."
             )
-        logger.info(f"The {collection_type} named {collection} exsits {bcheck}")
+        logger.info(f"The {collection_type} named {collection} exists {bcheck}")
 
 
 def create_and_add_specification(client, odset, method, basis, program,
@@ -64,7 +64,7 @@ def create_and_add_specification(client, odset, method, basis, program,
     if qc_keyword:
         kw_name = client.query_keywords()[qc_keyword].values.values()
         logger.debug(f"Using the following keyword for the specification {kw_name} to {odset.name}")
-        if ("uks" or "uhf") in kw_name and program == "psi4":
+        if ("uks" in kw_name or "uhf" in kw_name) and program == "psi4":
             spec_name = "U" + spec_name
 
     spec = {
@@ -81,7 +81,7 @@ def create_and_add_specification(client, odset, method, basis, program,
     }
     odset.add_specification(**spec, overwrite=True)
     odset.save()
-    logger.debug(f"Create and added the specifiction {spec_name} to {odset.name}")
+    logger.debug(f"Create and added the specification {spec_name} to {odset.name}")
     return spec_name
 
 
@@ -118,7 +118,7 @@ def wait_for_completion(client, odset_dict, opt_lot, program, qc_keyword=None,
         statuses = []
         for lot in opt_lot:
             try:
-                if ("uks" or "uhf") in client.query_keywords()[qc_keyword].values.values() and program == "psi4":
+                if ("uks" in client.query_keywords()[qc_keyword].values.values() or "uhf" in client.query_keywords()[qc_keyword].values.values()) and program == "psi4":
                     lot = "U" + lot
             except TypeError:
                 pass
@@ -330,12 +330,12 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
 
     padded_log(
         logger,
-        "Start of RMSD comparsion between DFT and {} geometries",
+        "Start of RMSD comparison between DFT and {} geometries",
         geom_ref_opt_lot,
     )
 
     try:
-        if ("uks" or "uhf") in client.query_keywords()[dft_keyword].values.values() and dft_program == "psi4":
+        if ("uks" in client.query_keywords()[dft_keyword].values.values() or "uhf" in client.query_keywords()[dft_keyword].values.values()) and dft_program == "psi4":
             dft_geom_functionals = {
                 key: ["U" + item for item in value]
                 for key, value in dft_geom_functionals.items()
