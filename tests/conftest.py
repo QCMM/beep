@@ -47,6 +47,39 @@ def w22_cluster():
     return Molecule.from_file(str(DATA_DIR / "w22_01.xyz"))
 
 
+# Real optimized binding-site structures fetched from the QCFractal server
+# (CO on water clusters, B3LYP-D3BJ/def2-TZVP)
+
+@pytest.fixture(scope="session")
+def co_w2_0001():
+    return Molecule.from_file(str(DATA_DIR / "co_w2_0001.xyz"))
+
+
+@pytest.fixture(scope="session")
+def co_w2_0007():
+    return Molecule.from_file(str(DATA_DIR / "co_w2_0007.xyz"))
+
+
+@pytest.fixture(scope="session")
+def co_w3_0001():
+    return Molecule.from_file(str(DATA_DIR / "co_w3_0001.xyz"))
+
+
+@pytest.fixture(scope="session")
+def co_w3_0004():
+    return Molecule.from_file(str(DATA_DIR / "co_w3_0004.xyz"))
+
+
+@pytest.fixture(scope="session")
+def co_w5_0001():
+    return Molecule.from_file(str(DATA_DIR / "co_w5_0001.xyz"))
+
+
+@pytest.fixture(scope="session")
+def co_w5_0002():
+    return Molecule.from_file(str(DATA_DIR / "co_w5_0002.xyz"))
+
+
 # ---------------------------------------------------------------------------
 # Function-scoped utility fixtures
 # ---------------------------------------------------------------------------

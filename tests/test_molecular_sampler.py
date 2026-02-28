@@ -15,6 +15,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+TEST_OUTPUT_DIR = Path(__file__).resolve().parent / "test_data_output"
 logging.basicConfig(filename='app.log', filemode='w', level=logging.DEBUG)
 
 def load_molecules(pattern: str) -> list:
@@ -136,7 +137,7 @@ for key, vals in water_clusters.items():
 def test_create_molecules(cluster, shifted_mol, request):
     test_id = request.node.name.split("[")[1].split("]")[0]
     mol = create_molecule(cluster, shifted_mol)
-    mol.to_file("test_data_output/" + test_id + ".xyz", dtype="xyz")
+    mol.to_file(str(TEST_OUTPUT_DIR / (test_id + ".xyz")), dtype="xyz")
     assert len(mol.symbols) == len(cluster.symbols) + len(shifted_mol.symbols)
 
 print(test_data_create_molecule_diameters)
@@ -161,6 +162,6 @@ def test_random_molecule_sampler(cluster, target_mol, request, caplog):
     
     # Other assertions
     assert all(isinstance(item, Molecule) for item in mol_list)
-    debug_mol.to_file("test_data_output/sampling_mol_" + test_id + ".xyz", dtype="xyz")
+    debug_mol.to_file(str(TEST_OUTPUT_DIR / ("sampling_mol_" + test_id + ".xyz")), dtype="xyz")
 
 

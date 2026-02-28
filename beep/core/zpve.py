@@ -4,6 +4,7 @@ ZPVE vibrational analysis — pure computation using PSI4.
 No QCFractal imports. This module contains only the _vibanal_wfn function
 which operates on raw Hessian matrices and molecule objects.
 """
+import collections
 import numpy as np
 from typing import Union, Any, Callable
 import os, sys
@@ -36,6 +37,52 @@ def suppress_stdout(func: Callable) -> Callable:
     return wrapper
 
 
+def _patch_harmonic_analysis():
+    """Monkey-patch psi4's harmonic_analysis to skip the MintsHelper/cdsalcs
+    block when basisset is None.
+
+    The original code calls ``MintsHelper(basisset)`` to obtain SALCs for
+    irrep classification of vibrational modes.  When basisset is None (as in
+    BEEP's usage) this segfaults.  The SALCs are only used for labelling
+    modes by irrep — frequencies, force constants, and thermodynamics are
+    unaffected.  Skipping this block sets ``Uh = {}`` so all modes get
+    ``gamma = None`` instead of an irrep label.
+    """
+    import psi4.driver.qcdb.vib as _vib
+
+    _orig = _vib.harmonic_analysis
+
+    @wraps(_orig)
+    def _patched(hess, geom, mass, basisset, irrep_labels, dipder=None,
+                 project_trans=True, project_rot=True):
+        if basisset is not None:
+            return _orig(hess, geom, mass, basisset, irrep_labels,
+                         dipder=dipder, project_trans=project_trans,
+                         project_rot=project_rot)
+
+        # --- basisset is None: skip MintsHelper, provide empty Uh ---
+        import psi4
+        _saved = psi4.core.MintsHelper
+
+        class _DummyMintsHelper:
+            def __init__(self, *a, **kw):
+                pass
+            def cdsalcs(self, *a, **kw):
+                return self
+            def matrix_irrep(self, h):
+                return np.zeros((0, 0))
+
+        psi4.core.MintsHelper = _DummyMintsHelper
+        try:
+            return _orig(hess, geom, mass, None, irrep_labels,
+                         dipder=dipder, project_trans=project_trans,
+                         project_rot=project_rot)
+        finally:
+            psi4.core.MintsHelper = _saved
+
+    _vib.harmonic_analysis = _patched
+
+
 def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecule=None, energy=None, project_trans: bool = True, project_rot: bool = True, molden=False,name=None, lt=None):
     """Function to perform analysis of a hessian or hessian block, specifically...
     calling for and printing vibrational and thermochemical analysis, setting thermochemical variables,
@@ -62,6 +109,8 @@ def _vibanal_wfn(hess: np.ndarray = None, irrep: Union[int, str] = None, molecul
     vibinfo : dict
         A dictionary of vibrational information. See :py:func:`~psi4.driver.qcdb.vib.harmonic_analysis`
     """
+
+    _patch_harmonic_analysis()
 
     from psi4.driver.qcdb.vib import harmonic_analysis, thermo
     harmonic = suppress_stdout(harmonic_analysis)
