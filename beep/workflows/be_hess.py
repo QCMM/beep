@@ -5,9 +5,9 @@ import logging
 from pathlib import Path
 from typing import List, Tuple
 
-import qcfractal.interface as ptl
-from qcfractal.interface.client import FractalClient
-from qcfractal.interface.collections import ReactionDataset
+import qcportal as ptl
+from qcportal.client import FractalClient
+from qcportal.collections import ReactionDataset
 
 from ..models.be_hess import BeHessConfig
 from ..core.logging_utils import padded_log

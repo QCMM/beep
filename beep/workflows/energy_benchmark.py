@@ -6,11 +6,11 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-import qcfractal.interface as ptl
+import qcportal as ptl
 import qcelemental as qcel
 from pathlib import Path
-from qcfractal.interface.client import FractalClient
-from qcfractal.interface.collections import Dataset, OptimizationDataset, ReactionDataset
+from qcportal.client import FractalClient
+from qcportal.collections import Dataset, OptimizationDataset, ReactionDataset
 from qcelemental.models.molecule import Molecule
 
 from ..models.energy_benchmark import EnergyBenchmarkConfig

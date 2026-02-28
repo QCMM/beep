@@ -6,10 +6,10 @@ import pandas as pd
 import os,sys
 from functools import wraps
 
-import qcfractal.interface as ptl
-from qcfractal.interface.client import FractalClient
+import qcportal as ptl
+from qcportal.client import FractalClient
 from qcelemental.models.molecule import Molecule
-from qcfractal.interface.collections import Dataset, OptimizationDataset, ReactionDataset
+from qcportal.collections import Dataset, OptimizationDataset, ReactionDataset
 from .utils.logging_utils import *
 
 def suppress_stdout(func: Callable) -> Callable:

@@ -7,10 +7,10 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
-import qcfractal.interface as ptl
+import qcportal as ptl
 from pathlib import Path
-from qcfractal.interface.client import FractalClient
-from qcfractal.interface.collections import OptimizationDataset, ReactionDataset
+from qcportal.client import FractalClient
+from qcportal.collections import OptimizationDataset, ReactionDataset
 from qcelemental.models.molecule import Molecule
 
 from ..models.geom_benchmark import GeomBenchmarkConfig

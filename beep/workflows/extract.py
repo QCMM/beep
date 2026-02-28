@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import qcelemental as qcel
 from pathlib import Path
-from qcfractal.interface.client import FractalClient
+from qcportal.client import FractalClient
 
 from ..models.extract import ExtractConfig
 from ..core.logging_utils import (

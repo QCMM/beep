@@ -6,7 +6,7 @@ import logging
 import numpy as np
 import pandas as pd
 import qcelemental as qcel
-from qcfractal.interface.client import FractalClient
+from qcportal.client import FractalClient
 
 from ..models.pre_exp import PreExpConfig
 from ..core.logging_utils import setup_logging
