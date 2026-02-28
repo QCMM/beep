@@ -1,0 +1,20 @@
+{
+    "workflow": "be_hess",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "molecule": "CO",
+    "surface_model_collection": "Water_22",
+    "small_molecule_collection": "Small_molecules",
+    "level_of_theory": ["wpbe-d3bj_def2-tzvp"],
+    "exclude_clusters": [],
+    "opt_level_of_theory": "bhandhlyp_def2-svp",
+    "keyword_id": null,
+    "hessian_clusters": [],
+    "program": "psi4",
+    "energy_tag": null,
+    "hessian_tag": null
+}

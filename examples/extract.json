@@ -1,0 +1,20 @@
+{
+    "workflow": "extract",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "opt_method": "mpwb1k-d3bj_def2-tzvp",
+    "be_methods": ["WB97X-V", "M06-HF", "WPBE-D3MBJ"],
+    "mol_coll_name": "Small_molecules",
+    "surface_model": "Water_22",
+    "hessian_clusters": [],
+    "molecules": [],
+    "be_range": [-0.1, -25.0],
+    "scale_factor": 0.958,
+    "basis": "def2-tzvp",
+    "exclude_clusters": [],
+    "no_zpve": false
+}

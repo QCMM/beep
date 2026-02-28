@@ -1,0 +1,23 @@
+{
+    "workflow": "energy_benchmark",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "molecule": "CO",
+    "benchmark_structures": ["CO_W2_1", "CO_W3_1"],
+    "small_molecule_collection": "Small_molecules",
+    "surface_model_collection": "small water",
+    "opt_level_of_theory": ["bhandhlyp_def2-svp"],
+    "reference_be_level_of_theory": ["df-ccsd(t)-f12", "cc-pvdz", "molpro"],
+    "be_level_of_theory": [],
+    "cbs_level_of_theory": [],
+    "keyword_id": null,
+    "program": "psi4",
+    "tag_reference_geometry": null,
+    "tag_dft_geometry": null,
+    "tag_be": null,
+    "tag_cbs": null
+}

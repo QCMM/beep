@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beep"
+version = "0.2.0"
+description = "A binding energy evaluation platform and database for molecules on interstellar ice-grain mantels"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+authors = [
+    {name = "Stefan Vogt-Geisse", email = "stvogtgeisse@qcmmlab.com"},
+    {name = "Giulia M. Bovolenta"},
+]
+requires-python = ">=3.8"
+dependencies = [
+    "matplotlib",
+    "scipy",
+    "tqdm",
+    "seaborn",
+    "pydantic>=1.10",
+    "numpy",
+    "pandas",
+    "qcfractal>=0.15,<0.50",
+    "qcelemental",
+]
+
+[project.optional-dependencies]
+pre_exp = ["molsym"]
+test = ["pytest"]
+
+[project.scripts]
+beep = "beep.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["beep*"]
