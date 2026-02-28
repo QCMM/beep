@@ -16,7 +16,7 @@ from qcelemental.models.molecule import Molecule
 
 from ..models.geom_benchmark import GeomBenchmarkConfig
 from ..core.logging_utils import (
-    padded_log, log_dataframe_averages, log_progress, dict_to_log,
+    padded_log, log_dataframe_averages, log_progress, dict_to_log, beep_banner,
 )
 from ..core.dft_functionals import (
     geom_hmgga_dz, geom_hmgga_tz, geom_gga_dz, geom_sqm_mb,
@@ -29,15 +29,11 @@ bcheck = "\u2714"
 mia0911 = "\u2606"
 gear = "\u2699"
 
-welcome_msg = """
----------------------------------------------------------------------------------------
-Welcome to the BEEP Binding Energy Evaluation Platform Geometry Benchmark Suite
----------------------------------------------------------------------------------------
-
-Shine, Loom, Manifest.
-
-                            By:  Stefan Vogt-Geisse
-"""
+welcome_msg = beep_banner(
+    "Geometry Benchmark",
+    tagline="Shine, Loom, Manifest.",
+    authors="Stefan Vogt-Geisse",
+)
 
 
 def create_and_add_specification(client, odset, method, basis, program,

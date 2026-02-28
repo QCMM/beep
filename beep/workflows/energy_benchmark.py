@@ -16,7 +16,7 @@ from qcelemental.models.molecule import Molecule
 
 from ..models.energy_benchmark import EnergyBenchmarkConfig
 from ..core.logging_utils import (
-    padded_log, log_formatted_list, log_progress, log_energy_mae,
+    padded_log, log_formatted_list, log_progress, log_energy_mae, beep_banner,
 )
 from ..core.dft_functionals import hybrid_gga, lrc, meta_hybrid_gga
 from ..core.plotting_utils import (
@@ -37,15 +37,11 @@ mia0911 = "\u2606"
 gear = "\u2699"
 wstar = "\u2606"
 
-welcome_msg = """
----------------------------------------------------------------------------------------
-Welcome to the BEEP Binding Energy Evaluation Platform  Binding Energy Benchmark Suite
----------------------------------------------------------------------------------------
-
-Steadfastness, Learning, and Mastery.
-
-                            By:  Stefan Vogt-Geisse
-"""
+welcome_msg = beep_banner(
+    "Binding Energy Benchmark",
+    tagline="Steadfastness, Learning, and Mastery.",
+    authors="Stefan Vogt-Geisse",
+)
 
 
 def populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs,

@@ -9,26 +9,18 @@ from qcportal.client import FractalClient
 from qcportal.collections import ReactionDataset
 
 from ..models.be_hess import BeHessConfig
-from ..core.logging_utils import padded_log
+from ..core.logging_utils import padded_log, beep_banner
 from ..adapters import qcfractal_adapter as qcf
 
 bcheck = "\u2714"
 gear = "\u2699"
 
-welcome_msg = """
----------------------------------------------------------------------------------------
-Welcome to the BEEP Binding Energy and Hessian Computation Suite
----------------------------------------------------------------------------------------
-
-"Schoenheit ist der Glanz der Wahrheit"
-
-                  ~ Werner Heissenberg
-
----------------------------------------------------------------------------------------
-
-                            By:  Stefan Vogt-Geisse and Giulia M. Bovolenta
-
-"""
+welcome_msg = beep_banner(
+    "Binding Energy and Hessian Computation",
+    quote="Schoenheit ist der Glanz der Wahrheit",
+    quote_author="Werner Heisenberg",
+    authors="Stefan Vogt-Geisse and Giulia M. Bovolenta",
+)
 
 
 def check_collections(client, surface_model_name, molecule_collection_name,
