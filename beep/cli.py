@@ -22,7 +22,6 @@ from .models import (
     EnergyBenchmarkConfig,
 )
 from .adapters.qcfractal_adapter import connect
-from .core.logging_utils import setup_logging
 
 WORKFLOW_MODELS = {
     "sampling": SamplingConfig,
@@ -33,11 +32,6 @@ WORKFLOW_MODELS = {
     "energy_benchmark": EnergyBenchmarkConfig,
 }
 
-WELCOME_BANNER = """
----------------------------------------------------------------
-  BEEP — Binding Energy Evaluation Platform
----------------------------------------------------------------
-"""
 
 
 def main():
@@ -70,9 +64,15 @@ def main():
     # Validate with the appropriate Pydantic model
     config = WORKFLOW_MODELS[workflow](**raw)
 
-    # Set up logging
-    logger = setup_logging(f"beep_{workflow}", workflow)
-    logger.info(WELCOME_BANNER)
+    # Set up console-only logging (workflows add file handlers per output folder)
+    logger = logging.getLogger("beep")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    if not logger.handlers:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(console_handler)
+
     logger.info(f"Running workflow: {workflow}")
 
     # Connect to QCFractal server

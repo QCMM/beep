@@ -1,6 +1,8 @@
 """BE + Hessian workflow — refactored from workflows/launch_be_hess.py."""
+import json
 import time
 import logging
+from pathlib import Path
 from typing import List, Tuple
 
 import qcfractal.interface as ptl
@@ -149,6 +151,21 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
 
 def run(config: BeHessConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
+
+    # Create output folder: <molecule>/be_hess/
+    res_folder = Path.cwd() / config.molecule / "be_hess"
+    res_folder.mkdir(parents=True, exist_ok=True)
+
+    # File logging inside the output folder
+    log_file = res_folder / f"beep_be_hess_{config.molecule}.log"
+    file_handler = logging.FileHandler(str(log_file), mode='w')
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(file_handler)
+
+    # Save a copy of the input config
+    config_path = res_folder / f"be_hess_{config.molecule}.json"
+    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+
     logger.info(welcome_msg)
 
     padded_log(logger, f"Checking for the state of the OptimizationDatasets")
@@ -214,3 +231,6 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
         qcf.check_jobs_status(client, all_hess_ids, logger, wait_interval=3600)
 
     logger.info("\nThank you for using the binding energy and hessian compute suite!")
+
+    logger.removeHandler(file_handler)
+    file_handler.close()

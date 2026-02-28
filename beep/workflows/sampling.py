@@ -1,4 +1,5 @@
 """Sampling workflow — refactored from workflows/launch_sampling.py."""
+import json
 import logging
 from pathlib import Path
 
@@ -11,37 +12,46 @@ from ..adapters import qcfractal_adapter as qcf
 
 bcheck = "\u2714"
 gear = "\u2699"
+separator = "-" * 80
 
-welcome_msg = """
----------------------------------------------------------------------------------------
+welcome_msg = f"""
+{separator}
 Welcome to the BEEP  Set-of-clusters Sampling Workflow
----------------------------------------------------------------------------------------
+{separator}
 
 "Adopt the pace of nature: her secret is patience."
 
                               \u2013 Ralph Waldo Emerson
 
 Seek Locate Map
----------------------------------------------------------------------------------------
+{separator}
 
                             By:  Stefan Vogt-Geisse and Giulia M. Bovolenta
 """
 
 
-def sampling_model_msg(surface_model, target_mol, method, basis, program):
-    return f"""
------------------------------------------------------------------------------------------
-Starting the sampling of the surface model {surface_model} with the molecule {target_mol}
-The sampling level of theory is method: {method} basis: {basis} program: {program}
------------------------------------------------------------------------------------------
-    """
-
-
-def sampling_round_msg(opt_smplg, opt_refine):
-    return f"""
-The OptimizationDataset for the sampling results: {opt_smplg}
-The OptimizationDataset for the unique structures for refinement: {opt_refine}
-    """
+def config_summary_msg(config):
+    """Format a clean summary of the sampling configuration."""
+    s_lot = config.sampling_level_of_theory
+    r_lot = config.refinement_level_of_theory
+    s_basis = s_lot.basis or "N/A"
+    lines = [
+        "",
+        separator,
+        f"  Molecule:             {config.molecule}",
+        f"  Surface model:        {config.surface_model_collection}",
+        f"  Small molecule coll:  {config.small_molecule_collection}",
+        f"  Sampling LOT:         {s_lot.method}/{s_basis} ({s_lot.program})",
+        f"  Refinement LOT:       {r_lot.method}/{r_lot.basis} ({r_lot.program})",
+        f"  Sampling shell:       {config.sampling_shell} Angstrom",
+        f"  Sampling condition:   {config.sampling_condition}",
+        f"  RMSD cutoff:          {config.rmsd_value}",
+        f"  RMSD symmetry:        {config.rmsd_symmetry}",
+        f"  Target binding sites: {config.total_binding_sites}",
+        separator,
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def check_collection_existence(client, *collections, collection_type="OptimizationDataset"):
@@ -99,9 +109,25 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
     from beep.adapters.qcfractal_adapter import run_sampling
 
     logger = logging.getLogger("beep")
-    logger.info(welcome_msg)
 
     smol_name = config.molecule
+
+    # Create output folder: <molecule>/sampling/
+    res_folder = Path.cwd() / smol_name / "sampling"
+    res_folder.mkdir(parents=True, exist_ok=True)
+
+    # File logging inside the output folder
+    log_file = res_folder / f"beep_sampling_{smol_name}.log"
+    file_handler = logging.FileHandler(str(log_file), mode='w')
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(file_handler)
+
+    # Save a copy of the input config
+    config_path = res_folder / f"sampling_{smol_name}.json"
+    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+
+    logger.info(welcome_msg)
+
     method = config.sampling_level_of_theory.method
     basis = config.sampling_level_of_theory.basis
     program = config.sampling_level_of_theory.program
@@ -116,6 +142,9 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
     else:
         opt_lot = method
     ropt_lot = rmethod + "_" + rbasis
+
+    # --- Configuration summary ---
+    logger.info(config_summary_msg(config))
 
     args_dict = {
         "method": method,
@@ -132,12 +161,16 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         "logger": logger,
     }
 
-    # Check if the OptimizationDataSets exist
+    # --- Validate collections ---
+    logger.info("Validating collections and optimized geometries...")
     check_collection_existence(
         client, config.surface_model_collection, config.small_molecule_collection
     )
     ds_sm = qcf.get_collection(client, "OptimizationDataset", config.small_molecule_collection)
     ds_wc = qcf.get_collection(client, "OptimizationDataset", config.surface_model_collection)
+
+    cluster_names = list(ds_wc.data.records.keys())
+    logger.info(f"  Surface model clusters: {len(cluster_names)}  ({', '.join(cluster_names)})")
 
     # Check if all the molecules are optimized at the requested level of theory
     if len(qcf.fetch_initial_molecule(ds_sm, smol_name, opt_lot).symbols) == 1:
@@ -148,12 +181,13 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
         args_dict["target_mol"] = qcf.fetch_final_molecule(ds_sm, smol_name, opt_lot)
 
+    logger.info(f"  All geometries validated. {bcheck}\n")
+
     args_dict["client"] = client
 
+    # --- Sampling loop ---
     count = 0
-    logger.info(
-        sampling_model_msg(config.surface_model_collection, smol_name, method, basis, program)
-    )
+    cluster_results = []
 
     for c, w in enumerate(ds_wc.data.records):
         args_dict["cluster"] = qcf.fetch_final_molecule(ds_wc, w, opt_lot)
@@ -166,10 +200,13 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         args_dict["sampling_opt_dset"] = ds_smplg
         args_dict["refinement_opt_dset"] = ds_ref
 
-        padded_log(logger, f"Processing cluster: {w}", padding_char=gear, total_length=80)
-        logger.info(sampling_round_msg(smplg_opt_dset_name, ref_opt_dset_name))
+        logger.info(f"\n{'=' * 80}")
+        logger.info(f"  Cluster {c+1}/{len(cluster_names)}: {w}")
+        logger.info(f"  Sampling dataset:    {smplg_opt_dset_name}")
+        logger.info(f"  Refinement dataset:  {ref_opt_dset_name}")
+        logger.info(f"{'=' * 80}\n")
 
-        debug_path = Path("./site_finder/" + str(smol_name) + "_w/" + w)
+        debug_path = res_folder / "site_finder" / (str(smol_name) + "_w") / w
         if not debug_path.exists() and config.store_initial_structures:
             debug_path.parent.mkdir(parents=True, exist_ok=True)
         args_dict["debug_path"] = debug_path
@@ -182,12 +219,27 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         )
 
         ds_ref = qcf.get_or_create_opt_dataset(client, ref_opt_dset_name)
-        count += len(ds_ref.data.records)
-        logger.info(f"\nFinished sampling of cluster {w} number of binding sites: {len(ds_ref.data.records)}")
-        logger.info(f"\nTotal number of binding sites thus far: {count}\n\n")
+        n_sites = len(ds_ref.data.records)
+        count += n_sites
+        cluster_results.append((w, n_sites))
+
+        logger.info(f"\n  {bcheck} Cluster {w}: {n_sites} binding sites  |  Running total: {count}")
 
         if count > config.total_binding_sites:
-            logger.info(f"Thank you for using BEEP binding site sampler. Total binding sites : {count}\n")
+            logger.info(f"\n  Target of {config.total_binding_sites} binding sites reached. Stopping early.")
             break
 
-    logger.info(f"Thank you for using BEEP binding site sampler. Total binding sites : {count}\n")
+    # --- Final summary ---
+    logger.info(f"\n\n{'=' * 80}")
+    logger.info(f"  SAMPLING SUMMARY FOR {smol_name}")
+    logger.info(f"{'=' * 80}")
+    logger.info(f"  {'Cluster':<15} {'Binding sites':>15}")
+    logger.info(f"  {'-'*15} {'-'*15}")
+    for w, n in cluster_results:
+        logger.info(f"  {w:<15} {n:>15}")
+    logger.info(f"  {'-'*15} {'-'*15}")
+    logger.info(f"  {'TOTAL':<15} {count:>15}")
+    logger.info(f"{'=' * 80}\n")
+
+    logger.removeHandler(file_handler)
+    file_handler.close()
