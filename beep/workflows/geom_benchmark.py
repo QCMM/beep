@@ -326,7 +326,10 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
         record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
-        ref_geom_fmols[struct_name] = record.get_initial_molecule()
+        if config.use_initial_reference_geometry:
+            ref_geom_fmols[struct_name] = record.get_initial_molecule()
+        else:
+            ref_geom_fmols[struct_name] = record.get_final_molecule()
 
     padded_log(
         logger,
