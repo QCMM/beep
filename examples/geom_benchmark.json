@@ -14,5 +14,6 @@
     "tag_reference_geometry": null,
     "dft_optimization_program": "psi4",
     "dft_optimization_keyword": null,
-    "tag_dft_geometry": null
+    "tag_dft_geometry": null,
+    "use_initial_reference_geometry": false
 }

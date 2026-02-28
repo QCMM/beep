@@ -19,3 +19,4 @@ class GeomBenchmarkConfig(BaseModel):
     dft_optimization_program: str = "psi4"
     dft_optimization_keyword: Optional[int] = None
     tag_dft_geometry: Optional[str] = None
+    use_initial_reference_geometry: bool = False
