@@ -1,12 +1,12 @@
 """Pre-exponential factor workflow — refactored from workflows/launch_pre_exp.py."""
-import os
+import json
 import logging
+from pathlib import Path
 
 import pandas as pd
 from qcportal.client import FractalClient
 
 from ..models.pre_exp import PreExpConfig
-from ..core.logging_utils import setup_logging
 from ..core.pre_exponential import (
     get_mass, get_sym_num, parse_coordinates,
     align_to_z_axis, get_moments_of_inertia, pre_exponential_factor,
@@ -59,13 +59,26 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
     qcf.check_collection_existence(client, mol_col)
 
     main_logger = logging.getLogger("beep")
-    main_logger.info(welcome_msg)
 
     if mol is None:
         mol = list(ds.df.index)
 
-    v_folder = f"./v_{mol_col}"
-    os.makedirs(v_folder, exist_ok=True)
+    # Use first molecule name for the output folder (or collection name if list)
+    folder_label = mol[0] if isinstance(mol, list) else mol
+    res_folder = Path.cwd() / folder_label / "pre_exp"
+    res_folder.mkdir(parents=True, exist_ok=True)
+
+    # File logging inside the output folder
+    log_file = res_folder / f"beep_pre_exp_{folder_label}.log"
+    file_handler = logging.FileHandler(str(log_file), mode='w')
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    main_logger.addHandler(file_handler)
+
+    # Save a copy of the input config
+    config_path = res_folder / f"pre_exp_{folder_label}.json"
+    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+
+    main_logger.info(welcome_msg)
 
     for molecule in mol:
         qcf.check_optimized_molecule(ds, mol_lot, molecule)
@@ -90,13 +103,13 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
             f"{T_min}K to {T_max}K with steps of {T_step}K has been calculated"
         )
 
-        v_log_file = f"v_{mol_col}/v_{molecule}.dat"
-        v_logger = logging.getLogger(f"v_{molecule}")
-        v_logger.setLevel(logging.INFO)
-
-        v_handler = logging.FileHandler(v_log_file)
-        v_handler.setFormatter(logging.Formatter(" %(message)s"))
-        v_logger.addHandler(v_handler)
-
         table = pd.DataFrame({"T": T_list, "v": v})
-        v_logger.info("\n" + table.to_string(index=False))
+
+        # Write per-molecule data file into the output folder
+        v_dat_file = res_folder / f"v_{molecule}.dat"
+        v_dat_file.write_text(table.to_string(index=False))
+        main_logger.info(f"Saved pre-exponential data to {v_dat_file}")
+        main_logger.info("\n" + table.to_string(index=False))
+
+    main_logger.removeHandler(file_handler)
+    file_handler.close()

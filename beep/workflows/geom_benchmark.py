@@ -1,4 +1,5 @@
 """Geometry benchmark workflow — refactored from workflows/launch_geom_benchmark.py."""
+import json
 import time
 import logging
 import warnings
@@ -177,12 +178,27 @@ def compare_all_rmsd(functional_groups, odset_dict, ref_geom_fmols):
 
 def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
+
+    smol_name = config.molecule
+
+    # Create output folder: <molecule>/geom_benchmark/
+    res_folder = Path.cwd() / smol_name / "geom_benchmark"
+    res_folder.mkdir(parents=True, exist_ok=True)
+
+    # File logging inside the output folder
+    log_file = res_folder / f"beep_geom_benchmark_{smol_name}.log"
+    file_handler = logging.FileHandler(str(log_file), mode='w')
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(file_handler)
+
+    # Save a copy of the input config
+    config_path = res_folder / f"geom_benchmark_{smol_name}.json"
+    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+
     logger.info(welcome_msg)
 
     hl_tag = config.tag_reference_geometry
     dft_tag = config.tag_dft_geometry
-
-    smol_name = config.molecule
     gr_method, gr_basis, gr_program = config.reference_geometry_level_of_theory
     geom_ref_opt_lot = gr_method + "_" + gr_basis
 
@@ -305,16 +321,14 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     padded_log(logger, "BENCHMARK RESULSTS")
     log_dataframe_averages(logger, rmsd_df)
 
-    folder_path_json = Path.cwd() / Path("geom_json_data_" + smol_name)
-    if not folder_path_json.is_dir():
-        folder_path_json.mkdir(parents=True, exist_ok=True)
+    folder_path_json = res_folder / "json_data"
+    folder_path_json.mkdir(parents=True, exist_ok=True)
 
-    rmsd_df.to_json(str(folder_path_json) + "/results_geom_benchmark.json")
+    rmsd_df.to_json(str(folder_path_json / "results_geom_benchmark.json"))
     logger.info(f"\nDataFrame successfully saved to {folder_path_json}/results_geom_benchmark.json\n")
 
-    folder_path_plots = Path.cwd() / Path("geom_bchmk_plots_" + smol_name)
-    if not folder_path_plots.is_dir():
-        folder_path_plots.mkdir(parents=True, exist_ok=True)
+    folder_path_plots = res_folder / "plots"
+    folder_path_plots.mkdir(parents=True, exist_ok=True)
 
     rmsd_histograms(rmsd_df, smol_name, str(folder_path_plots))
 
@@ -323,3 +337,6 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
         "Geometry Benchmark finished successfully! Hasta pronto!",
         padding_char=mia0911,
     )
+
+    logger.removeHandler(file_handler)
+    file_handler.close()
