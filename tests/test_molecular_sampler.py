@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 import logging
-from beep.molecule_sampler import (
+from beep.core.molecule_sampler import (
     generate_shift_vector,
     calculate_displacements,
     calculate_diameter,
