@@ -187,4 +187,8 @@ pyrightconfig.json
 # Generated test output (random sampling artifacts)
 tests/test_data_output/
 
+# Psi4 runtime artifacts
+psi.*.clean
+timer.dat
+
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks
