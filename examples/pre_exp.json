@@ -1,0 +1,15 @@
+{
+    "workflow": "pre_exp",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "molecule": null,
+    "molecule_collection": "small_molecules",
+    "level_of_theory": "blyp_def2-svp",
+    "range_of_temperature": [10, 273],
+    "temperature_step": 1,
+    "molecule_surface_area": 1e-18
+}

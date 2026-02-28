@@ -1,0 +1,18 @@
+{
+    "workflow": "geom_benchmark",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "molecule": "CO",
+    "benchmark_structures": ["CO_W2_1", "CO_W3_1"],
+    "small_molecule_collection": "Small_molecules",
+    "surface_model_collection": "small water",
+    "reference_geometry_level_of_theory": ["df-ccsd(t)-f12", "cc-pvdz", "molpro"],
+    "tag_reference_geometry": null,
+    "dft_optimization_program": "psi4",
+    "dft_optimization_keyword": null,
+    "tag_dft_geometry": null
+}

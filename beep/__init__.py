@@ -1,20 +1,21 @@
 """A binding energy evaluation platform and database for molecules on interstellar ice-grain mantels"""
 
-# Add imports here
-# from .beep import *
-#from . import binding_energy_compute
-#from . import molecule_sampler
-#from . import converge_sampling
-from . import beep
+# New structure imports
+from . import core
+from . import models
 
+try:
+    from . import adapters
+except ImportError:
+    pass
 
 # Handle versioneer
-from ._version import get_versions
-
-versions = get_versions()
-__version__ = versions["version"]
-__git_revision__ = versions["full-revisionid"]
-del get_versions, versions
-
-from . import _version
-__version__ = _version.get_versions()['version']
+try:
+    from ._version import get_versions
+    versions = get_versions()
+    __version__ = versions["version"]
+    __git_revision__ = versions["full-revisionid"]
+    del get_versions, versions
+except Exception:
+    __version__ = "0.2.0"
+    __git_revision__ = ""
