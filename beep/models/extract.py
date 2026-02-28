@@ -19,3 +19,4 @@ class ExtractConfig(BaseModel):
     basis: str = "def2-tzvp"
     exclude_clusters: List[str] = []
     no_zpve: bool = False
+    generate_plots: bool = False
