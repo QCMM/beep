@@ -28,6 +28,7 @@ from pydantic import ValidationError
 
 from ..core.logging_utils import log_formatted_list, padded_log
 from ..core.stoichiometry import be_stoichiometry
+from ..core.errors import DatasetNotFound, LevelOfTheoryNotFound
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +92,99 @@ def check_collection_exists(client: FractalClient, collection_type: str, name: s
         return True
     except KeyError:
         return False
+
+
+def check_collection_existence(client: FractalClient, *collections,
+                                collection_type: str = "OptimizationDataset") -> None:
+    """Validate that all named collections exist on the server. Raises DatasetNotFound if any is missing."""
+    logger = logging.getLogger("beep")
+    for collection in collections:
+        if not check_collection_exists(client, collection_type, collection):
+            raise DatasetNotFound(
+                f"Collection {collection} does not exist. Please create it first. Exiting..."
+            )
+        logger.info(f"The {collection_type} named {collection} exists \u2714")
+
+
+def get_or_create_collection(client: FractalClient, name: str, collection_type=OptimizationDataset):
+    """Get or create a collection of any type."""
+    logger = logging.getLogger("beep")
+    type_name = collection_type.__name__
+    try:
+        ds = client.get_collection(type_name, name)
+        logger.info(f"Collection of type {type_name} with name {name} already exists. \u2714\n")
+    except KeyError:
+        ds = collection_type(name, client=client)
+        ds.save()
+        ds = client.get_collection(type_name, name)
+        logger.info(f"Creating new {type_name}: {name}.\n")
+    return ds
+
+
+def check_optimized_molecule(ds: OptimizationDataset, opt_lot: str, mol_names) -> None:
+    """Check that all named molecules have COMPLETE optimization records. Accepts a single name or list."""
+    if isinstance(mol_names, str):
+        mol_names = [mol_names]
+    for mol in list(mol_names):
+        try:
+            rr = fetch_opt_record(ds, mol, opt_lot)
+        except KeyError:
+            raise LevelOfTheoryNotFound(
+                f"{opt_lot} level of theory for {mol} or the entry itself does not exist "
+                f"in {ds.name} collection. Add the molecule and optimize it first\n"
+            )
+        if rr.status == "INCOMPLETE":
+            raise ValueError(f" Optimization has status {rr.status} restart it or wait")
+        elif rr.status == "ERROR":
+            raise ValueError(f" Optimization has status {rr.status} restart it or wait")
+
+
+def get_molecular_multiplicity(client: FractalClient, dataset, molecule_name: str) -> int:
+    """Get spin multiplicity from the initial molecule of a dataset entry."""
+    initial_molecule_id = dataset.data.records[molecule_name.lower()].initial_molecule
+    mol = fetch_molecules(client, initial_molecule_id)[0]
+    return mol.molecular_multiplicity
+
+
+def get_xyz(client: FractalClient, dataset: str, mol_name: str, level_theory: str,
+            collection_type: str = "OptimizationDataset") -> str:
+    """Fetch optimized geometry as XYZ string."""
+    ds_opt = get_collection(client, collection_type, dataset)
+    rr = fetch_opt_record(ds_opt, mol_name, level_theory)
+    mol = rr.get_final_molecule()
+    geom = mol.to_string(dtype="xyz")
+    xyz_list = geom.splitlines()[2:]
+    xyz = '\n'.join(xyz_list)
+    return xyz
+
+
+def wait_for_dataset_completion(client: FractalClient, ds_opt, opt_lot: str,
+                                 logger: logging.Logger, wait_interval: int = 600) -> None:
+    """Poll a dataset until all records for a given LOT are COMPLETE."""
+    while True:
+        incomplete = []
+        for entry in ds_opt.df.index:
+            try:
+                record = ds_opt.get_record(entry, opt_lot)
+                if hasattr(record, 'status'):
+                    if record.status == "INCOMPLETE":
+                        incomplete.append(entry)
+                    elif record.status == "ERROR":
+                        logger.info(f"Warning: Entry '{entry}' finished with ERROR")
+            except (KeyError, TypeError):
+                continue
+
+        if not incomplete:
+            logger.info(f"All entries in dataset '{ds_opt.name}' are complete.")
+            return
+
+        logger.info(
+            f"Dataset '{ds_opt.name}' has {len(incomplete)} incomplete entries. "
+            f"Waiting {wait_interval}s..."
+        )
+        time.sleep(wait_interval)
+        # Re-fetch to get updated statuses
+        ds_opt = get_collection(client, "OptimizationDataset", ds_opt.name)
 
 
 # ---------------------------------------------------------------------------

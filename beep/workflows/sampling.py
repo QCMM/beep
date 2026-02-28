@@ -7,7 +7,6 @@ from qcportal.client import FractalClient
 
 from ..models.sampling import SamplingConfig
 from ..core.logging_utils import padded_log
-from ..core.errors import DatasetNotFound, LevelOfTheoryNotFound
 from ..adapters import qcfractal_adapter as qcf
 
 bcheck = "\u2714"
@@ -52,29 +51,6 @@ def config_summary_msg(config):
         "",
     ]
     return "\n".join(lines)
-
-
-def check_collection_existence(client, *collections, collection_type="OptimizationDataset"):
-    for collection in collections:
-        if not qcf.check_collection_exists(client, collection_type, collection):
-            raise DatasetNotFound(
-                f"Collection {collection} does not exist. Please create it first. Exiting..."
-            )
-
-
-def check_optimized_molecule(ds, opt_lot, mol_names):
-    for mol in list(mol_names):
-        try:
-            rr = qcf.fetch_opt_record(ds, mol, opt_lot)
-        except KeyError:
-            raise LevelOfTheoryNotFound(
-                f"{opt_lot} level of theory for {mol} or the entry itself does not exist "
-                f"in {ds.name} collection. Add the molecule and optimize it first\n"
-            )
-        if rr.status == "INCOMPLETE":
-            raise ValueError(f" Optimization has status {rr.status} restart it or wait")
-        elif rr.status == "ERROR":
-            raise ValueError(f" Optimization has status {rr.status} restart it or wait")
 
 
 def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
@@ -163,7 +139,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
     # --- Validate collections ---
     logger.info("Validating collections and optimized geometries...")
-    check_collection_existence(
+    qcf.check_collection_existence(
         client, config.surface_model_collection, config.small_molecule_collection
     )
     ds_sm = qcf.get_collection(client, "OptimizationDataset", config.small_molecule_collection)
@@ -174,11 +150,11 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
     # Check if all the molecules are optimized at the requested level of theory
     if len(qcf.fetch_initial_molecule(ds_sm, smol_name, opt_lot).symbols) == 1:
-        check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
+        qcf.check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
         args_dict["target_mol"] = qcf.fetch_initial_molecule(ds_sm, smol_name, opt_lot)
     else:
-        check_optimized_molecule(ds_sm, opt_lot, [smol_name])
-        check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
+        qcf.check_optimized_molecule(ds_sm, opt_lot, [smol_name])
+        qcf.check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
         args_dict["target_mol"] = qcf.fetch_final_molecule(ds_sm, smol_name, opt_lot)
 
     logger.info(f"  All geometries validated. {bcheck}\n")

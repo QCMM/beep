@@ -21,7 +21,7 @@ from ..core.dft_functionals import (
     geom_hmgga_dz, geom_hmgga_tz, geom_gga_dz, geom_sqm_mb,
 )
 from ..core.plotting_utils import rmsd_histograms
-from ..core.errors import DatasetNotFound
+from ..core.benchmark_utils import create_benchmark_dataset_dict, compute_rmsd
 from ..adapters import qcfractal_adapter as qcf
 
 bcheck = "\u2714"
@@ -37,24 +37,6 @@ Shine, Loom, Manifest.
 
                             By:  Stefan Vogt-Geisse
 """
-
-
-def create_benchmark_dataset_dict(benchmark_structs):
-    dataset_dict = {}
-    for bchmk_struc_name in benchmark_structs:
-        mol, surf, _ = bchmk_struc_name.split("_")
-        dataset_dict[bchmk_struc_name] = f"{mol}_{surf}"
-    return dataset_dict
-
-
-def check_collection_existence(client, *collections, collection_type="OptimizationDataset"):
-    logger = logging.getLogger("beep")
-    for collection in collections:
-        if not qcf.check_collection_exists(client, collection_type, collection):
-            raise DatasetNotFound(
-                f"Collection {collection} does not exist. Please create it first. Exiting..."
-            )
-        logger.info(f"The {collection_type} named {collection} exists {bcheck}")
 
 
 def create_and_add_specification(client, odset, method, basis, program,
@@ -83,12 +65,6 @@ def create_and_add_specification(client, odset, method, basis, program,
     odset.save()
     logger.debug(f"Create and added the specification {spec_name} to {odset.name}")
     return spec_name
-
-
-def get_molecular_multiplicity(client, dataset, molecule_name):
-    initial_molecule_id = dataset.data.records[molecule_name.lower()].initial_molecule
-    mol = qcf.fetch_molecules(client, initial_molecule_id)[0]
-    return mol.molecular_multiplicity
 
 
 def optimize_reference_molecule(odset, struct_name, geom_ref_opt_lot, mol_mult, opt_tag):
@@ -147,20 +123,6 @@ def wait_for_completion(client, odset_dict, opt_lot, program, qc_keyword=None,
         time.sleep(wait_interval)
 
 
-def compute_rmsd(mol1, mol2, rmsd_symm):
-    rmsd_val_mirror = 10.0
-    if rmsd_symm:
-        align_mols_mirror = mol1.align(mol2, run_mirror=True)
-        rmsd_val_mirror = align_mols_mirror[1]["rmsd"]
-    align_mols = mol1.align(mol2, atoms_map=True)
-    rmsd_val = align_mols[1]["rmsd"]
-
-    if rmsd_val < rmsd_val_mirror:
-        return rmsd_val
-    else:
-        return rmsd_val_mirror
-
-
 def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
     logger = logging.getLogger("beep")
     logger.propagate = False
@@ -213,14 +175,6 @@ def compare_all_rmsd(functional_groups, odset_dict, ref_geom_fmols):
     return best_opt_lot, combined_rmsd_df
 
 
-def save_df_to_json(logger, df, filename):
-    try:
-        df.to_json(filename)
-        logger.info(f"\nDataFrame successfully saved to {filename}\n")
-    except Exception as e:
-        logger.info(f"Error saving DataFrame to JSON: {e}")
-
-
 def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
     logger.info(welcome_msg)
@@ -244,12 +198,12 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     odset_dict = {}
     bchmk_dset_names = create_benchmark_dataset_dict(bchmk_structs)
 
-    check_collection_existence(client, *bchmk_dset_names.values())
-    check_collection_existence(client, smol_dset_name)
-    check_collection_existence(client, surf_dset_name)
+    qcf.check_collection_existence(client, *bchmk_dset_names.values())
+    qcf.check_collection_existence(client, smol_dset_name)
+    qcf.check_collection_existence(client, surf_dset_name)
 
     smol_dset = qcf.get_collection(client, "OptimizationDataset", smol_dset_name)
-    mol_mult = get_molecular_multiplicity(client, smol_dset, smol_name)
+    mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
     logger.info(f"\n The molecular multiplicity of {smol_name} is {mol_mult}")
 
     odset_dict = {smol_name: smol_dset}
@@ -355,7 +309,8 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     if not folder_path_json.is_dir():
         folder_path_json.mkdir(parents=True, exist_ok=True)
 
-    save_df_to_json(logger, rmsd_df, str(folder_path_json) + "/results_geom_benchmark.json")
+    rmsd_df.to_json(str(folder_path_json) + "/results_geom_benchmark.json")
+    logger.info(f"\nDataFrame successfully saved to {folder_path_json}/results_geom_benchmark.json\n")
 
     folder_path_plots = Path.cwd() / Path("geom_bchmk_plots_" + smol_name)
     if not folder_path_plots.is_dir():
