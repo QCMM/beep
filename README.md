@@ -15,7 +15,7 @@ pip install .
 
 This pulls in the core dependencies: `qcportal`, `qcelemental`, `pydantic`, `numpy`, `pandas`, `scipy`, `matplotlib`, `seaborn`, and `tqdm`.
 
-**Note:** To run computations you also need a running QCFractal server (v0.15) with compute workers (e.g. Psi4). See the [QCFractal documentation](https://docs.qcarchive.molssi.org) for server setup.
+**Note:** To run computations you also need a running QCFractal server (v0.15) with compute workers. See the [QCFractal documentation](https://docs.qcarchive.molssi.org) for server setup.
 
 ## Usage
 
