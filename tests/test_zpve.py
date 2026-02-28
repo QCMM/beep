@@ -1,87 +1,14 @@
-"""Tests for beep/core/zpve.py.
-
-suppress_stdout is pure Python and always testable.
-_vibanal_wfn requires a working psi4 installation; tests are skipped
-when psi4 is broken (e.g. segfault on import).
-"""
-import io
+"""Tests for beep/core/zpve.py — pure numpy vibrational analysis."""
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 from qcelemental.models.molecule import Molecule
 
-from beep.core.zpve import suppress_stdout
+from beep.core.zpve import _vibanal_wfn
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-
-
-# ---------------------------------------------------------------------------
-# suppress_stdout
-# ---------------------------------------------------------------------------
-
-def test_suppress_stdout_captures_output(capsys):
-    """Decorated function should produce no stdout output."""
-    @suppress_stdout
-    def noisy():
-        print("this should not appear")
-        return 42
-
-    result = noisy()
-    captured = capsys.readouterr()
-    assert result == 42
-    assert "this should not appear" not in captured.out
-
-
-def test_suppress_stdout_restores_on_exception():
-    """stdout should be restored even if the decorated function raises."""
-    @suppress_stdout
-    def raises():
-        print("noise")
-        raise ValueError("boom")
-
-    original = sys.stdout
-    with pytest.raises(ValueError, match="boom"):
-        raises()
-    assert sys.stdout is original
-
-
-def test_suppress_stdout_preserves_return():
-    """Return values pass through the decorator unchanged."""
-    @suppress_stdout
-    def returns_dict():
-        print("noise")
-        return {"a": 1, "b": [2, 3]}
-
-    result = returns_dict()
-    assert result == {"a": 1, "b": [2, 3]}
-
-
-def test_suppress_stdout_wraps_name():
-    """Decorator preserves function name via @wraps."""
-    @suppress_stdout
-    def my_func():
-        pass
-
-    assert my_func.__name__ == "my_func"
-
-
-# ---------------------------------------------------------------------------
-# _vibanal_wfn — requires working psi4
-# ---------------------------------------------------------------------------
-
-def _psi4_importable():
-    """Check if psi4 can be imported."""
-    try:
-        import psi4
-        return True
-    except ImportError:
-        return False
-
-
-psi4_available = _psi4_importable()
 
 
 @pytest.fixture(scope="session")
@@ -115,18 +42,11 @@ def test_hessian_fixture_molecule(hessian_data):
     assert symbols.count("H") == 6
 
 
-@pytest.mark.skipif(not psi4_available, reason="psi4 not available")
 def test_vibanal_wfn_runs(hessian_data):
     """Integration test: _vibanal_wfn produces frequencies and thermo data.
 
     Uses real hessian data from the QCFractal server (b3lyp/6-31g, 11 atoms).
     """
-    import psi4
-    psi4.set_memory("500 MB")
-    psi4.set_output_file("/tmp/psi4_zpve_test.log")
-
-    from beep.core.zpve import _vibanal_wfn
-
     hess, mol, energy = hessian_data
     vibinfo, therminfo = _vibanal_wfn(hess=hess, molecule=mol, energy=energy)
 
@@ -154,15 +74,8 @@ def test_vibanal_wfn_runs(hessian_data):
     assert therminfo["ZPE_tot"].data < 0  # total energy with ZPE is negative
 
 
-@pytest.mark.skipif(not psi4_available, reason="psi4 not available")
 def test_vibanal_wfn_frequencies_physical(hessian_data):
     """Vibrational frequencies should be in a physically reasonable range."""
-    import psi4
-    psi4.set_memory("500 MB")
-    psi4.set_output_file("/tmp/psi4_zpve_test2.log")
-
-    from beep.core.zpve import _vibanal_wfn
-
     hess, mol, energy = hessian_data
     vibinfo, _ = _vibanal_wfn(hess=hess, molecule=mol, energy=energy)
 
@@ -178,15 +91,8 @@ def test_vibanal_wfn_frequencies_physical(hessian_data):
     assert min(real_freqs) < 1000
 
 
-@pytest.mark.skipif(not psi4_available, reason="psi4 not available")
 def test_vibanal_wfn_thermo_consistency(hessian_data):
     """Thermodynamic corrections should satisfy H = E + PV, G = H - TS."""
-    import psi4
-    psi4.set_memory("500 MB")
-    psi4.set_output_file("/tmp/psi4_zpve_test3.log")
-
-    from beep.core.zpve import _vibanal_wfn
-
     hess, mol, energy = hessian_data
     _, therminfo = _vibanal_wfn(hess=hess, molecule=mol, energy=energy)
 
