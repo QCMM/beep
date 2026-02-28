@@ -11,21 +11,15 @@ from ..core.pre_exponential import (
     get_mass, get_sym_num, parse_coordinates,
     align_to_z_axis, get_moments_of_inertia, pre_exponential_factor,
 )
+from ..core.logging_utils import beep_banner
 from ..adapters import qcfractal_adapter as qcf
 
-welcome_msg = """
----------------------------------------------------------------------------------------
-Welcome to the BEEP Range of temperature Pre-Exponential Factor Workflow
----------------------------------------------------------------------------------------
-
-"To deny our impulses is to deny the very thing that makes us human."
-
-                              \u2013 Lana and Lilly Wachowski
-
----------------------------------------------------------------------------------------
-
-                            By:  Gabriela Silva-Vera  and  Namrata Rani
-"""
+welcome_msg = beep_banner(
+    "Pre-Exponential Factor",
+    quote="To deny our impulses is to deny the very thing that makes us human.",
+    quote_author="Lana and Lilly Wachowski",
+    authors="Gabriela Silva-Vera and Namrata Rani",
+)
 
 
 def calculation_msg(mol_col, mol, level_theory):

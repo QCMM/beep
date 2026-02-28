@@ -6,27 +6,19 @@ from pathlib import Path
 from qcportal.client import FractalClient
 
 from ..models.sampling import SamplingConfig
-from ..core.logging_utils import padded_log
+from ..core.logging_utils import padded_log, beep_banner
 from ..adapters import qcfractal_adapter as qcf
 
 bcheck = "\u2714"
 gear = "\u2699"
-separator = "-" * 80
 
-welcome_msg = f"""
-{separator}
-Welcome to the BEEP  Set-of-clusters Sampling Workflow
-{separator}
-
-"Adopt the pace of nature: her secret is patience."
-
-                              \u2013 Ralph Waldo Emerson
-
-Seek Locate Map
-{separator}
-
-                            By:  Stefan Vogt-Geisse and Giulia M. Bovolenta
-"""
+welcome_msg = beep_banner(
+    "Set-of-clusters Sampling",
+    quote="Adopt the pace of nature: her secret is patience.",
+    quote_author="Ralph Waldo Emerson",
+    tagline="Seek Locate Map",
+    authors="Stefan Vogt-Geisse and Giulia M. Bovolenta",
+)
 
 
 def config_summary_msg(config):

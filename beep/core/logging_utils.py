@@ -3,6 +3,37 @@ from typing import Any, Dict, List, Tuple, Union, NoReturn
 import pandas as pd
 import qcelemental as qcel
 
+from .. import __version__
+
+_LINE = "=" * 88
+
+
+def beep_banner(workflow_name, quote=None, quote_author=None, authors=None, tagline=None):
+    """Return the universal BEEP banner with workflow-specific details."""
+    lines = [
+        "",
+        _LINE,
+        "BEEP  \u2014  Binding Energy Evaluation Platform".center(88),
+        f"v{__version__}".center(88),
+        _LINE,
+        "",
+        f"  Workflow:  {workflow_name}",
+        "",
+    ]
+    if quote:
+        lines.append(f'  "{quote}"')
+        if quote_author:
+            lines.append(f"{'':>40}\u2014 {quote_author}")
+        lines.append("")
+    if tagline:
+        lines.append(f"  {tagline}")
+        lines.append("")
+    if authors:
+        lines.append(f"  By: {authors}")
+        lines.append("")
+    lines.append("-" * 88)
+    return "\n".join(lines)
+
 
 def setup_logging(prefix: str, molecule_name: str) -> logging.Logger:
     """

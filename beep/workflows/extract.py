@@ -12,7 +12,7 @@ from qcportal.client import FractalClient
 
 from ..models.extract import ExtractConfig
 from ..core.logging_utils import (
-    padded_log, log_dataframe, write_energy_log,
+    padded_log, log_dataframe, write_energy_log, beep_banner,
 )
 from ..core.be_tools import apply_lin_models, calculate_mean_std
 from ..adapters import qcfractal_adapter as qcf
@@ -22,21 +22,13 @@ warnings.filterwarnings("ignore")
 bcheck = "\u2714"
 gear = "\u2699"
 
-welcome_msg = """
----------------------------------------------------------------------------------------
-Welcome to the BEEP  binding energy data extraction workflow!
----------------------------------------------------------------------------------------
-
-"And now I see. With eye serene. The very. Pulse. Of the machine."
-
-                                                ~ Michael Swanwick
-
-Scrutinizing, Leveraging, and Magnifying.
-
-                           By: Stefan Vogt-Geisse
-
----------------------------------------------------------------------------------------
-"""
+welcome_msg = beep_banner(
+    "Binding Energy Data Extraction",
+    quote="And now I see. With eye serene. The very. Pulse. Of the machine.",
+    quote_author="Michael Swanwick",
+    tagline="Scrutinizing, Leveraging, and Magnifying.",
+    authors="Stefan Vogt-Geisse",
+)
 
 
 def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
