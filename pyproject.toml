@@ -34,3 +34,6 @@ beep = "beep.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["beep*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
