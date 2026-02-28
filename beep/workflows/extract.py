@@ -179,6 +179,18 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
         logger.info(f"Linear model at the {bm} level of theory: BE+ \u0394ZPVE = {m} * BE + {b}")
         logger.info(f"Fit quality: R\u00b2 = {r_sq}")
 
+    # Universal model: fit mean uncorrected BE vs mean ZPVE-corrected BE
+    uncorr_cols = [f"{bm}/{basis}" for bm in be_methods]
+    zpve_cols = [f"{bm}/{basis}+ZPVE" for bm in be_methods]
+    x_mean = df_be[uncorr_cols].mean(axis=1).to_numpy(dtype=float)
+    y_mean = df_be[zpve_cols].mean(axis=1).to_numpy(dtype=float)
+    mask = ~np.isnan(x_mean) & ~np.isnan(y_mean)
+    m, b = np.polyfit(x_mean[mask], y_mean[mask], 1)
+    r_sq = np.corrcoef(x_mean[mask], y_mean[mask])[0, 1] ** 2
+    fitting_params["Mean"] = [m, b, r_sq]
+    logger.info(f"Universal linear model (mean BE): BE+\u0394ZPVE = {m} * BE + {b}")
+    logger.info(f"Fit quality: R\u00b2 = {r_sq}")
+
     df_be = df_be[[col for col in df_be.columns if "+ZPVE" in col]]
 
     df_be["Mean_Eb_all_dft"] = df_be.mean(axis=1)
@@ -276,6 +288,7 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
         df_zpve_lin = apply_lin_models(
             df_no_zpve, df_zpve, fit_data_dict,
             config.be_methods, config.basis, mol, tuple(config.be_range),
+            generate_plots=config.generate_plots,
         )
 
         df_zpve_lin.drop(imag_todelete, inplace=True, errors='ignore')
