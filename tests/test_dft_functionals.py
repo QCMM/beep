@@ -38,9 +38,6 @@ def test_all_strings(func):
 @pytest.mark.parametrize("func", ALL_FUNCS, ids=lambda f: f.__name__)
 def test_no_duplicates(func):
     result = func()
-    if func is double_hybrid:
-        # Known duplicate: DSD-PBEPBE-NL appears twice in source
-        pytest.xfail("double_hybrid() has a known duplicate entry (DSD-PBEPBE-NL)")
     assert len(result) == len(set(result))
 
 

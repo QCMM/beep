@@ -60,7 +60,7 @@ def check_collection_existence(client, *collections, collection_type="Optimizati
             raise DatasetNotFound(
                 f"Collection {collection} does not exist. Please create it first. Exiting..."
             )
-        logger.info(f"The {collection_type} named {collection} exsits {bcheck}\n")
+        logger.info(f"The {collection_type} named {collection} exists {bcheck}\n")
 
 
 def get_or_create_collection(client, dset_name, collection_type):
@@ -197,7 +197,7 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
             logger.info("\nAll records are COMPLETE. Continuing with the execution")
             break
         if any(counts["ERROR"] > 0 for counts in status_counts.values()):
-            logger.info("\nThere are records with ERROR. Proceed with cuation")
+            logger.info("\nThere are records with ERROR. Proceed with caution")
             break
 
         time.sleep(wait_interval)
@@ -336,9 +336,9 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
             logger.info(f"Adding entry for {bench_struct} of {lot} geometry")
             be_stoich = create_be_stoichiometry(odset_dict, bench_struct, lot)
             bench_entry = f"{bench_struct}_{lot}"
-            n_entries += 1
             try:
                 ds_be.add_rxn(bench_entry, be_stoich)
+                n_entries += 1
             except KeyError:
                 continue
 
@@ -401,7 +401,7 @@ def compute_be_dft_energies_eb(ds_be, all_dft, basis="def2-tzvpd",
                                 program="psi4", tag="bench_dft"):
     logger = logging.getLogger("beep")
     stoich_list = ["default", "de", "ie", "be_nocp"]
-    logger.info(f"Computing energies for the following stoichiometries: {' '.join(stoich_list)} (defualt = be)")
+    logger.info(f"Computing energies for the following stoichiometries: {' '.join(stoich_list)} (default = be)")
     log_formatted_list(logger, all_dft, "Sending DFT energy computations for the following functionals:")
 
     c_list_sub = []
