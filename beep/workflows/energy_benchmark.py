@@ -1,4 +1,5 @@
 """Energy benchmark workflow — refactored from workflows/launch_energy_benchmark.py."""
+import json
 import time
 import logging
 import warnings
@@ -92,13 +93,13 @@ def add_cc_keywords(cbs_col, mol_mult):
         logger.info("Keyword already set in Dataset, nothing to add\n")
 
 
-def compute_all_cbs(cbs_col, cbs_list, mol_mult):
+def compute_all_cbs(cbs_col, cbs_list, mol_mult, res_folder=None):
     all_cbs_ids = []
     logger = logging.getLogger("beep")
     id_str = ""
-    dir_path = Path("cbs_ids")
+    dir_path = (res_folder / "cbs_ids") if res_folder else Path("cbs_ids")
     if not dir_path.exists():
-        dir_path.mkdir()
+        dir_path.mkdir(parents=True)
     file_path = dir_path / "cbs_ids.dat"
 
     for lot in cbs_list:
@@ -373,9 +374,24 @@ def compute_be_dft_energies_eb(ds_be, all_dft, basis="def2-tzvpd",
 
 def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
-    logger.info(welcome_msg)
 
     smol_name = config.molecule
+
+    # Create output folder: <molecule>/energy_benchmark/
+    res_folder = Path.cwd() / smol_name / "energy_benchmark"
+    res_folder.mkdir(parents=True, exist_ok=True)
+
+    # File logging inside the output folder
+    log_file = res_folder / f"beep_energy_benchmark_{smol_name}.log"
+    file_handler = logging.FileHandler(str(log_file), mode='w')
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(file_handler)
+
+    # Save a copy of the input config
+    config_path = res_folder / f"energy_benchmark_{smol_name}.json"
+    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+
+    logger.info(welcome_msg)
     gr_method, gr_basis, gr_program = config.reference_be_level_of_theory
     geom_ref_opt_lot = gr_method + "_" + gr_basis
 
@@ -439,7 +455,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs, odset_dict, geom_ref_opt_lot)
     add_cc_keywords(cbs_col, mol_mult)
 
-    compute_all_cbs(cbs_col, cbs_list, mol_mult)
+    compute_all_cbs(cbs_col, cbs_list, mol_mult, res_folder=res_folder)
     check_dataset_status(cbs_col, cbs_list)
 
     ref_df = get_reference_be_result(bchmk_structs, cbs_col, cbs_list)
@@ -477,9 +493,8 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())
     df_de_ae, df_de_re = get_errors_dataframe(df_de, ref_df["DE"].to_dict())
 
-    folder_path_json = Path.cwd() / Path("en_json_data_" + smol_name)
-    if not folder_path_json.is_dir():
-        folder_path_json.mkdir(parents=True, exist_ok=True)
+    folder_path_json = res_folder / "json_data"
+    folder_path_json.mkdir(parents=True, exist_ok=True)
 
     padded_log(logger, "Saving BE data in json files")
     df_be.to_json(folder_path_json / "BE_DFT.json", orient="index")
@@ -505,9 +520,8 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     padded_log(logger, "Generating BE benchmark plots")
 
-    folder_path_plots = Path.cwd() / Path("en_bchmk_plots_" + smol_name)
-    if not folder_path_plots.is_dir():
-        folder_path_plots.mkdir(parents=True, exist_ok=True)
+    folder_path_plots = res_folder / "plots"
+    folder_path_plots.mkdir(parents=True, exist_ok=True)
 
     df_be_plt = pd.read_json(folder_path_json / "BE_DFT.json", orient="index")
     df_be_ae_plt = pd.read_json(folder_path_json / "BE_AE_DFT.json", orient="index")
@@ -530,3 +544,6 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     log_energy_mae(logger, df_ie_ae)
     padded_log(logger, "DEFORMATION ENERGY MAE")
     log_energy_mae(logger, df_de_ae)
+
+    logger.removeHandler(file_handler)
+    file_handler.close()
