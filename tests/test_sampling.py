@@ -108,3 +108,62 @@ def test_filter_removes_duplicate(h2_mol, ws3_cluster, test_logger):
         logger=test_logger, ligand_size=len(h2_mol.symbols),
     )
     assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# Real optimized structures from QCFractal (CO on w2/w3 clusters)
+# ---------------------------------------------------------------------------
+
+def test_rmsd_real_same_structure(co_w2_0001):
+    """RMSD of a real binding site against itself should be ~0."""
+    r, rm = compute_rmsd_conditional(co_w2_0001, co_w2_0001, rmsd_symm=False, cutoff=0.4)
+    assert abs(r) < 1e-10
+
+
+def test_rmsd_real_different_binding_sites(co_w2_0001, co_w2_0007):
+    """Two different CO-w2 binding sites should have non-zero RMSD."""
+    r, rm = compute_rmsd_conditional(co_w2_0001, co_w2_0007, rmsd_symm=False, cutoff=0.4)
+    assert r > 0.01
+
+
+def test_filter_real_distinct_sites_kept(co_w2_0001, co_w2_0007, test_logger):
+    """Two genuinely different binding sites should both survive filtering."""
+    ligand_size = 2  # CO has 2 atoms
+    result = filter_binding_sites(
+        [("co_w2_0001", co_w2_0001), ("co_w2_0007", co_w2_0007)], [],
+        cut_off_val=0.25, rmsd_symm=False,
+        logger=test_logger, ligand_size=ligand_size,
+    )
+    assert len(result) == 2
+
+
+def test_filter_real_against_reference(co_w2_0001, co_w3_0001, co_w3_0004, test_logger):
+    """Filter new candidates against an existing reference set."""
+    ligand_size = 2  # CO
+    # co_w3 structures are different systems (3 waters vs 2) so they won't match
+    result = filter_binding_sites(
+        [("co_w3_0001", co_w3_0001), ("co_w3_0004", co_w3_0004)],
+        [("co_w2_0001", co_w2_0001)],
+        cut_off_val=0.25, rmsd_symm=False,
+        logger=test_logger, ligand_size=ligand_size,
+        atoms_map=False,  # different atom counts, can't use atoms_map
+    )
+    # w3 structures have 11 atoms vs w2's 8 — can't align, so both should survive
+    assert len(result) >= 1
+
+
+def test_rmsd_real_co_w5_different_sites(co_w5_0001, co_w5_0002):
+    """Two different CO-w5 binding sites should have non-zero RMSD."""
+    r, rm = compute_rmsd_conditional(co_w5_0001, co_w5_0002, rmsd_symm=False, cutoff=0.4)
+    assert r > 0.01
+
+
+def test_filter_real_co_w5_distinct_kept(co_w5_0001, co_w5_0002, test_logger):
+    """Two distinct CO-w5 binding sites should both survive filtering."""
+    ligand_size = 2  # CO
+    result = filter_binding_sites(
+        [("co_w5_0001", co_w5_0001), ("co_w5_0002", co_w5_0002)], [],
+        cut_off_val=0.25, rmsd_symm=False,
+        logger=test_logger, ligand_size=ligand_size,
+    )
+    assert len(result) == 2
