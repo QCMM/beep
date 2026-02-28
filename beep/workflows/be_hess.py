@@ -1,6 +1,5 @@
 """BE + Hessian workflow — refactored from workflows/launch_be_hess.py."""
 import json
-import time
 import logging
 from pathlib import Path
 from typing import List, Tuple
@@ -61,18 +60,6 @@ def check_collections(client, surface_model_name, molecule_collection_name,
     return surface_dataset, final_molecule
 
 
-def get_incomplete_entries(opt_ds, opt_lot):
-    logger = logging.getLogger("beep")
-    incomplete_entries = []
-    for entry in opt_ds.df.index:
-        entry_status = opt_ds.get_record(entry, opt_lot)
-        if entry_status == "ERROR":
-            logger.info(f"Warning: Entry '{entry}' in dataset finished with ERROR")
-        elif entry_status == "INCOMPLETE":
-            incomplete_entries.append(entry)
-    return incomplete_entries
-
-
 def get_optdataset(client, surf_ds, mol_name, opt_lot, exclude_clusters=None):
     if exclude_clusters is None:
         exclude_clusters = []
@@ -92,15 +79,7 @@ def get_optdataset(client, surf_ds, mol_name, opt_lot, exclude_clusters=None):
             logger.info(f"Warning: Error accessing dataset '{ds_opt_name}': {e}, might not exist. Will continue without")
             continue
 
-        incomplete_entries = get_incomplete_entries(opt_ds, opt_lot)
-
-        while incomplete_entries:
-            logger.info(f"Dataset '{ds_opt_name}' has {len(incomplete_entries)} incomplete entries. Waiting for completion...")
-            time.sleep(60)
-            opt_ds = qcf.get_collection(client, "OptimizationDataset", ds_opt_name)
-            incomplete_entries = get_incomplete_entries(opt_ds, opt_lot)
-
-        logger.info(f"All entries in dataset '{ds_opt_name}' are complete.")
+        qcf.wait_for_dataset_completion(client, opt_ds, opt_lot, logger, wait_interval=60)
         processed_datasets.append(opt_ds)
 
     logger.info(f"Finished optimization datasets: {[d.name for d in processed_datasets]}\n\n\n")

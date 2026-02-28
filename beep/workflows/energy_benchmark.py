@@ -24,7 +24,9 @@ from ..core.plotting_utils import (
 from ..core.cbs_extrapolation import (
     scf_xtpl_helgaker_3, scf_xtpl_helgaker_2, corl_xtpl_helgaker_2,
 )
-from ..core.errors import DatasetNotFound
+from ..core.benchmark_utils import (
+    create_benchmark_dataset_dict, create_molecular_fragments, get_errors_dataframe,
+)
 from ..adapters import qcfractal_adapter as qcf
 
 warnings.filterwarnings("ignore")
@@ -43,43 +45,6 @@ Steadfastness, Learning, and Mastery.
 
                             By:  Stefan Vogt-Geisse
 """
-
-
-def create_benchmark_dataset_dict(benchmark_structs):
-    dataset_dict = {}
-    for bchmk_struc_name in benchmark_structs:
-        mol, surf, _ = bchmk_struc_name.split("_")
-        dataset_dict[bchmk_struc_name] = f"{mol}_{surf}"
-    return dataset_dict
-
-
-def check_collection_existence(client, *collections, collection_type="OptimizationDataset"):
-    logger = logging.getLogger("beep")
-    for collection in collections:
-        if not qcf.check_collection_exists(client, collection_type, collection):
-            raise DatasetNotFound(
-                f"Collection {collection} does not exist. Please create it first. Exiting..."
-            )
-        logger.info(f"The {collection_type} named {collection} exists {bcheck}\n")
-
-
-def get_or_create_collection(client, dset_name, collection_type):
-    logger = logging.getLogger("beep")
-    try:
-        ds = client.get_collection(collection_type.__name__, dset_name)
-        logger.info(f"Collection of type {collection_type.__name__} with name {dset_name} already exists. {bcheck}\n")
-    except KeyError:
-        ds = collection_type(dset_name, client=client)
-        ds.save()
-        ds = client.get_collection(collection_type.__name__, dset_name)
-        logger.info(f"Creating new {collection_type.__name__}: {dset_name}.\n")
-    return ds
-
-
-def get_molecular_multiplicity(client, dataset, molecule_name):
-    initial_molecule_id = dataset.data.records[molecule_name.lower()].initial_molecule
-    mol = qcf.fetch_molecules(client, initial_molecule_id)[0]
-    return mol.molecular_multiplicity
 
 
 def populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs,
@@ -201,22 +166,6 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
             break
 
         time.sleep(wait_interval)
-
-
-def create_molecular_fragments(mol, len_f1):
-    geom = mol.geometry.flatten()
-    symbols = mol.symbols
-    f_mol = ptl.Molecule(
-        symbols=symbols,
-        geometry=geom,
-        fragments=[
-            list(range(0, len_f1)),
-            list(range(len_f1, len(symbols))),
-        ],
-    )
-    f1_mol = f_mol.get_fragment(0)
-    f2_mol = f_mol.get_fragment(1)
-    return f1_mol, f2_mol
 
 
 def get_energy_record(ds, struct, method, basis):
@@ -422,50 +371,6 @@ def compute_be_dft_energies_eb(ds_be, all_dft, basis="def2-tzvpd",
     return c_list_sub + c_list_exis
 
 
-def check_jobs_status_eb(client, job_ids, wait_interval=600):
-    logger = logging.getLogger("beep")
-    all_complete = False
-    while not all_complete:
-        status_counts = {"COMPLETE": 0, "INCOMPLETE": 0, "ERROR": 0}
-        job_stats = client.query_procedures(job_ids)
-        for job in job_stats:
-            if job:
-                status = job.status.upper()
-                if status in status_counts:
-                    status_counts[status] += 1
-
-        logger.info(
-            f"Job Status Summary: {status_counts['INCOMPLETE']} INCOMPLETE, "
-            f"{status_counts['COMPLETE']} COMPLETE, {status_counts['ERROR']} ERROR\n"
-        )
-        if status_counts["ERROR"] > 0:
-            logger.info("Some jobs have ERROR status. Proceed with caution.")
-        if status_counts["INCOMPLETE"] == 0:
-            all_complete = True
-            logger.info("All jobs are COMPLETE. Continuing with the execution.")
-        else:
-            time.sleep(wait_interval)
-
-
-def get_errors_dataframe(df, ref_en_dict):
-    def construct_key(index):
-        return "_".join(index.split("_")[:3])
-
-    df = df[df.index.map(construct_key).isin(ref_en_dict.keys())]
-
-    abs_error_df = pd.DataFrame(index=df.index, columns=df.columns)
-    rel_error_df = pd.DataFrame(index=df.index, columns=df.columns)
-
-    for row_index in df.index:
-        ref_value = ref_en_dict["_".join(row_index.split("_")[:3])]
-        for col in df.columns:
-            abs_error = df.at[row_index, col] - ref_value
-            abs_error_df.at[row_index, col] = abs_error
-            rel_error_df.at[row_index, col] = abs_error / ref_value
-
-    return abs_error_df, rel_error_df
-
-
 def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
     logger.info(welcome_msg)
@@ -486,16 +391,16 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     logger.info(f"DFT and SQM  geometry levels of theory: {' '.join(dft_opt_lot)}")
 
     smol_dset = qcf.get_collection(client, "OptimizationDataset", smol_dset_name)
-    mol_mult = get_molecular_multiplicity(client, smol_dset, smol_name)
+    mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
     logger.info(f"\nThe molecular multiplicity of {smol_name} is {mol_mult}\n\n")
     logger.info(f"Retriving data of the reference equilibirum geometries at {gr_method}/{gr_basis}:\n")
 
     odset_dict = {}
     bchmk_dset_names = create_benchmark_dataset_dict(bchmk_structs)
 
-    check_collection_existence(client, *bchmk_dset_names.values())
-    check_collection_existence(client, smol_dset_name)
-    check_collection_existence(client, surf_dset_name)
+    qcf.check_collection_existence(client, *bchmk_dset_names.values())
+    qcf.check_collection_existence(client, smol_dset_name)
+    qcf.check_collection_existence(client, surf_dset_name)
 
     odset_dict = {smol_name: smol_dset}
     for bchmk_struct_name, odset_name in bchmk_dset_names.items():
@@ -526,7 +431,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     log_formatted_list(logger, cbs_list, "Energies to compute for CCSD(T)/CBS (Semi-enlightend listing) : ")
 
     logger.info("\nCreating Dataset collection for CCSD(T)/CBS:")
-    cbs_col = get_or_create_collection(
+    cbs_col = qcf.get_or_create_collection(
         client, "cbs" + "_" + smol_name + "_" + surf_dset_name, Dataset,
     )
 
@@ -558,7 +463,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
         dft_ids = compute_be_dft_energies_eb(
             ds_be, dft_f_list, basis="def2-tzvpd", program="psi4", tag="bench_en_dft",
         )
-        check_jobs_status_eb(client, dft_ids)
+        qcf.check_jobs_status(client, dft_ids, logger)
 
     ds_be._disable_query_limit = True
     ds_be.save()
