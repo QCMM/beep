@@ -1,11 +1,11 @@
-import qcfractal.interface as ptl
+import qcportal as ptl
 import logging
 from typing import List, Tuple, Dict
 from collections import Counter
 from pydantic import ValidationError
-from qcfractal.interface.client import FractalClient
+from qcportal.client import FractalClient
 from qcelemental.models.molecule import Molecule
-from qcfractal.interface.collections import Dataset, OptimizationDataset, ReactionDataset
+from qcportal.collections import Dataset, OptimizationDataset, ReactionDataset
 
 from .utils.logging_utils import *
 

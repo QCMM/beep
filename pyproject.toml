@@ -18,11 +18,12 @@ dependencies = [
     "scipy",
     "tqdm",
     "seaborn",
-    "pydantic>=1.10",
-    "numpy",
-    "pandas",
-    "qcfractal>=0.15,<0.50",
-    "qcelemental",
+    "pydantic>=1.10,<2",
+    "numpy<2",
+    "pandas>=1.4,<1.5",
+    "qcportal>=0.15,<0.50",
+    "qcelemental>=0.25,<0.26",
+    "networkx",
 ]
 
 [project.optional-dependencies]

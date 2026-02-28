@@ -3,9 +3,9 @@ import time
 import logging
 import numpy as np
 from pathlib import Path
-from qcfractal.interface.collections.optimization_dataset import OptimizationDataset
+from qcportal.collections.optimization_dataset import OptimizationDataset
 from qcelemental.models.molecule import Molecule
-from qcfractal.interface.client import FractalClient
+from qcportal.client import FractalClient
 from typing import List, Tuple, Optional
 from collections import Counter, defaultdict
 from .molecule_sampler import random_molecule_sampler as mol_sample

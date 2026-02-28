@@ -9,13 +9,4 @@ try:
 except ImportError:
     pass
 
-# Handle versioneer
-try:
-    from ._version import get_versions
-    versions = get_versions()
-    __version__ = versions["version"]
-    __git_revision__ = versions["full-revisionid"]
-    del get_versions, versions
-except Exception:
-    __version__ = "0.2.0"
-    __git_revision__ = ""
+__version__ = "0.2.0"

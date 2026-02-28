@@ -3,7 +3,7 @@ import json
 import logging
 from pathlib import Path
 
-from qcfractal.interface.client import FractalClient
+from qcportal.client import FractalClient
 
 from ..models.sampling import SamplingConfig
 from ..core.logging_utils import padded_log
