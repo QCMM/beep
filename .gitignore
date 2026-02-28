@@ -184,4 +184,7 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+# Generated test output (random sampling artifacts)
+tests/test_data_output/
+
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks
