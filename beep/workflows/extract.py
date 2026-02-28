@@ -1,4 +1,5 @@
 """Extract BE data workflow — refactored from workflows/launch_extract_be_data.py."""
+import json
 import logging
 import warnings
 from typing import List, Tuple, Dict
@@ -288,6 +289,20 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
         res_folder = Path.cwd() / str(mol)
         res_folder.mkdir(exist_ok=True)
 
+        # File logging inside the output folder
+        log_file = res_folder / f"beep_extract_{mol}.log"
+        file_handler = logging.FileHandler(str(log_file), mode='w')
+        file_handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(file_handler)
+
+        # Write the welcome banner into the log file
+        file_handler.emit(logging.LogRecord(
+            "beep", logging.INFO, "", 0, welcome_msg, (), None))
+
+        # Save a copy of the input config
+        config_path = res_folder / f"extract_{mol}.json"
+        config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+
         df_no_zpve, success = concatenate_frames(
             client, mol, ds_w, config.opt_method,
             be_range=tuple(config.be_range),
@@ -295,6 +310,8 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
         )
         if not success:
             logger.warning(f"No valid binding energies found for {mol}. Skipping...")
+            logger.removeHandler(file_handler)
+            file_handler.close()
             continue
 
         res_be_no_zpve, mean, sdev = calculate_mean_std(df_no_zpve, mol, logger)
@@ -307,6 +324,8 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
         if config.no_zpve:
             logger.info("Skipping ZPVE correction and model fitting due to no_zpve flag.")
             final_result_nz = write_energy_log(res_be_no_zpve, mol, final_result_nz, "(NO ZPVE):")
+            logger.removeHandler(file_handler)
+            file_handler.close()
             continue
 
         log_dataframe(
@@ -358,6 +377,10 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
         res_be_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
         res_be_zpve.to_csv(f"{res_folder}/be_zpve_{mol}.csv")
         res_be_lin_zpve.to_csv(f"{res_folder}/be_lin_zpve_{mol}.csv")
+
+        # Remove per-molecule file handler
+        logger.removeHandler(file_handler)
+        file_handler.close()
 
     padded_log(logger, "Summary of binding energy results", padding_char=gear)
     if config.no_zpve:

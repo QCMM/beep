@@ -32,12 +32,9 @@ def test_main_invalid_workflow(monkeypatch, tmp_path):
 
 
 @patch("beep.cli.connect")
-@patch("beep.cli.setup_logging")
-def test_main_valid_dispatch(mock_logging, mock_connect, monkeypatch, tmp_path):
+def test_main_valid_dispatch(mock_connect, monkeypatch, tmp_path):
     mock_client = MagicMock()
     mock_connect.return_value = mock_client
-    mock_logger = MagicMock()
-    mock_logging.return_value = mock_logger
 
     cfg_file = tmp_path / "sampling.json"
     cfg_file.write_text(json.dumps({
