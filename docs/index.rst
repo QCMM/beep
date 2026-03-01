@@ -20,36 +20,29 @@ corrections — and stores all results in a `QCFractal
 <https://docs.qcarchive.molssi.org>`_ (v0.15) database for reproducible
 querying.
 
-BEEP has been used to compute 21 BE distributions of astrophysically relevant
-molecules and radicals, each containing 220--250 unique binding sites sampled
-across 12--15 clusters of 22 water molecules.  The distributions are fitted
-with Gaussian functions and compared favourably with experimental TPD
-measurements and previous theoretical studies.  For details see:
+For a detailed description of the methodology and results, see:
 
     G. M. Bovolenta, S. Vogt-Geisse, S. Bovino, and T. Grassi,
     *"Binding Energy Evaluation Platform: A database of quantum chemical
     binding energy distributions for the astrochemical community"*,
     `ApJ (2022) <https://doi.org/10.3847/1538-4357/ac8e11>`_.
 
-Computational Procedure
+Computational Workflows
 -----------------------
 
 The BEEP protocol consists of three main steps:
 
 1. **Sampling** — Target molecules are randomly placed around a set of ASW
-   clusters within a shell of ~2.5 A from the surface.  Binding site
-   candidates (BSCs) are generated in batches, geometry-optimized at
-   BLYP/def2-SVP level, and filtered by RMSD (>= 0.40 A) to retain only
-   unique sites.
+   clusters.  Binding site candidates (BSCs) are generated in batches,
+   geometry-optimized, and filtered by RMSD to retain only unique sites.
 
 2. **Geometry optimization** — BSCs are further refined at a higher level of
-   theory (hybrid or meta-hybrid DFT with a triple-zeta basis, or the
-   cost-effective HF-3c/MINIX model chemistry).
+   theory selected through a geometry benchmark.
 
 3. **Binding energy calculation** — BSSE-corrected BEs are computed via the
    counterpoise method, ZPVE corrections are derived from a Hessian-based
    linear model, and the final distribution is assembled and fitted with a
-   Gaussian function using a bootstrap procedure.
+   Gaussian function.
 
 Architecture
 ------------
