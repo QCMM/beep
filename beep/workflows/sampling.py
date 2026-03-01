@@ -23,6 +23,7 @@ welcome_msg = beep_banner(
 
 def config_summary_msg(config):
     """Format a clean summary of the sampling configuration."""
+    separator = "-" * 88
     s_lot = config.sampling_level_of_theory
     r_lot = config.refinement_level_of_theory
     s_basis = s_lot.basis or "N/A"

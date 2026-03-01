@@ -163,6 +163,8 @@ def wait_for_dataset_completion(client: FractalClient, ds_opt, opt_lot: str,
     """Poll a dataset until all records for a given LOT are COMPLETE."""
     while True:
         incomplete = []
+        n_complete = 0
+        n_error = 0
         for entry in ds_opt.df.index:
             try:
                 record = ds_opt.get_record(entry, opt_lot)
@@ -170,17 +172,27 @@ def wait_for_dataset_completion(client: FractalClient, ds_opt, opt_lot: str,
                     if record.status == "INCOMPLETE":
                         incomplete.append(entry)
                     elif record.status == "ERROR":
+                        n_error += 1
                         logger.info(f"Warning: Entry '{entry}' finished with ERROR")
+                    elif record.status == "COMPLETE":
+                        n_complete += 1
             except (KeyError, TypeError):
                 continue
 
+        n_total = n_complete + len(incomplete) + n_error
         if not incomplete:
-            logger.info(f"All entries in dataset '{ds_opt.name}' are complete.")
+            logger.info(
+                f"Dataset '{ds_opt.name}': {n_complete}/{n_total} COMPLETE"
+                + (f", {n_error} ERROR" if n_error else "")
+                + ". All done."
+            )
             return
 
         logger.info(
-            f"Dataset '{ds_opt.name}' has {len(incomplete)} incomplete entries. "
-            f"Waiting {wait_interval}s..."
+            f"Dataset '{ds_opt.name}': {n_complete}/{n_total} COMPLETE, "
+            f"{len(incomplete)} incomplete"
+            + (f", {n_error} ERROR" if n_error else "")
+            + f". Waiting {wait_interval}s..."
         )
         time.sleep(wait_interval)
         # Re-fetch to get updated statuses
