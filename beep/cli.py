@@ -3,6 +3,8 @@ BEEP CLI — single JSON-config entry point for all workflows.
 
 Usage:
     beep --config input.json
+    beep --workflows
+    beep --schema sampling
 
 The JSON file must contain a "workflow" key that selects which workflow to run.
 Valid workflow values: sampling, be_hess, extract, pre_exp, geom_benchmark, energy_benchmark
@@ -33,16 +35,72 @@ WORKFLOW_MODELS = {
 }
 
 
+def _print_workflows():
+    """Print a table of available workflows with descriptions."""
+    print("Available workflows:\n")
+    print(f"  {'Name':<20} Description")
+    print(f"  {'----':<20} -----------")
+    for name, model in WORKFLOW_MODELS.items():
+        doc = (model.__doc__ or "").strip().rstrip(".")
+        print(f"  {name:<20} {doc}")
+    print()
+    print("Use 'beep --schema <workflow>' to see the full JSON schema for a workflow.")
+
+
+def _print_schema(workflow_name):
+    """Print the JSON schema for a workflow model."""
+    if workflow_name not in WORKFLOW_MODELS:
+        print(
+            f"Error: unknown workflow '{workflow_name}'. "
+            f"Valid options: {', '.join(WORKFLOW_MODELS)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    model = WORKFLOW_MODELS[workflow_name]
+    print(model.schema_json(indent=2))
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BEEP — Binding Energy Evaluation Platform CLI"
+        prog="beep",
+        description="BEEP — Binding Energy Evaluation Platform",
+        epilog=(
+            "examples:\n"
+            "  beep --config input.json      Run a workflow from a JSON config\n"
+            "  beep --workflows              List available workflows\n"
+            "  beep --schema sampling         Show JSON schema for a workflow\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--config", required=True,
+        "--config",
         help="Path to JSON configuration file",
     )
+    parser.add_argument(
+        "--workflows",
+        action="store_true",
+        help="List available workflows and exit",
+    )
+    parser.add_argument(
+        "--schema",
+        metavar="WORKFLOW",
+        help="Print the JSON schema for WORKFLOW and exit",
+    )
     args = parser.parse_args()
+
+    # --workflows: print list and exit
+    if args.workflows:
+        _print_workflows()
+        sys.exit(0)
+
+    # --schema: print schema and exit
+    if args.schema is not None:
+        _print_schema(args.schema)
+        sys.exit(0)
+
+    # Otherwise --config is required
+    if args.config is None:
+        parser.error("--config is required (or use --workflows / --schema)")
 
     # Load and parse config
     config_path = Path(args.config)
