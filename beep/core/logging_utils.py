@@ -327,6 +327,10 @@ def write_energy_log(df: pd.DataFrame, mol: str, existing_content: str = "", com
     if not content:
         content += f"{'':<50}{'BE Average':<50}{'BE Standard Deviation'}\n"
 
+    if len(df) < 2:
+        content += f"{mol} {comment:<30}NO DATA (all structures filtered out)\n"
+        return content
+
     last_two_rows = df.iloc[-2:]
     content += f"{mol} {comment:<30}"
     for _, row in last_two_rows.iterrows():

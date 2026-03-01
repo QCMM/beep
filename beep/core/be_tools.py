@@ -184,6 +184,15 @@ def calculate_mean_std(df_res, mol, logger):
     df_with_stats = df_res.copy()
     data_only_df = df_res.loc[~df_res.index.str.startswith(("Mean_", "StdDev_"))]
 
+    if len(data_only_df) == 0:
+        logger.warning(
+            f"No binding energy data remaining for {mol} after filtering. "
+            "This typically happens when the ZPVE correction is larger than "
+            "the binding energy, causing all values to fall outside the BE "
+            "range. Returning NaN for mean and standard deviation."
+        )
+        return df_with_stats, np.nan, np.nan
+
     mean_row = data_only_df.mean()
     std_row = data_only_df.std()
 
