@@ -17,19 +17,16 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
     and deformation energy (de).
 
     Parameters:
-    smol_mol (Molecule): The small molecule bound to the surface.
-    cluster_mol (Molecule): The surface or cluster model molecule.
-    struc_mol (Molecule): The full structure with both the small molecule and cluster bound together.
-    logger (logging.Logger): Logger instance for logging messages.
+        smol_mol (Molecule): The small molecule bound to the surface.
+        cluster_mol (Molecule): The surface or cluster model molecule.
+        struc_mol (Molecule): The full structure with both the small molecule and
+            cluster bound together.
+        logger (logging.Logger): Logger instance for logging messages.
 
     Returns:
-    Dict[str, List[Tuple[Molecule, float]]]: A dictionary containing different sets of tuples
-                                             for BE stoichiometry calculations.
-                                             Each tuple consists of a Molecule object and
-                                             a corresponding coefficient.
-                                             The keys of the dictionary represent different
-                                             calculation scenarios:
-                                             'default', 'be_nocp', 'ie', and 'de'.
+        dict: A dictionary mapping scenario names (``'default'``, ``'be_nocp'``,
+        ``'ie'``, ``'de'``) to lists of ``(Molecule, float)`` tuples representing
+        the stoichiometry coefficients.
     """
     # Flatten the structure geometry and get the symbols
     geom = struc_mol.geometry.flatten()

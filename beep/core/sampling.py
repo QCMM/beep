@@ -15,25 +15,26 @@ def generate_shell_list(sampling_shell: float, condition: str) -> List[float]:
     Generate a list of sampling shells based on the given condition.
 
     Parameters:
-    - sampling_shell (float): The primary sampling shell value.
-    - condition (str): The condition to adjust the sampling shell list.
-                       It can be one of 'sparse', 'normal', or 'fine'.
+        sampling_shell (float): The primary sampling shell value.
+        condition (str): The condition to adjust the sampling shell list.
+            It can be one of ``'sparse'``, ``'normal'``, ``'fine'``, or
+            ``'hyperfine'``.
 
     Returns:
-    - List[float]: A list containing the adjusted sampling shell values.
+        List[float]: A list containing the adjusted sampling shell values.
 
     Raises:
-    - ValueError: If the condition is not one of ['sparse', 'normal', 'fine'].
+        ValueError: If the condition is not one of the accepted values.
 
     Examples:
-    >>> generate_shell_list(10.0, 'sparse')
-    [10.0]
+        >>> generate_shell_list(10.0, 'sparse')
+        [10.0]
 
-    >>> generate_shell_list(10.0, 'normal')
-    [10.0, 8.0, 12.0]
+        >>> generate_shell_list(10.0, 'normal')
+        [10.0, 8.0, 12.0]
 
-    >>> generate_shell_list(10.0, 'fine')
-    [10.0, 7.5, 9.0, 11.0, 15.0]
+        >>> generate_shell_list(10.0, 'fine')
+        [10.0, 7.5, 9.0, 11.0, 15.0]
     """
 
     conditions_map = {

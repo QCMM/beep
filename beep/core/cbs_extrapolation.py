@@ -107,6 +107,7 @@ def scf_xtpl_helgaker_2(functionname: str, zLO: int, valueLO, zHI, valueHI, verb
 def scf_xtpl_helgaker_3(functionname, zLO, valueLO, zMD, valueMD, zHI, valueHI, verbose=False, alpha=None):
     r"""Extrapolation scheme for reference energies with three adjacent zeta-level bases.
     Used by :py:func:`~psi4.cbs`.
+
     Parameters
     ----------
     functionname : str
@@ -170,6 +171,7 @@ def scf_xtpl_helgaker_3(functionname, zLO, valueLO, zMD, valueMD, zHI, valueHI, 
 def corl_xtpl_helgaker_2(functionname, zLO, valueLO, zHI, valueHI, verbose=False, alpha=None):
     r"""Extrapolation scheme for correlation energies with two adjacent zeta-level bases.
     Used by :py:func:`~psi4.cbs`.
+
     Parameters
     ----------
     functionname : str
