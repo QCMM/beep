@@ -27,6 +27,22 @@ beep --config input.json
 
 The JSON file must contain a `"workflow"` key that selects which workflow to run.
 
+### Discovering workflows and configuration options
+
+List all available workflows:
+
+```bash
+beep --workflows
+```
+
+Dump the full JSON schema for any workflow (shows every field, its type, default value, and description):
+
+```bash
+beep --schema sampling
+```
+
+This is the easiest way to create a new configuration file — start from the schema and fill in the required fields.
+
 ## Workflows
 
 | Workflow | Description |

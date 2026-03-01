@@ -43,6 +43,25 @@ configuration file:
 The JSON file must contain a ``"workflow"`` key that selects which workflow to
 run. Example configuration files are provided in the ``examples/`` directory.
 
+Discovering Workflows and Configuration Options
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List all available workflows with a short description of each:
+
+.. code-block:: bash
+
+   beep --workflows
+
+Dump the full JSON schema for any workflow — this shows every field, its type,
+default value, and a human-readable description:
+
+.. code-block:: bash
+
+   beep --schema sampling
+
+This is the easiest way to create a new configuration file: start from the
+schema output and fill in the required fields.
+
 Workflows
 ---------
 
