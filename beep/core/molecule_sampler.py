@@ -68,15 +68,15 @@ def surface_distance_check(
     Check if any atom in the molecule (mol) is too close to any atom in the cluster based on a specified cutoff distance.
 
     Parameters:
-    - cluster : qcelemental.models.molecule.Molecule
-    - mol : qcelemental.models.molecule.Molecule
-    - cut_distance : float
-        The cutoff distance to determine if atoms are too close. This value is multiplied
-        by the global constant 'angst2bohr' to get the actual distance threshold.
+        cluster (Molecule): The cluster molecule.
+        mol (Molecule): The molecule to check.
+        cut_distance (float): The cutoff distance to determine if atoms are too close.
+            This value is multiplied by the global constant ``angst2bohr`` to get the
+            actual distance threshold.
 
     Returns:
-    - bool : False if any atom in the molecule is too close to the cluster based on the cutoff distance,
-             True otherwise.
+        bool: False if any atom in the molecule is too close to the cluster based on
+        the cutoff distance, True otherwise.
     """
     for a1 in mol.geometry:
         for a2 in cluster.geometry:
@@ -89,16 +89,14 @@ def surface_distance_check(
 def calculate_displacements(cluster: Molecule, sampling_shell: float) -> (float, float):
     """
     Calculate the minimal and maximal displacements based on the cluster's geometry and a sampling shell.
-    The 20%  most distance atoms from the origin are considered for calculating the minimum distance.
+    The 20% most distant atoms from the origin are considered for calculating the minimum distance.
 
     Parameters:
-    - cluster : qcelemental.models.molecule.Molecule
-        Molecular cluster for which displacements are calculated.
-    - sampling_shell : float
-        Size of the shell to use for sampling.
+        cluster (Molecule): Molecular cluster for which displacements are calculated.
+        sampling_shell (float): Size of the shell to use for sampling.
 
     Returns:
-    - tuple(float, float) : Minimum and maximum displacements.
+        tuple: Minimum and maximum displacements ``(dis_min, dis_max)``.
     """
     atms_prctg = 20
     norms = [np.linalg.norm(i) for i in cluster.geometry]
@@ -116,13 +114,11 @@ def generate_shift_vector(dis_min: float, dis_max: float) -> np.ndarray:
     Generate a random shift vector with a magnitude between the given minimum and maximum distances.
 
     Parameters:
-    - dis_min : float
-        Minimum distance for the shift vector.
-    - dis_max : float
-        Maximum distance for the shift vector.
+        dis_min (float): Minimum distance for the shift vector.
+        dis_max (float): Maximum distance for the shift vector.
 
     Returns:
-    - np.ndarray : Randomly generated shift vector.
+        np.ndarray: Randomly generated shift vector.
     """
     vector = (
         np.random.random_sample((3,)) - 0.5
@@ -138,13 +134,11 @@ def create_molecule(cluster: Molecule, mol_shift: Molecule) -> Molecule:
     Create a new molecule by combining a cluster and a shifted molecule.
 
     Parameters:
-    - cluster : qcelemental.models.molecule.Molecule
-        Molecular cluster to be combined.
-    - mol_shift : qcelemental.models.molecule.Molecule
-        Shifted molecule to be combined with the cluster.
+        cluster (Molecule): Molecular cluster to be combined.
+        mol_shift (Molecule): Shifted molecule to be combined with the cluster.
 
     Returns:
-    - qcelemental.models.molecule.Molecule : Combined molecule.
+        Molecule: Combined molecule.
     """
     atms = []
     atms.extend(list(cluster.symbols))
@@ -200,20 +194,15 @@ def random_molecule_sampler(
     Sample random molecule placements around a given molecular cluster.
 
     Parameters:
-    - cluster : qcelemental.models.molecule.Molecule
-        Molecular cluster around which the target molecule will be sampled.
-    - target_molecule : qcelemental.models.molecule.Molecule
-        Molecule to be sampled around the cluster.
-    - number_of_structures : int (default=10)
-        Number of sampled structures to generate.
-    - sampling_shell : float (default=2.0)
-        Size of the shell to use for sampling.
-    - debug : bool (default=False)
-        If True, additional debugging information is provided.
+        cluster (Molecule): Molecular cluster around which the target molecule will be sampled.
+        target_molecule (Molecule): Molecule to be sampled around the cluster.
+        sampling_shell (float): Size of the shell to use for sampling.
+        max_structures (int): Number of sampled structures to generate.
+        debug (bool): If True, additional debugging information is provided.
 
     Returns:
-    - list of qcelemental.models.molecule.Molecule : List of sampled molecular structures.
-    - qcelemental.models.molecule.Molecule : Debug molecule (if debug=True).
+        tuple: A tuple of ``(list[Molecule], Molecule)`` — the list of sampled molecular
+        structures and a debug molecule (or None if *debug* is False).
     """
     logger = logging.getLogger("beep_sampling")
 

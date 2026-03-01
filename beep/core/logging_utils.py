@@ -298,9 +298,10 @@ def log_dictionary(logger: logging.Logger, dictionary: Dict[Any, Any], title: st
 
     Args:
         logger (logging.Logger): The logger to use for logging the dictionary.
-        dictionary (Dict[Any, Any]): The dictionary to be logged. The values are expected to be tuples
-                                     in the form (m, n, R^2).
-        title (str): The title to prepend to the logged dictionary. Defaults to "Dictionary".
+        dictionary (Dict[Any, Any]): The dictionary to be logged.  The values are
+            expected to be tuples in the form ``(m, n, R^2)``.
+        title (str): The title to prepend to the logged dictionary.
+            Defaults to ``"Dictionary"``.
 
     Returns:
         None
