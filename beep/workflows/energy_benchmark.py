@@ -45,16 +45,19 @@ welcome_msg = beep_banner(
 
 
 def populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs,
-                                      odset_dict, geom_ref_opt_lot):
+                                      odset_dict, geom_ref_opt_lot, config=None):
     logger = logging.getLogger("beep")
     for name, fmol in ref_geom_fmols.items():
         if name in bchmk_structs:
             mol_name, surf_name, _ = name.split("_")
-            surf_mod_mol = (
+            surf_record = (
                 odset_dict[surf_name.upper()]
-                .get_record(name=surf_name.upper(), specification="ccsd(t)_cc-pvtz")
-                .get_final_molecule()
+                .get_record(name=surf_name.upper(), specification=geom_ref_opt_lot)
             )
+            if config.use_initial_reference_geometry:
+                surf_mod_mol = surf_record.get_initial_molecule()
+            else:
+                surf_mod_mol = surf_record.get_final_molecule()
             len_f1 = len(surf_mod_mol.symbols)
             mol_f1, mol_f2 = create_molecular_fragments(fmol, len_f1)
             cbs_col.add_entry(name, fmol)
@@ -89,7 +92,7 @@ def add_cc_keywords(cbs_col, mol_mult):
         logger.info("Keyword already set in Dataset, nothing to add\n")
 
 
-def compute_all_cbs(cbs_col, cbs_list, mol_mult, res_folder=None):
+def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, res_folder=None):
     all_cbs_ids = []
     logger = logging.getLogger("beep")
     id_str = ""
@@ -101,8 +104,6 @@ def compute_all_cbs(cbs_col, cbs_list, mol_mult, res_folder=None):
     for lot in cbs_list:
         method, basis = lot.split("_")[0], lot.split("_")[1]
         logger.info(f"\nSendig computations for {method}/{basis}")
-
-        tag = "cbs_en_radical" if mol_mult == 2 else "cbs_en"
 
         if "scf" not in lot:
             c = cbs_col.compute(method, basis, tag=tag, keywords="df", program="psi4")
@@ -343,8 +344,8 @@ def create_be_stoichiometry(odset, bench_struct, lot_geom):
     }
 
 
-def compute_be_dft_energies_eb(ds_be, all_dft, basis="def2-tzvpd",
-                                program="psi4", tag="bench_dft"):
+def compute_be_dft_energies_eb(ds_be, all_dft, tag, basis="def2-tzvpd",
+                                program="psi4"):
     logger = logging.getLogger("beep")
     stoich_list = ["default", "de", "ie", "be_nocp"]
     logger.info(f"Computing energies for the following stoichiometries: {' '.join(stoich_list)} (default = be)")
@@ -422,11 +423,10 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
-        if struct_name in ["CO", "W2", "W3"]:
-            record = odset.get_record(struct_name, specification="ccsd(t)_cc-pvtz")
-            ref_geom_fmols[struct_name] = record.get_final_molecule()
+        record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
+        if config.use_initial_reference_geometry:
+            ref_geom_fmols[struct_name] = record.get_initial_molecule()
         else:
-            record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
             ref_geom_fmols[struct_name] = record.get_final_molecule()
 
     padded_log(logger, "CCSD(T)/CBS computations:")
@@ -448,10 +448,10 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     )
 
     logger.info(f"\nAdding molecules and fragments to {cbs_col.name} Database collection:\n")
-    populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs, odset_dict, geom_ref_opt_lot)
+    populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs, odset_dict, geom_ref_opt_lot, config)
     add_cc_keywords(cbs_col, mol_mult)
 
-    compute_all_cbs(cbs_col, cbs_list, mol_mult, res_folder=res_folder)
+    compute_all_cbs(cbs_col, cbs_list, mol_mult, tag=config.tag_cbs, res_folder=res_folder)
     check_dataset_status(cbs_col, cbs_list)
 
     ref_df = get_reference_be_result(bchmk_structs, cbs_col, cbs_list)
@@ -473,7 +473,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     for name, dft_f_list in dft_func.items():
         padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvpd basis")
         dft_ids = compute_be_dft_energies_eb(
-            ds_be, dft_f_list, basis="def2-tzvpd", program="psi4", tag="bench_en_dft",
+            ds_be, dft_f_list, basis="def2-tzvpd", program="psi4", tag=config.tag_be,
         )
         qcf.check_jobs_status(client, dft_ids, logger)
 

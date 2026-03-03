@@ -18,6 +18,7 @@
     "program": "psi4",
     "tag_reference_geometry": null,
     "tag_dft_geometry": null,
-    "tag_be": null,
-    "tag_cbs": null
+    "tag_be": "bench_en_dft",
+    "tag_cbs": "bench_cbs_en",
+    "use_initial_reference_geometry": false
 }
