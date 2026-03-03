@@ -23,5 +23,6 @@ class EnergyBenchmarkConfig(BaseModel):
     program: str = Field("psi4", description="QC program to use")
     tag_reference_geometry: Optional[str] = Field(None, description="Queue tag for reference geometry tasks")
     tag_dft_geometry: Optional[str] = Field(None, description="Queue tag for DFT geometry tasks")
-    tag_be: Optional[str] = Field(None, description="Queue tag for binding energy tasks")
-    tag_cbs: Optional[str] = Field(None, description="Queue tag for CBS extrapolation tasks")
+    tag_be: str = Field(..., description="Queue tag for binding energy tasks")
+    tag_cbs: str = Field(..., description="Queue tag for CBS extrapolation tasks")
+    use_initial_reference_geometry: bool = Field(False, description="Use initial (unoptimized) reference geometry")
