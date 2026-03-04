@@ -18,6 +18,7 @@ from ..models.energy_benchmark import EnergyBenchmarkConfig
 from ..core.logging_utils import (
     padded_log, log_formatted_list, log_progress, log_energy_mae, beep_banner,
 )
+from ..core.stoichiometry import be_stoichiometry
 from ..core.dft_functionals import hybrid_gga, lrc, meta_hybrid_gga
 from ..core.plotting_utils import (
     plot_violins, plot_density_panels, plot_mean_errors, plot_ie_vs_de,
@@ -58,9 +59,8 @@ def populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs,
                 surf_mod_mol = surf_record.get_initial_molecule()
             else:
                 surf_mod_mol = surf_record.get_final_molecule()
-            n_surf = len(surf_mod_mol.symbols)
-            n_total = len(fmol.symbols)
-            mol_f1, mol_f2 = create_molecular_fragments(fmol, n_total - n_surf)
+            len_f1 = len(surf_mod_mol.symbols)
+            mol_f1, mol_f2 = create_molecular_fragments(fmol, len_f1)
             cbs_col.add_entry(name, fmol)
             cbs_col.add_entry(name + "_f1", mol_f1)
             cbs_col.add_entry(name + "_f2", mol_f2)
@@ -283,7 +283,10 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
         for lot in dft_opt_lot:
             logger.info(f"Adding entry for {bench_struct} of {lot} geometry")
             try:
-                be_stoich = create_be_stoichiometry(odset_dict, bench_struct, lot)
+                smol_mol, surf_mol, struc_mol = _fetch_be_molecules(
+                    odset_dict, bench_struct, lot
+                )
+                be_stoich = be_stoichiometry(smol_mol, surf_mol, struc_mol, logger)
             except (TypeError, KeyError) as e:
                 logger.warning(
                     f"Skipping {bench_struct} at {lot}: could not retrieve final molecule "
@@ -302,56 +305,29 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
     return ds_be
 
 
-def create_be_stoichiometry(odset, bench_struct, lot_geom):
+def _fetch_be_molecules(odset, bench_struct, lot_geom):
+    """Fetch the three molecules needed for BE stoichiometry from optimization datasets.
+
+    Returns (smol_mol, surf_mol, struc_mol) — the small molecule, surface model,
+    and full complex, all as optimized geometries.
+    """
     mol_name, surf_name, _ = bench_struct.split("_")
-    bench_mol = (
+    smol_mol = (
         odset[mol_name.upper()]
         .get_record(name=mol_name.upper(), specification=lot_geom)
         .get_final_molecule()
     )
-    bench_struc_mol = (
-        odset[bench_struct]
-        .get_record(name=bench_struct, specification=lot_geom)
-        .get_final_molecule()
-    )
-    bench_geom = bench_struc_mol.geometry.flatten()
-    bench_symbols = bench_struc_mol.symbols
-
-    surf_mod_mol = (
+    surf_mol = (
         odset[surf_name.upper()]
         .get_record(name=surf_name.upper(), specification=lot_geom)
         .get_final_molecule()
     )
-    surf_symbols = surf_mod_mol.symbols
-
-    n_surf = len(surf_symbols)
-    n_total = len(bench_symbols)
-    f_bench_struc_mol = ptl.Molecule(
-        symbols=bench_symbols,
-        geometry=bench_geom,
-        fragments=[
-            list(range(0, n_total - n_surf)),
-            list(range(n_total - n_surf, n_total)),
-        ],
+    struc_mol = (
+        odset[bench_struct]
+        .get_record(name=bench_struct, specification=lot_geom)
+        .get_final_molecule()
     )
-
-    j4 = f_bench_struc_mol.get_fragment(0)     # Small molecule fragment
-    j5 = f_bench_struc_mol.get_fragment(1)     # Surface fragment
-    j6 = f_bench_struc_mol.get_fragment(0, 1)  # Small molecule with ghost surface
-    j7 = f_bench_struc_mol.get_fragment(1, 0)  # Surface with ghost small molecule
-
-    return {
-        "default": [
-            (f_bench_struc_mol, 1.0), (j4, 1.0), (j5, 1.0),
-            (j7, -1.0), (j6, -1.0),
-            (surf_mod_mol, -1.0), (bench_mol, -1.0),
-        ],
-        "be_nocp": [
-            (f_bench_struc_mol, 1.0), (surf_mod_mol, -1.0), (bench_mol, -1.0),
-        ],
-        "ie": [(f_bench_struc_mol, 1.0), (j7, -1.0), (j6, -1.0)],
-        "de": [(surf_mod_mol, -1.0), (bench_mol, -1.0), (j4, 1.0), (j5, 1.0)],
-    }
+    return smol_mol, surf_mol, struc_mol
 
 
 def compute_be_dft_energies_eb(ds_be, all_dft, tag, basis="def2-tzvpd",
@@ -481,9 +457,9 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     }
 
     for name, dft_f_list in dft_func.items():
-        padded_log(logger, f"Sending computations for {name} functionals with a def2-tzvpd basis")
+        padded_log(logger, f"Sending computations for {name} functionals with a {config.be_basis} basis")
         dft_ids = compute_be_dft_energies_eb(
-            ds_be, dft_f_list, basis="def2-tzvpd", program="psi4", tag=config.tag_be,
+            ds_be, dft_f_list, basis=config.be_basis, program="psi4", tag=config.tag_be,
         )
         qcf.check_jobs_status(client, dft_ids, logger)
 
