@@ -58,8 +58,9 @@ def populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs,
                 surf_mod_mol = surf_record.get_initial_molecule()
             else:
                 surf_mod_mol = surf_record.get_final_molecule()
-            len_f1 = len(surf_mod_mol.symbols)
-            mol_f1, mol_f2 = create_molecular_fragments(fmol, len_f1)
+            n_surf = len(surf_mod_mol.symbols)
+            n_total = len(fmol.symbols)
+            mol_f1, mol_f2 = create_molecular_fragments(fmol, n_total - n_surf)
             cbs_col.add_entry(name, fmol)
             cbs_col.add_entry(name + "_f1", mol_f1)
             cbs_col.add_entry(name + "_f2", mol_f2)
@@ -281,7 +282,14 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
     for bench_struct in bchmk_structs:
         for lot in dft_opt_lot:
             logger.info(f"Adding entry for {bench_struct} of {lot} geometry")
-            be_stoich = create_be_stoichiometry(odset_dict, bench_struct, lot)
+            try:
+                be_stoich = create_be_stoichiometry(odset_dict, bench_struct, lot)
+            except (TypeError, KeyError) as e:
+                logger.warning(
+                    f"Skipping {bench_struct} at {lot}: could not retrieve final molecule "
+                    f"(optimization likely in ERROR status). {e}"
+                )
+                continue
             bench_entry = f"{bench_struct}_{lot}"
             try:
                 ds_be.add_rxn(bench_entry, be_stoich)
@@ -316,19 +324,21 @@ def create_be_stoichiometry(odset, bench_struct, lot_geom):
     )
     surf_symbols = surf_mod_mol.symbols
 
+    n_surf = len(surf_symbols)
+    n_total = len(bench_symbols)
     f_bench_struc_mol = ptl.Molecule(
         symbols=bench_symbols,
         geometry=bench_geom,
         fragments=[
-            list(range(0, len(surf_symbols))),
-            list(range(len(surf_symbols), len(bench_symbols))),
+            list(range(0, n_total - n_surf)),
+            list(range(n_total - n_surf, n_total)),
         ],
     )
 
-    j5 = f_bench_struc_mol.get_fragment(0)
-    j4 = f_bench_struc_mol.get_fragment(1)
-    j7 = f_bench_struc_mol.get_fragment(0, 1)
-    j6 = f_bench_struc_mol.get_fragment(1, 0)
+    j4 = f_bench_struc_mol.get_fragment(0)     # Small molecule fragment
+    j5 = f_bench_struc_mol.get_fragment(1)     # Surface fragment
+    j6 = f_bench_struc_mol.get_fragment(0, 1)  # Small molecule with ghost surface
+    j7 = f_bench_struc_mol.get_fragment(1, 0)  # Surface with ghost small molecule
 
     return {
         "default": [

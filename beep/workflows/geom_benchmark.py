@@ -127,6 +127,7 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
     final_opt_lot = {}
     total_operations = len(dft_lot)
 
+    errored_specs = []
     for i, opt_lot in enumerate(dft_lot):
         rmsd_tot_dict = {}
         err = None
@@ -134,10 +135,12 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
             record = odset.get_record(struct_name, specification=opt_lot)
             err = record.get_error()
             if err:
-                logger.info(
-                    f"Calculation for {struct_name} at the {opt_lot} level of theory "
-                    "finished with error. It will be skipped"
+                logger.warning(
+                    f"WARNING: Calculation for {struct_name} at the {opt_lot} level of theory "
+                    f"finished with error (record id: {record.id}). "
+                    f"This level of theory will be excluded from the benchmark."
                 )
+                errored_specs.append((opt_lot, struct_name, record.id))
                 break
             fmol = record.get_final_molecule()
             rmsd = compute_rmsd(ref_geom_fmols[struct_name], fmol, rmsd_symm=True)
@@ -145,11 +148,19 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
             rmsd_df.at[struct_name, opt_lot] = rmsd
 
         if err:
+            rmsd_df[opt_lot] = np.nan
             continue
         rmsd_tot = list(rmsd_tot_dict.values())
         final_opt_lot[opt_lot] = np.mean(rmsd_tot)
         log_progress(logger, i + 1, total_operations)
 
+    if errored_specs:
+        logger.warning(f"\nSummary of errored optimizations ({len(errored_specs)} total):")
+        for spec, struct, rec_id in errored_specs:
+            logger.warning(f"  {spec} / {struct}  (record id: {rec_id})")
+        logger.warning("")
+
+    rmsd_df = rmsd_df.dropna(axis=1, how="all")
     lowest_values = sorted(final_opt_lot.values())[:1]
     best_geom_lot = {k: v for k, v in final_opt_lot.items() if v in lowest_values}
     return best_geom_lot, final_opt_lot, rmsd_df
