@@ -21,6 +21,7 @@ class EnergyBenchmarkConfig(BaseModel):
     cbs_level_of_theory: List[str] = Field([], description="Levels of theory for CBS extrapolation")
     keyword_id: Optional[int] = Field(None, description="QCFractal keyword ID for custom options")
     program: str = Field("psi4", description="QC program to use")
+    be_basis: str = Field("def2-tzvpd", description="Basis set for DFT binding energy single-point calculations")
     tag_reference_geometry: Optional[str] = Field(None, description="Queue tag for reference geometry tasks")
     tag_dft_geometry: Optional[str] = Field(None, description="Queue tag for DFT geometry tasks")
     tag_be: str = Field(..., description="Queue tag for binding energy tasks")
