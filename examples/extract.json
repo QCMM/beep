@@ -6,15 +6,16 @@
         "password": null,
         "verify": false
     },
-    "opt_method": "mpwb1k-d3bj_def2-tzvp",
-    "be_methods": ["WB97X-V", "M06-HF", "WPBE-D3MBJ"],
-    "mol_coll_name": "Small_molecules",
-    "surface_model": "Water_22",
+    "opt_method": null,
+    "be_methods": [],
+    "mol_coll_name": null,
+    "surface_model": null,
     "hessian_clusters": [],
     "molecules": [],
     "be_range": [-0.1, -25.0],
-    "scale_factor": 0.958,
-    "basis": "def2-tzvp",
+    "scale_factor": null,
+    "basis": null,
     "exclude_clusters": [],
-    "no_zpve": false
+    "no_zpve": false,
+    "generate_plots": false
 }

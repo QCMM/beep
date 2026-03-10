@@ -6,26 +6,26 @@
         "password": null,
         "verify": false
     },
-    "molecule": "CO",
-    "surface_model_collection": "Water_22",
-    "small_molecule_collection": "Small_molecules",
+    "molecule": null,
+    "surface_model_collection": null,
+    "small_molecule_collection": null,
     "sampling_shell": 2.0,
     "sampling_condition": "normal",
     "sampling_level_of_theory": {
-        "method": "gfn2-xtb",
+        "method": null,
         "basis": null,
-        "program": "xtb"
+        "program": null
     },
     "refinement_level_of_theory": {
-        "method": "bhandhlyp",
-        "basis": "def2-svp",
-        "program": "psi4"
+        "method": null,
+        "basis": null,
+        "program": null
     },
     "rmsd_value": 0.40,
     "rmsd_symmetry": false,
     "store_initial_structures": false,
-    "sampling_tag": "sampling",
-    "refinement_tag": "refinement",
-    "total_binding_sites": 220,
+    "sampling_tag": null,
+    "refinement_tag": null,
+    "total_binding_sites": null,
     "keyword_id": null
 }
