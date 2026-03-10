@@ -650,8 +650,9 @@ def get_zpve_mol(client: FractalClient, mol: int, lot_opt: str,
         return 0.0, True
 
     mol_form = mol_obj.dict()["identifiers"]["molecular_formula"]
-    method = lot_opt.split("_")[0]
-    basis = lot_opt.split("_")[1]
+    lot_parts = lot_opt.split("_", 1)
+    method = lot_parts[0]
+    basis = lot_parts[1] if len(lot_parts) == 2 else None
     if method[0] == "U":
         method = method[1:]
 

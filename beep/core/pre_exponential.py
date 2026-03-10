@@ -31,6 +31,7 @@ def get_sym_num(xyz):
     if pg == 'C0v':
         return pg, 1
     else:
+        mol.tol = 1e-4  # Relax tolerance for optimized geometries
         s_m = molsym.Symtext.from_molecule(mol).rotational_symmetry_number
         return pg, s_m
 
