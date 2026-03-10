@@ -366,11 +366,12 @@ def write_energy_log(df: pd.DataFrame, mol: str, existing_content: str = "", com
 
     last_two_rows = df.iloc[-2:]
     content += f"{mol} {comment:<30}"
-    for _, row in last_two_rows.iterrows():
+    for i, (_, row) in enumerate(last_two_rows.iterrows()):
         mean_values = []
         for unit in ['kcal/mol', 'K']:
-            mean_val = -1 * round(qcel.constants.conversion_factor('kcal/mol', unit) * row['Mean_Eb_all_dft'], 2)
-            std_val = round(qcel.constants.conversion_factor('kcal/mol', unit) * row['StdDev_all_dft'], 2)
+            conv = qcel.constants.conversion_factor('kcal/mol', unit)
+            mean_val = abs(round(conv * row['Mean_Eb_all_dft'], 2))
+            std_val = abs(round(conv * row['StdDev_all_dft'], 2))
             mean_values.append(f"{mean_val:.2f} ± {std_val:.2f} [{unit}]")
         content += f"{'   '.join(mean_values):<50}"
     content += "\n"

@@ -37,7 +37,9 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
         exclude_clusters = []
     logger = logging.getLogger("beep")
     df_be = pd.DataFrame()
-    method, basis = opt_method.split("_")
+    parts = opt_method.split("_", 1)
+    method = parts[0]
+    basis = parts[1] if len(parts) == 2 else None
 
     logger.info("Joining the energies of the different clusters.")
 
@@ -46,12 +48,26 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
             logger.info(f"Skipping excluded cluster: {w}")
             continue
 
-        name_be = f"be_{mol}_{w}_{method}_{basis}"
+        if basis:
+            name_be = f"be_{mol}_{w}_{method}_{basis}"
+        else:
+            name_be = f"be_{mol}_{w}_{method}"
         try:
             ds_be = qcf.get_collection(client, "ReactionDataset", name_be)
         except KeyError:
-            logger.info(f"ReactionDataset {name_be} not found for molecule: {mol}")
-            continue
+            # Fallback: try method-only name for old datasets (e.g. hf3c_minix -> hf3c)
+            if basis:
+                name_be_fallback = f"be_{mol}_{w}_{method}"
+                try:
+                    ds_be = qcf.get_collection(client, "ReactionDataset", name_be_fallback)
+                    logger.info(f"Found legacy dataset {name_be_fallback} (no basis in name)")
+                    name_be = name_be_fallback
+                except KeyError:
+                    logger.info(f"ReactionDataset {name_be} not found for molecule: {mol}")
+                    continue
+            else:
+                logger.info(f"ReactionDataset {name_be} not found for molecule: {mol}")
+                continue
 
         ds_be._disable_query_limit = True
 
@@ -273,10 +289,26 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
         )
         df_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
 
-        name_hess_be = [
-            f"be_{mol}_{cluster}_{config.opt_method.split('_')[0]}_{config.opt_method.split('_')[1]}"
-            for cluster in config.hessian_clusters
-        ]
+        opt_parts = config.opt_method.split("_", 1)
+        opt_suffix = "_".join(opt_parts)
+        name_hess_be = []
+        for cluster in config.hessian_clusters:
+            name = f"be_{mol}_{cluster}_{opt_suffix}"
+            try:
+                qcf.get_collection(client, "ReactionDataset", name)
+                name_hess_be.append(name)
+            except KeyError:
+                # Fallback: try method-only name for legacy datasets
+                if len(opt_parts) == 2:
+                    name_fallback = f"be_{mol}_{cluster}_{opt_parts[0]}"
+                    try:
+                        qcf.get_collection(client, "ReactionDataset", name_fallback)
+                        logger.info(f"Found legacy hessian dataset {name_fallback}")
+                        name_hess_be.append(name_fallback)
+                    except KeyError:
+                        logger.info(f"Hessian dataset {name} not found, skipping")
+                else:
+                    logger.info(f"Hessian dataset {name} not found, skipping")
 
         df_zpve, fit_data_dict, imag_todelete = zpve_correction(
             name_hess_be, config.be_methods, config.opt_method,
