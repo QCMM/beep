@@ -16,6 +16,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 TEST_OUTPUT_DIR = Path(__file__).resolve().parent / "test_data_output"
+TEST_OUTPUT_DIR.mkdir(exist_ok=True)
 logging.basicConfig(filename='app.log', filemode='w', level=logging.DEBUG)
 
 def load_molecules(pattern: str) -> list:
