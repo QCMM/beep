@@ -12,7 +12,7 @@ def beep_banner(workflow_name, quote=None, quote_author=None, authors=None, tagl
     """Return the universal BEEP banner with workflow-specific details."""
     lines = [
         '''
-        ·······················································································
+·······················································································
 :                                                                                     :
 :  ██████╗ ██╗███╗   ██╗██████╗ ██╗███╗   ██╗ ██████╗                                 :
 :  ██╔══██╗██║████╗  ██║██╔══██╗██║████╗  ██║██╔════╝                                 :
@@ -46,8 +46,7 @@ def beep_banner(workflow_name, quote=None, quote_author=None, authors=None, tagl
         '''
         "",
         _LINE,
-        "BEEP  \u2014  Binding Energy Evaluation Platform".center(88),
-        f"v{__version__}".center(88),
+        f"BEEP \u2014 v{__version__}".center(88),
         _LINE,
         "",
         f"  Workflow:  {workflow_name}",

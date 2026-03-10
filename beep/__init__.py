@@ -9,4 +9,6 @@ try:
 except ImportError:
     pass
 
-__version__ = "0.2.0"
+from importlib.metadata import version as _version
+
+__version__ = _version("beep")
