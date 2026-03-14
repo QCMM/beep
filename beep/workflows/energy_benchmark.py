@@ -7,12 +7,8 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-import qcportal as ptl
 import qcelemental as qcel
 from pathlib import Path
-from qcportal.client import FractalClient
-from qcportal.collections import Dataset, OptimizationDataset, ReactionDataset
-from qcelemental.models.molecule import Molecule
 
 from ..models.energy_benchmark import EnergyBenchmarkConfig
 from ..core.logging_utils import (
@@ -30,6 +26,7 @@ from ..core.benchmark_utils import (
     create_benchmark_dataset_dict, create_molecular_fragments, get_errors_dataframe,
 )
 from ..adapters import qcfractal_adapter as qcf
+from ..adapters.qcfractal_adapter import FractalClient, Dataset, ReactionDataset
 
 warnings.filterwarnings("ignore")
 
@@ -78,12 +75,12 @@ def add_cc_keywords(cbs_col, mol_mult):
         logger.info(f"\n\nCreating keywords for closed shell coupled cluster computation")
         kw_dict = {"scf_type": "df", "cc_type": "df", "freeze_core": "true"}
         logger.info(f"Keywords dictionary: {kw_dict}")
-        kw_dfit = ptl.models.KeywordSet(values=kw_dict)
+        kw_dfit = qcf.create_keyword_set(kw_dict)
     elif mol_mult == 2:
         logger.info(f"\n\nCreating keywords for open shell coupled cluster computation")
         kw_dict = {"reference": "uhf", "freeze_core": "true"}
         logger.info(f"Keywords dictionary: {kw_dict}")
-        kw_dfit = ptl.models.KeywordSet(values=kw_dict)
+        kw_dfit = qcf.create_keyword_set(kw_dict)
 
     try:
         cbs_col.add_keywords("df", "psi4", kw_dfit)
@@ -271,13 +268,7 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
     logger = logging.getLogger("beep")
     rdset_name = f"bchmk_be_{smol_name}_{surf_dset_name}"
     logger.info(f"Creating a loading ReactionDataset: {rdset_name}\n")
-    try:
-        client.delete_collection("ReactionDataset", rdset_name)
-    except KeyError:
-        pass
-
-    ds_be = ReactionDataset(rdset_name, ds_type="rxn", client=client, default_program="psi4")
-    ds_be.save()
+    ds_be = qcf.create_reaction_dataset(client, rdset_name, program="psi4")
     n_entries = 0
     for bench_struct in bchmk_structs:
         for lot in dft_opt_lot:
