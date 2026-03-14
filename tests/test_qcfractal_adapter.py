@@ -10,6 +10,8 @@ from beep.adapters.qcfractal_adapter import (
     check_collection_exists,
     fetch_opt_molecules,
     check_for_completion,
+    create_keyword_set,
+    query_keywords,
 )
 
 
@@ -113,3 +115,44 @@ def test_check_for_completion_incomplete():
     done, counts = check_for_completion(mock_client, ["pid1", "pid2"])
     assert done is False
     assert counts["INCOMPLETE"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Re-exports
+# ---------------------------------------------------------------------------
+
+def test_reexports_are_importable():
+    """Adapter must re-export QCPortal types so workflows never import
+    qcportal directly."""
+    from beep.adapters.qcfractal_adapter import (
+        FractalClient,
+        Dataset,
+        OptimizationDataset,
+        ReactionDataset,
+        Molecule,
+    )
+    # Verify they are actual classes, not None or accidentally overwritten
+    for cls in (FractalClient, Dataset, OptimizationDataset, ReactionDataset, Molecule):
+        assert isinstance(cls, type), f"{cls} is not a class"
+
+
+# ---------------------------------------------------------------------------
+# Keyword helpers
+# ---------------------------------------------------------------------------
+
+@patch("beep.adapters.qcfractal_adapter.ptl")
+def test_create_keyword_set(mock_ptl):
+    sentinel = MagicMock()
+    mock_ptl.models.KeywordSet.return_value = sentinel
+    result = create_keyword_set({"reference": "uks"})
+    mock_ptl.models.KeywordSet.assert_called_once_with(values={"reference": "uks"})
+    assert result is sentinel
+
+
+def test_query_keywords_delegates_to_client():
+    mock_client = MagicMock()
+    sentinel = MagicMock()
+    mock_client.query_keywords.return_value = sentinel
+    result = query_keywords(mock_client)
+    mock_client.query_keywords.assert_called_once()
+    assert result is sentinel

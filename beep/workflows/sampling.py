@@ -3,11 +3,10 @@ import json
 import logging
 from pathlib import Path
 
-from qcportal.client import FractalClient
-
 from ..models.sampling import SamplingConfig
 from ..core.logging_utils import padded_log, beep_banner
 from ..adapters import qcfractal_adapter as qcf
+from ..adapters.qcfractal_adapter import FractalClient
 
 bcheck = "\u2714"
 gear = "\u2699"

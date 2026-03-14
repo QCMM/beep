@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 import pandas as pd
-from qcportal.client import FractalClient
 
 from ..models.pre_exp import PreExpConfig
 from ..core.pre_exponential import (
@@ -13,6 +12,7 @@ from ..core.pre_exponential import (
 )
 from ..core.logging_utils import beep_banner
 from ..adapters import qcfractal_adapter as qcf
+from ..adapters.qcfractal_adapter import FractalClient
 
 welcome_msg = beep_banner(
     "Pre-Exponential Factor",
