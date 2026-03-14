@@ -8,14 +8,13 @@ import numpy as np
 import pandas as pd
 import qcelemental as qcel
 from pathlib import Path
-from qcportal.client import FractalClient
-
 from ..models.extract import ExtractConfig
 from ..core.logging_utils import (
     padded_log, log_dataframe, write_energy_log, beep_banner,
 )
 from ..core.be_tools import apply_lin_models, calculate_mean_std
 from ..adapters import qcfractal_adapter as qcf
+from ..adapters.qcfractal_adapter import FractalClient
 
 warnings.filterwarnings("ignore")
 

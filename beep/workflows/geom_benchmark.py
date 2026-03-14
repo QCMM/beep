@@ -8,11 +8,7 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
-import qcportal as ptl
 from pathlib import Path
-from qcportal.client import FractalClient
-from qcportal.collections import OptimizationDataset, ReactionDataset
-from qcelemental.models.molecule import Molecule
 
 from ..models.geom_benchmark import GeomBenchmarkConfig
 from ..core.logging_utils import (
@@ -24,6 +20,7 @@ from ..core.dft_functionals import (
 from ..core.plotting_utils import rmsd_histograms
 from ..core.benchmark_utils import create_benchmark_dataset_dict, compute_rmsd
 from ..adapters import qcfractal_adapter as qcf
+from ..adapters.qcfractal_adapter import FractalClient
 
 bcheck = "\u2714"
 mia0911 = "\u2606"
@@ -41,7 +38,7 @@ def create_and_add_specification(client, odset, method, basis, program,
     logger = logging.getLogger("beep")
     spec_name = f"{method}_{basis}"
     if qc_keyword:
-        kw_name = client.query_keywords()[qc_keyword].values.values()
+        kw_name = qcf.query_keywords(client)[qc_keyword].values.values()
         logger.debug(f"Using the following keyword for the specification {kw_name} to {odset.name}")
         if ("uks" in kw_name or "uhf" in kw_name) and program == "psi4":
             spec_name = "U" + spec_name
@@ -91,7 +88,7 @@ def wait_for_completion(client, odset_dict, opt_lot, program, qc_keyword=None,
         statuses = []
         for lot in opt_lot:
             try:
-                if ("uks" in client.query_keywords()[qc_keyword].values.values() or "uhf" in client.query_keywords()[qc_keyword].values.values()) and program == "psi4":
+                if ("uks" in qcf.query_keywords(client)[qc_keyword].values.values() or "uhf" in qcf.query_keywords(client)[qc_keyword].values.values()) and program == "psi4":
                     lot = "U" + lot
             except TypeError:
                 pass
@@ -315,7 +312,7 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     )
 
     try:
-        if ("uks" in client.query_keywords()[dft_keyword].values.values() or "uhf" in client.query_keywords()[dft_keyword].values.values()) and dft_program == "psi4":
+        if ("uks" in qcf.query_keywords(client)[dft_keyword].values.values() or "uhf" in qcf.query_keywords(client)[dft_keyword].values.values()) and dft_program == "psi4":
             dft_geom_functionals = {
                 key: ["U" + item for item in value]
                 for key, value in dft_geom_functionals.items()
