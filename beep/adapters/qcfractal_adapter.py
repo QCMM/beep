@@ -30,6 +30,13 @@ from ..core.logging_utils import log_formatted_list, padded_log
 from ..core.stoichiometry import be_stoichiometry
 from ..core.errors import DatasetNotFound, LevelOfTheoryNotFound
 
+# Re-export types so that workflows can import them from the adapter
+# instead of reaching into qcportal internals directly.
+__all__ = [
+    "FractalClient", "Dataset", "OptimizationDataset", "ReactionDataset",
+    "Molecule",
+]
+
 
 # ---------------------------------------------------------------------------
 # Connection
@@ -287,6 +294,16 @@ def add_reaction(ds_be: ReactionDataset, name: str, stoichiometry: dict) -> None
 def add_keywords(client: FractalClient, keyword_set) -> str:
     """Add a keyword set and return its ID."""
     return client.add_keywords([keyword_set])[0]
+
+
+def create_keyword_set(values: dict) -> "ptl.models.KeywordSet":
+    """Create a KeywordSet object."""
+    return ptl.models.KeywordSet(values=values)
+
+
+def query_keywords(client: FractalClient):
+    """Query all keyword sets from the server."""
+    return client.query_keywords()
 
 
 # ---------------------------------------------------------------------------

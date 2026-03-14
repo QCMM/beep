@@ -2,12 +2,10 @@
 import json
 import logging
 from pathlib import Path
-import qcportal as ptl
-from qcportal.client import FractalClient
-
 from ..models.be_hess import BeHessConfig
 from ..core.logging_utils import padded_log, beep_banner
 from ..adapters import qcfractal_adapter as qcf
+from ..adapters.qcfractal_adapter import FractalClient
 
 bcheck = "\u2714"
 gear = "\u2699"
@@ -156,7 +154,7 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
 
         keyword = None
         if mult == 2:
-            keyword_obj = ptl.models.KeywordSet(values={"reference": "uks"})
+            keyword_obj = qcf.create_keyword_set({"reference": "uks"})
             keyword = "rad_be"
             try:
                 ds_be.add_keywords(keyword, config.program, keyword_obj, default=True)
