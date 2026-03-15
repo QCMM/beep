@@ -191,4 +191,6 @@ tests/test_data_output/
 psi.*.clean
 timer.dat
 
+MIGRATION.md
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks
+
