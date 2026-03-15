@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "beep"
-version = "0.6.0"
+version = "0.12.0"
 description = "A binding energy evaluation platform and database for molecules on interstellar ice-grain mantels"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
@@ -20,9 +20,9 @@ dependencies = [
     "seaborn",
     "pydantic>=1.10,<2",
     "numpy<2",
-    "pandas>=1.4,<1.5",
-    "qcportal>=0.15,<0.50",
-    "qcelemental>=0.25,<0.26",
+    "pandas>=1.4",
+    "qcportal>=0.50",
+    "qcelemental>=0.25",
     "networkx",
 ]
 

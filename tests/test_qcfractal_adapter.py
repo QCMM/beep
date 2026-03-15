@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from qcportal.record_models import RecordStatusEnum
+
 from beep.adapters.qcfractal_adapter import (
     connect,
     get_or_create_opt_dataset,
@@ -12,6 +14,10 @@ from beep.adapters.qcfractal_adapter import (
     check_for_completion,
     create_keyword_set,
     query_keywords,
+    is_complete,
+    is_incomplete,
+    is_error,
+    status_label,
 )
 
 
@@ -19,13 +25,14 @@ from beep.adapters.qcfractal_adapter import (
 # Connection
 # ---------------------------------------------------------------------------
 
-@patch("beep.adapters.qcfractal_adapter.ptl")
-def test_connect_calls_fractal_client(mock_ptl):
-    mock_ptl.FractalClient.return_value = MagicMock()
+@patch("beep.adapters.qcfractal_adapter.PortalClient")
+def test_connect_calls_portal_client(mock_portal):
+    mock_portal.return_value = MagicMock()
     client = connect("localhost:7777")
-    mock_ptl.FractalClient.assert_called_once_with(
+    mock_portal.assert_called_once_with(
         address="localhost:7777", verify=False,
         username=None, password=None,
+        show_motd=False,
     )
 
 
@@ -36,32 +43,31 @@ def test_connect_calls_fractal_client(mock_ptl):
 def test_get_or_create_existing():
     mock_client = MagicMock()
     mock_ds = MagicMock()
-    mock_client.get_collection.return_value = mock_ds
+    mock_client.get_dataset.return_value = mock_ds
     result = get_or_create_opt_dataset(mock_client, "test_ds")
     assert result is mock_ds
 
 
-@patch("beep.adapters.qcfractal_adapter.ptl")
-def test_get_or_create_new(mock_ptl):
+def test_get_or_create_new():
     mock_client = MagicMock()
-    # First call raises KeyError, second call returns the new dataset
     mock_ds = MagicMock()
-    mock_client.get_collection.side_effect = [KeyError("not found"), mock_ds]
-    mock_ptl.collections.OptimizationDataset.return_value = MagicMock()
+    mock_client.get_dataset.side_effect = KeyError("not found")
+    mock_client.add_dataset.return_value = mock_ds
 
     result = get_or_create_opt_dataset(mock_client, "new_ds")
+    mock_client.add_dataset.assert_called_once_with("optimization", "new_ds")
     assert result is mock_ds
 
 
 def test_check_collection_exists_true():
     mock_client = MagicMock()
-    mock_client.get_collection.return_value = MagicMock()
+    mock_client.get_dataset.return_value = MagicMock()
     assert check_collection_exists(mock_client, "OptimizationDataset", "ds") is True
 
 
 def test_check_collection_exists_false():
     mock_client = MagicMock()
-    mock_client.get_collection.side_effect = KeyError("not found")
+    mock_client.get_dataset.side_effect = KeyError("not found")
     assert check_collection_exists(mock_client, "OptimizationDataset", "ds") is False
 
 
@@ -71,20 +77,22 @@ def test_check_collection_exists_false():
 
 def test_fetch_opt_molecules_filters_by_status():
     mock_ds = MagicMock()
+    sentinel_mol = MagicMock()
 
-    # Two records: one COMPLETE, one ERROR
+    # Two records: one complete, one error
     rec_complete = MagicMock()
-    rec_complete.status = "COMPLETE"
-    rec_complete.get_final_molecule.return_value = MagicMock()
+    rec_complete.status = RecordStatusEnum.complete
+    rec_complete.final_molecule = sentinel_mol
 
     rec_error = MagicMock()
-    rec_error.status = "ERROR"
+    rec_error.status = RecordStatusEnum.error
 
     mock_ds.get_record.side_effect = [rec_complete, rec_error]
 
     result = fetch_opt_molecules(mock_ds, ["entry1", "entry2"], "opt_lot")
     assert len(result) == 1
     assert result[0][0] == "entry1"
+    assert result[0][1] is sentinel_mol
 
 
 # ---------------------------------------------------------------------------
@@ -94,12 +102,12 @@ def test_fetch_opt_molecules_filters_by_status():
 def test_check_for_completion_all_done():
     mock_client = MagicMock()
     rec1 = MagicMock()
-    rec1.status = "COMPLETE"
+    rec1.status = RecordStatusEnum.complete
     rec2 = MagicMock()
-    rec2.status = "COMPLETE"
-    mock_client.query_procedures.return_value = [rec1, rec2]
+    rec2.status = RecordStatusEnum.complete
+    mock_client.get_records.return_value = [rec1, rec2]
 
-    done, counts = check_for_completion(mock_client, ["pid1", "pid2"])
+    done, counts = check_for_completion(mock_client, [1, 2])
     assert done is True
     assert counts["COMPLETE"] == 2
 
@@ -107,14 +115,35 @@ def test_check_for_completion_all_done():
 def test_check_for_completion_incomplete():
     mock_client = MagicMock()
     rec1 = MagicMock()
-    rec1.status = "COMPLETE"
+    rec1.status = RecordStatusEnum.complete
     rec2 = MagicMock()
-    rec2.status = "INCOMPLETE"
-    mock_client.query_procedures.return_value = [rec1, rec2]
+    rec2.status = RecordStatusEnum.running
+    mock_client.get_records.return_value = [rec1, rec2]
 
-    done, counts = check_for_completion(mock_client, ["pid1", "pid2"])
+    done, counts = check_for_completion(mock_client, [1, 2])
     assert done is False
     assert counts["INCOMPLETE"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Status helpers
+# ---------------------------------------------------------------------------
+
+def test_status_helpers():
+    assert is_complete(RecordStatusEnum.complete) is True
+    assert is_complete(RecordStatusEnum.error) is False
+    assert is_incomplete(RecordStatusEnum.running) is True
+    assert is_incomplete(RecordStatusEnum.waiting) is True
+    assert is_incomplete(RecordStatusEnum.complete) is False
+    assert is_error(RecordStatusEnum.error) is True
+    assert is_error(RecordStatusEnum.complete) is False
+
+
+def test_status_label_mapping():
+    assert status_label(RecordStatusEnum.complete) == "COMPLETE"
+    assert status_label(RecordStatusEnum.running) == "INCOMPLETE"
+    assert status_label(RecordStatusEnum.waiting) == "INCOMPLETE"
+    assert status_label(RecordStatusEnum.error) == "ERROR"
 
 
 # ---------------------------------------------------------------------------
@@ -126,12 +155,13 @@ def test_reexports_are_importable():
     qcportal directly."""
     from beep.adapters.qcfractal_adapter import (
         FractalClient,
+        PortalClient,
         Dataset,
         OptimizationDataset,
         ReactionDataset,
         Molecule,
     )
-    # Verify they are actual classes, not None or accidentally overwritten
+    assert FractalClient is PortalClient
     for cls in (FractalClient, Dataset, OptimizationDataset, ReactionDataset, Molecule):
         assert isinstance(cls, type), f"{cls} is not a class"
 
@@ -140,19 +170,13 @@ def test_reexports_are_importable():
 # Keyword helpers
 # ---------------------------------------------------------------------------
 
-@patch("beep.adapters.qcfractal_adapter.ptl")
-def test_create_keyword_set(mock_ptl):
-    sentinel = MagicMock()
-    mock_ptl.models.KeywordSet.return_value = sentinel
+def test_create_keyword_set_returns_dict():
     result = create_keyword_set({"reference": "uks"})
-    mock_ptl.models.KeywordSet.assert_called_once_with(values={"reference": "uks"})
-    assert result is sentinel
+    assert result == {"reference": "uks"}
+    assert isinstance(result, dict)
 
 
-def test_query_keywords_delegates_to_client():
+def test_query_keywords_raises():
     mock_client = MagicMock()
-    sentinel = MagicMock()
-    mock_client.query_keywords.return_value = sentinel
-    result = query_keywords(mock_client)
-    mock_client.query_keywords.assert_called_once()
-    assert result is sentinel
+    with pytest.raises(NotImplementedError):
+        query_keywords(mock_client)

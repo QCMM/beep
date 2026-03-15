@@ -42,7 +42,7 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
 
     logger.info("Joining the energies of the different clusters.")
 
-    for w in ds_w.df.index:
+    for w in ds_w.entry_names:
         if w in exclude_clusters:
             logger.info(f"Skipping excluded cluster: {w}")
             continue
@@ -68,10 +68,8 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
                 logger.info(f"ReactionDataset {name_be} not found for molecule: {mol}")
                 continue
 
-        ds_be._disable_query_limit = True
-
         try:
-            df = ds_be.get_values(stoich="default")
+            df = qcf.fetch_reaction_values(client, name_be, stoich="default")
         except KeyError:
             logger.info(f"ReactionDataset {name_be} exists but seems to be empty, please check.")
             continue
@@ -122,15 +120,23 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
 
     logger.info("Starting ZPVE correction procedure")
     for name in name_be:
-        ds_be = qcf.get_collection(client, "ReactionDataset", name)
-        entry_list.extend(ds_be.get_index())
-        df_be = df_be.append(ds_be.get_values(), ignore_index=False)
+        # Get entry names from the be_nocp dataset
+        ds_nocp_name = f"{name}_be_nocp"
+        try:
+            ds_nocp_ds = qcf.get_collection(client, "ReactionDataset", ds_nocp_name)
+            entry_list.extend(list(ds_nocp_ds.entry_names))
+        except KeyError:
+            logger.info(f"Dataset {ds_nocp_name} not found, skipping")
+            continue
+
+        # Get default BE values
+        df_vals = qcf.fetch_reaction_values(client, name, stoich="default")
+        df_be = pd.concat([df_be, df_vals], axis=0)
         logger.info(f"Extracting and saving binding energies from {name} for ZPVE correction")
 
-        temp_df = ds_be.get_entries()
-        df_nocp = df_nocp.append(
-            temp_df[temp_df["stoichiometry"] == "be_nocp"], ignore_index=False
-        )
+        # Get be_nocp entries for molecule IDs
+        temp_df = qcf.fetch_reaction_entries(client, name, stoich="be_nocp")
+        df_nocp = pd.concat([df_nocp, temp_df], axis=0)
 
     logger.info("Obtaining the ZPVE correction from the harmonic vibrational analysis")
     zpve_corr_dict, todelete = {}, []
@@ -231,7 +237,7 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
     dset_smol = qcf.get_collection(client, "OptimizationDataset", config.mol_coll_name)
     ds_w = qcf.get_collection(client, "OptimizationDataset", config.surface_model)
 
-    mol_list = config.molecules or list(dset_smol.df.index)
+    mol_list = config.molecules or list(dset_smol.entry_names)
 
     final_result_nz = ""
     final_result_dz = ""

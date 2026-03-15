@@ -5,7 +5,7 @@ from pathlib import Path
 from ..models.be_hess import BeHessConfig
 from ..core.logging_utils import padded_log, beep_banner
 from ..adapters import qcfractal_adapter as qcf
-from ..adapters.qcfractal_adapter import FractalClient
+from ..adapters.qcfractal_adapter import FractalClient, is_complete, is_incomplete, is_error
 
 bcheck = "\u2714"
 gear = "\u2699"
@@ -69,13 +69,13 @@ def check_refinement_status(client, surf_ds, mol_name, opt_lot,
     total_entries = 0
     lines = []
 
-    for cn in surf_ds.df.index:
+    for cn in surf_ds.entry_names:
         if cn in exclude_clusters:
             continue
         ds_opt_name = f"{mol_name}_{cn}"
         try:
             opt_ds = qcf.get_collection(client, "OptimizationDataset", ds_opt_name)
-            if not opt_ds.data.records:
+            if not opt_ds.entry_names:
                 continue
         except Exception:
             continue
@@ -83,15 +83,15 @@ def check_refinement_status(client, surf_ds, mol_name, opt_lot,
         n_complete = 0
         n_incomplete = 0
         n_error = 0
-        for entry in opt_ds.df.index:
+        for entry in opt_ds.entry_names:
             try:
                 record = opt_ds.get_record(entry, opt_lot)
                 if hasattr(record, 'status'):
-                    if record.status == "COMPLETE":
+                    if is_complete(record.status):
                         n_complete += 1
-                    elif record.status == "INCOMPLETE":
+                    elif is_incomplete(record.status):
                         n_incomplete += 1
-                    elif record.status == "ERROR":
+                    elif is_error(record.status):
                         n_error += 1
             except (KeyError, TypeError):
                 continue
@@ -148,23 +148,17 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
         logger.info(f"ReactionDataset name for {ds_opt.name} is: {rdset_name}")
 
         padded_log(logger, f"Creating the dataset {rdset_name}", padding_char="*", total_length=60)
-        ds_be = qcf.create_or_load_reaction_dataset(
+        rdset_base = qcf.create_or_load_reaction_dataset(
             client, rdset_name, opt_lot, smol_mol, cluster_mol, ds_opt, opt_stru, logger
         )
 
         keyword = None
         if mult == 2:
-            keyword_obj = qcf.create_keyword_set({"reference": "uks"})
-            keyword = "rad_be"
-            try:
-                ds_be.add_keywords(keyword, config.program, keyword_obj, default=True)
-                ds_be.save()
-            except KeyError:
-                pass
+            keyword = {"reference": "uks"}
 
         padded_log(logger, f"Sending computations for {rdset_name}", padding_char="*", total_length=60)
         job_ids = qcf.compute_be_dft_energies(
-            ds_be, config.level_of_theory, config.energy_tag,
+            client, rdset_base, config.level_of_theory, config.energy_tag,
             program=config.program, keyword=keyword, logger=logger,
         )
         all_ids.extend(job_ids)

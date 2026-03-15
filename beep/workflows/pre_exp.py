@@ -55,7 +55,7 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
     main_logger = logging.getLogger("beep")
 
     if mol is None:
-        mol = list(ds.df.index)
+        mol = list(ds.entry_names)
 
     # Use first molecule name for the output folder (or collection name if list)
     folder_label = mol[0] if isinstance(mol, list) else mol

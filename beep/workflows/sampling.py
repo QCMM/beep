@@ -61,7 +61,6 @@ def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
     }
 
     qcf.add_opt_specification(ds_opt, spec, overwrite=True)
-    ds_opt.save()
     c = qcf.submit_optimizations(ds_opt, ropt_lot_name, tag=rtag)
 
     logger.info(
@@ -69,7 +68,7 @@ def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
         f"using {rmethod}/{rbasis} in {program}. \n"
         f"Description: {spec['description']}. \n"
         f"Tag applied: '{rtag}'\n"
-        f"Number of optimizations submitted: {c}. {bcheck} \n"
+        f"Optimizations submitted: {c}. {bcheck} \n"
     )
 
 
@@ -137,16 +136,16 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
     ds_sm = qcf.get_collection(client, "OptimizationDataset", config.small_molecule_collection)
     ds_wc = qcf.get_collection(client, "OptimizationDataset", config.surface_model_collection)
 
-    cluster_names = list(ds_wc.data.records.keys())
+    cluster_names = list(ds_wc.entry_names)
     logger.info(f"  Surface model clusters: {len(cluster_names)}  ({', '.join(cluster_names)})")
 
     # Check if all the molecules are optimized at the requested level of theory
     if len(qcf.fetch_initial_molecule(ds_sm, smol_name, opt_lot).symbols) == 1:
-        qcf.check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
+        qcf.check_optimized_molecule(ds_wc, opt_lot, ds_wc.entry_names)
         args_dict["target_mol"] = qcf.fetch_initial_molecule(ds_sm, smol_name, opt_lot)
     else:
         qcf.check_optimized_molecule(ds_sm, opt_lot, [smol_name])
-        qcf.check_optimized_molecule(ds_wc, opt_lot, ds_wc.data.records.keys())
+        qcf.check_optimized_molecule(ds_wc, opt_lot, ds_wc.entry_names)
         args_dict["target_mol"] = qcf.fetch_final_molecule(ds_sm, smol_name, opt_lot)
 
     logger.info(f"  All geometries validated. {bcheck}\n")
@@ -157,7 +156,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
     count = 0
     cluster_results = []
 
-    for c, w in enumerate(ds_wc.data.records):
+    for c, w in enumerate(ds_wc.entry_names):
         args_dict["cluster"] = qcf.fetch_final_molecule(ds_wc, w, opt_lot)
 
         ref_opt_dset_name = smol_name + "_" + w
@@ -187,7 +186,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         )
 
         ds_ref = qcf.get_or_create_opt_dataset(client, ref_opt_dset_name)
-        n_sites = len(ds_ref.data.records)
+        n_sites = len(ds_ref.entry_names)
         count += n_sites
         cluster_results.append((w, n_sites))
 

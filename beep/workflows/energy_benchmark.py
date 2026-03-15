@@ -50,48 +50,48 @@ def populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs,
             mol_name, surf_name, _ = name.split("_")
             surf_record = (
                 odset_dict[surf_name.upper()]
-                .get_record(name=surf_name.upper(), specification=geom_ref_opt_lot)
+                .get_record(surf_name.upper(), geom_ref_opt_lot)
             )
             if config.use_initial_reference_geometry:
-                surf_mod_mol = surf_record.get_initial_molecule()
+                surf_mod_mol = surf_record.initial_molecule
             else:
-                surf_mod_mol = surf_record.get_final_molecule()
+                surf_mod_mol = surf_record.final_molecule
             len_f1 = len(surf_mod_mol.symbols)
             mol_f1, mol_f2 = create_molecular_fragments(fmol, len_f1)
-            cbs_col.add_entry(name, fmol)
-            cbs_col.add_entry(name + "_f1", mol_f1)
-            cbs_col.add_entry(name + "_f2", mol_f2)
+            cbs_col.add_entry(name=name, molecule=fmol)
+            cbs_col.add_entry(name=name + "_f1", molecule=mol_f1)
+            cbs_col.add_entry(name=name + "_f2", molecule=mol_f2)
             logger.info(f"Adding molecule and fragments of {name} to {cbs_col.name}")
-            cbs_col.save()
         else:
-            cbs_col.add_entry(name, fmol)
+            cbs_col.add_entry(name=name, molecule=fmol)
             logger.info(f"Adding molecule {name} to {cbs_col.name}")
-            cbs_col.save()
 
 
-def add_cc_keywords(cbs_col, mol_mult):
+def get_cc_keywords(mol_mult):
+    """Return the density-fitting keywords dict for correlated methods."""
     logger = logging.getLogger("beep")
     if mol_mult == 1:
-        logger.info(f"\n\nCreating keywords for closed shell coupled cluster computation")
-        kw_dict = {"scf_type": "df", "cc_type": "df", "freeze_core": "true"}
-        logger.info(f"Keywords dictionary: {kw_dict}")
-        kw_dfit = qcf.create_keyword_set(kw_dict)
+        logger.info(f"\n\nKeywords for closed shell coupled cluster computation")
+        kw = {"scf_type": "df", "cc_type": "df", "freeze_core": "true"}
     elif mol_mult == 2:
-        logger.info(f"\n\nCreating keywords for open shell coupled cluster computation")
-        kw_dict = {"reference": "uhf", "freeze_core": "true"}
-        logger.info(f"Keywords dictionary: {kw_dict}")
-        kw_dfit = qcf.create_keyword_set(kw_dict)
+        logger.info(f"\n\nKeywords for open shell coupled cluster computation")
+        kw = {
+            "reference": "uhf",
+            "scf_type": "df",
+            "cc_type": "df",
+            "freeze_core": "true",
+            "qc_module": "OCC",
+        }
+    else:
+        kw = {}
+    logger.info(f"Keywords dictionary: {kw}\n")
+    return kw
 
-    try:
-        cbs_col.add_keywords("df", "psi4", kw_dfit)
-        cbs_col.save()
-        logger.info("Added keywords to Dataset\n")
-    except KeyError:
-        logger.info("Keyword already set in Dataset, nothing to add\n")
 
+def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, cc_keywords=None,
+                    res_folder=None):
+    from qcportal.singlepoint.record_models import QCSpecification, SinglepointDriver
 
-def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, res_folder=None):
-    all_cbs_ids = []
     logger = logging.getLogger("beep")
     id_str = ""
     dir_path = (res_folder / "cbs_ids") if res_folder else Path("cbs_ids")
@@ -99,28 +99,46 @@ def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, res_folder=None):
         dir_path.mkdir(parents=True)
     file_path = dir_path / "cbs_ids.dat"
 
+    if cc_keywords is None:
+        cc_keywords = {}
+
     for lot in cbs_list:
         method, basis = lot.split("_")[0], lot.split("_")[1]
-        logger.info(f"\nSendig computations for {method}/{basis}")
+        logger.info(f"\nSending computations for {method}/{basis}")
 
-        if "scf" not in lot:
-            c = cbs_col.compute(method, basis, tag=tag, keywords="df", program="psi4")
-        else:
-            c = cbs_col.compute(method, basis, tag=tag, program="psi4")
+        # SCF uses no special keywords; correlated methods use df keywords
+        kw = {} if "scf" in lot else cc_keywords
+        spec_name = f"{method}_{basis}" if not kw else f"{method}_{basis}_df"
 
-        id_li = c.submitted + c.existing
-        id_str += f"{method}_{basis}: {id_li}\n"
-        logger.info(f"Submited {len(c.submitted)} Computation to tag {tag}.")
-        if len(c.existing) > 0:
-            logger.info(f"{len(c.existing)} have already been computed {bcheck}")
+        qc_spec = QCSpecification(
+            program="psi4",
+            driver=SinglepointDriver.energy,
+            method=method,
+            basis=basis,
+            keywords=kw,
+        )
+        try:
+            cbs_col.add_specification(spec_name, qc_spec)
+        except Exception:
+            pass  # specification already exists
+
+        result = cbs_col.submit(
+            specification_names=[spec_name],
+            compute_tag=tag,
+        )
+
+        id_str += f"{method}_{basis}: submitted={result.n_inserted} existing={result.n_existing}\n"
+        logger.info(f"Submitted {result.n_inserted} computations to tag {tag}.")
+        if result.n_existing > 0:
+            logger.info(f"{result.n_existing} have already been computed {bcheck}")
 
     with file_path.open(mode="w") as file:
         file.write(id_str)
 
-    return all_cbs_ids
-
 
 def check_dataset_status(dataset, cbs_list, wait_interval=1800):
+    from beep.adapters.qcfractal_adapter import is_complete, is_incomplete, is_error
+
     logger = logging.getLogger("beep")
     while True:
         status_counts = {
@@ -130,18 +148,22 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
 
         for lot in cbs_list:
             method, basis = lot.split("_")
-            if "scf" not in method:
-                df = dataset.get_records(method=method, basis=basis, program="psi4", keywords="df")
-            else:
-                df = dataset.get_records(method=method, basis=basis, program="psi4", keywords=None)
+            spec_name = f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df"
 
-            for index, row in df.iterrows():
-                status = row["record"].status.upper()
-                if status not in status_counts[method]:
+            for entry_name, sn, record in dataset.iterate_records(
+                specification_names=[spec_name],
+            ):
+                if record is None:
                     continue
-                status_counts[method][status] += 1
-                if status == "ERROR":
-                    raise Exception(f"Error in record {index} with level of theory {lot}")
+                if is_complete(record.status):
+                    status_counts[method]["COMPLETE"] += 1
+                elif is_incomplete(record.status):
+                    status_counts[method]["INCOMPLETE"] += 1
+                elif is_error(record.status):
+                    status_counts[method]["ERROR"] += 1
+                    raise Exception(
+                        f"Error in record {entry_name} with level of theory {lot}"
+                    )
 
         logger.info(f"\nChecking status of computations for CCSD(T)\\CBS:\n")
         for method, counts in status_counts.items():
@@ -165,18 +187,16 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
 
 
 def get_energy_record(ds, struct, method, basis):
-    kwargs = {"method": method, "basis": basis, "program": "Psi4", "keywords": None}
-    if "scf" not in method:
-        kwargs["keywords"] = "df"
-    df_records = ds.get_records(**kwargs)
-    df_records.index = df_records.index.str.upper()
-    records = df_records.loc[struct.upper()]
-
-    if isinstance(records, pd.DataFrame):
-        rec = records.iloc[0].iloc[0]
-    else:
-        rec = records[0]
-    return rec
+    spec_name = f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df"
+    record = ds.get_record(struct.upper(), spec_name)
+    if record is None:
+        # Try lowercase entry name as fallback
+        record = ds.get_record(struct, spec_name)
+    if record is None:
+        raise KeyError(
+            f"No record for entry '{struct}' with specification '{spec_name}'"
+        )
+    return record
 
 
 def get_cbs_energy(ds, struct, cbs_lot_list):
@@ -268,7 +288,12 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
     logger = logging.getLogger("beep")
     rdset_name = f"bchmk_be_{smol_name}_{surf_dset_name}"
     logger.info(f"Creating a loading ReactionDataset: {rdset_name}\n")
-    ds_be = qcf.create_reaction_dataset(client, rdset_name, program="psi4")
+
+    # Create one dataset per stoichiometry type
+    for stoich_type in qcf.STOICH_TYPES:
+        ds_name = f"{rdset_name}_{stoich_type}"
+        qcf.create_reaction_dataset(client, ds_name, program="psi4")
+
     n_entries = 0
     for bench_struct in bchmk_structs:
         for lot in dft_opt_lot:
@@ -286,14 +311,13 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
                 continue
             bench_entry = f"{bench_struct}_{lot}"
             try:
-                ds_be.add_rxn(bench_entry, be_stoich)
+                qcf.add_reaction(client, rdset_name, bench_entry, be_stoich)
                 n_entries += 1
             except KeyError:
                 continue
 
-    ds_be.save()
     logger.info(f"Created a total of {n_entries} in {rdset_name} {bcheck}")
-    return ds_be
+    return rdset_name
 
 
 def _fetch_be_molecules(odset, bench_struct, lot_geom):
@@ -305,45 +329,57 @@ def _fetch_be_molecules(odset, bench_struct, lot_geom):
     mol_name, surf_name, _ = bench_struct.split("_")
     smol_mol = (
         odset[mol_name.upper()]
-        .get_record(name=mol_name.upper(), specification=lot_geom)
-        .get_final_molecule()
+        .get_record(mol_name.upper(), lot_geom)
+        .final_molecule
     )
     surf_mol = (
         odset[surf_name.upper()]
-        .get_record(name=surf_name.upper(), specification=lot_geom)
-        .get_final_molecule()
+        .get_record(surf_name.upper(), lot_geom)
+        .final_molecule
     )
     struc_mol = (
         odset[bench_struct]
-        .get_record(name=bench_struct, specification=lot_geom)
-        .get_final_molecule()
+        .get_record(bench_struct, lot_geom)
+        .final_molecule
     )
     return smol_mol, surf_mol, struc_mol
 
 
-def compute_be_dft_energies_eb(ds_be, all_dft, tag, basis="def2-tzvpd",
-                                program="psi4"):
+def compute_be_dft_energies_eb(client, rdset_base_name, all_dft, tag,
+                                basis="def2-tzvpd", program="psi4"):
     logger = logging.getLogger("beep")
-    stoich_list = ["default", "de", "ie", "be_nocp"]
-    logger.info(f"Computing energies for the following stoichiometries: {' '.join(stoich_list)} (default = be)")
+    logger.info(f"Computing energies for the following stoichiometries: {' '.join(qcf.STOICH_TYPES)} (default = be)")
     log_formatted_list(logger, all_dft, "Sending DFT energy computations for the following functionals:")
 
-    c_list_sub = []
-    c_list_exis = []
+    total_submitted = 0
+    total_existing = 0
     for i, func in enumerate(all_dft):
-        c_per_func_sub = []
-        c_per_func_exis = []
-        for stoich in stoich_list:
-            c = ds_be.compute(method=func, basis=basis, program=program, stoich=stoich, tag=tag)
-            c_list_sub.extend(list(c)[1][1])
-            c_per_func_sub.extend(list(c)[1][1])
-            c_list_exis.extend(list(c)[0][1])
-            c_per_func_exis.extend(list(c)[0][1])
-        logger.info(f"\n{func}: Existing {len(c_per_func_exis)}  Submitted {len(c_per_func_sub)}")
+        func_submitted = 0
+        func_existing = 0
+        for stoich in qcf.STOICH_TYPES:
+            result = qcf.submit_energies(
+                client, rdset_base_name,
+                method=func, basis=basis, program=program,
+                stoich=stoich, tag=tag,
+            )
+            func_submitted += result.n_inserted
+            func_existing += result.n_existing
+        total_submitted += func_submitted
+        total_existing += func_existing
+        logger.info(f"\n{func}: Existing {func_existing}  Submitted {func_submitted}")
         log_progress(logger, i, len(all_dft))
 
-    logger.info(f"Submitted a total of {len(c_list_sub)} DFT computations. {len(c_list_exis)} are already computed")
-    return c_list_sub + c_list_exis
+    logger.info(f"Submitted a total of {total_submitted} DFT computations. {total_existing} are already computed")
+
+    # Collect record IDs for monitoring
+    record_ids = []
+    for stoich in qcf.STOICH_TYPES:
+        ds_name = f"{rdset_base_name}_{stoich}"
+        ds = client.get_dataset("reaction", ds_name)
+        for _, _, record in ds.iterate_records():
+            if record is not None:
+                record_ids.append(record.id)
+    return record_ids
 
 
 def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
@@ -400,11 +436,11 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
-        record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
+        record = odset.get_record(struct_name, geom_ref_opt_lot)
         if config.use_initial_reference_geometry:
-            ref_geom_fmols[struct_name] = record.get_initial_molecule()
+            ref_geom_fmols[struct_name] = record.initial_molecule
         else:
-            ref_geom_fmols[struct_name] = record.get_final_molecule()
+            ref_geom_fmols[struct_name] = record.final_molecule
 
     padded_log(logger, "CCSD(T)/CBS computations:")
 
@@ -426,9 +462,10 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     logger.info(f"\nAdding molecules and fragments to {cbs_col.name} Database collection:\n")
     populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs, odset_dict, geom_ref_opt_lot, config)
-    add_cc_keywords(cbs_col, mol_mult)
+    cc_kw = get_cc_keywords(mol_mult)
 
-    compute_all_cbs(cbs_col, cbs_list, mol_mult, tag=config.tag_cbs, res_folder=res_folder)
+    compute_all_cbs(cbs_col, cbs_list, mol_mult, tag=config.tag_cbs,
+                    cc_keywords=cc_kw, res_folder=res_folder)
     check_dataset_status(cbs_col, cbs_list)
 
     ref_df = get_reference_be_result(bchmk_structs, cbs_col, cbs_list)
@@ -437,7 +474,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     padded_log(logger, "Initializing DFT Binding Energy Computations")
     logger.info(f"The BE will be computed on the following Geometries: {' '.join(dft_opt_lot)}\n")
 
-    ds_be = create_or_load_reaction_dataset_eb(
+    rdset_base = create_or_load_reaction_dataset_eb(
         client, smol_name, surf_dset_name, bchmk_structs, dft_opt_lot, odset_dict,
     )
 
@@ -450,17 +487,14 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     for name, dft_f_list in dft_func.items():
         padded_log(logger, f"Sending computations for {name} functionals with a {config.be_basis} basis")
         dft_ids = compute_be_dft_energies_eb(
-            ds_be, dft_f_list, basis=config.be_basis, program="psi4", tag=config.tag_be,
+            client, rdset_base, dft_f_list, basis=config.be_basis, program="psi4", tag=config.tag_be,
         )
         qcf.check_jobs_status(client, dft_ids, logger)
 
-    ds_be._disable_query_limit = True
-    ds_be.save()
-
     padded_log(logger, "Retriving energies from ReactionDataset")
-    df_be = ds_be.get_values(stoich="default").dropna(axis=1)
-    df_ie = ds_be.get_values(stoich="ie").dropna(axis=1)
-    df_de = ds_be.get_values(stoich="de").dropna(axis=1)
+    df_be = qcf.fetch_reaction_values(client, rdset_base, stoich="default").dropna(axis=1)
+    df_ie = qcf.fetch_reaction_values(client, rdset_base, stoich="ie").dropna(axis=1)
+    df_de = qcf.fetch_reaction_values(client, rdset_base, stoich="de").dropna(axis=1)
 
     df_be_ae, df_be_re = get_errors_dataframe(df_be, ref_df["BE"].to_dict())
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())

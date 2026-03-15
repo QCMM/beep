@@ -20,7 +20,7 @@ from ..core.dft_functionals import (
 from ..core.plotting_utils import rmsd_histograms
 from ..core.benchmark_utils import create_benchmark_dataset_dict, compute_rmsd
 from ..adapters import qcfractal_adapter as qcf
-from ..adapters.qcfractal_adapter import FractalClient
+from ..adapters.qcfractal_adapter import FractalClient, is_complete, is_incomplete, is_error, status_label
 
 bcheck = "\u2714"
 mia0911 = "\u2606"
@@ -33,15 +33,23 @@ welcome_msg = beep_banner(
 )
 
 
+def _is_unrestricted_keyword(qc_keyword):
+    """Check if keyword dict indicates unrestricted reference (uks/uhf)."""
+    if qc_keyword is None:
+        return False
+    if isinstance(qc_keyword, dict):
+        vals = [str(v).lower() for v in qc_keyword.values()]
+        return "uks" in vals or "uhf" in vals
+    return False
+
+
 def create_and_add_specification(client, odset, method, basis, program,
                                   qc_keyword, geom_keywords=None):
     logger = logging.getLogger("beep")
     spec_name = f"{method}_{basis}"
-    if qc_keyword:
-        kw_name = qcf.query_keywords(client)[qc_keyword].values.values()
-        logger.debug(f"Using the following keyword for the specification {kw_name} to {odset.name}")
-        if ("uks" in kw_name or "uhf" in kw_name) and program == "psi4":
-            spec_name = "U" + spec_name
+    if _is_unrestricted_keyword(qc_keyword) and program == "psi4":
+        logger.debug(f"Using unrestricted keywords for specification on {odset.name}")
+        spec_name = "U" + spec_name
 
     spec = {
         "name": spec_name,
@@ -51,13 +59,12 @@ def create_and_add_specification(client, odset, method, basis, program,
             "driver": "gradient",
             "method": method,
             "basis": basis,
-            "keywords": qc_keyword,
+            "keywords": qc_keyword if isinstance(qc_keyword, dict) else {},
             "program": program,
         },
     }
-    odset.add_specification(**spec, overwrite=True)
-    odset.save()
-    logger.debug(f"Create and added the specification {spec_name} to {odset.name}")
+    qcf.add_opt_specification(odset, spec, overwrite=True)
+    logger.debug(f"Created and added the specification {spec_name} to {odset.name}")
     return spec_name
 
 
@@ -85,34 +92,37 @@ def wait_for_completion(client, odset_dict, opt_lot, program, qc_keyword=None,
     logger.info("\nChecking if the computations have finished")
     logger.info("\n")
     while True:
-        statuses = []
+        n_complete = 0
+        n_incomplete = 0
+        n_error = 0
         for lot in opt_lot:
-            try:
-                if ("uks" in qcf.query_keywords(client)[qc_keyword].values.values() or "uhf" in qcf.query_keywords(client)[qc_keyword].values.values()) and program == "psi4":
-                    lot = "U" + lot
-            except TypeError:
-                pass
+            if _is_unrestricted_keyword(qc_keyword) and program == "psi4":
+                lot = "U" + lot
             for struct_name, odset in odset_dict.items():
-                status = odset.get_record(struct_name, specification=lot).status
-                statuses.append(status)
-
-                if status == "ERROR" and check_errors:
+                record = odset.get_record(struct_name, lot)
+                if record is None:
+                    continue
+                if is_error(record.status) and check_errors:
                     raise RuntimeError(
                         f"Error encountered in computation for {struct_name} with spec '{lot}'"
                     )
+                if is_complete(record.status):
+                    n_complete += 1
+                elif is_incomplete(record.status):
+                    n_incomplete += 1
+                elif is_error(record.status):
+                    n_error += 1
 
-        status_counts = Counter(statuses)
-
-        if status_counts["INCOMPLETE"] == 0:
+        if n_incomplete == 0:
             logger.info(
-                f"All entries have been processed. (Complete: {status_counts['COMPLETE']}, "
-                f"ERROR: {status_counts['ERROR']}) {bcheck}"
+                f"All entries have been processed. (Complete: {n_complete}, "
+                f"ERROR: {n_error}) {bcheck}"
             )
-            return status_counts["COMPLETE"]
+            return n_complete
 
         logger.info(
             f"Waiting for {wait_interval} seconds before rechecking statuses... "
-            f"(Incomplete: {status_counts['INCOMPLETE']})"
+            f"(Incomplete: {n_incomplete})"
         )
         time.sleep(wait_interval)
 
@@ -129,8 +139,8 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
         rmsd_tot_dict = {}
         err = None
         for struct_name, odset in odset_dict.items():
-            record = odset.get_record(struct_name, specification=opt_lot)
-            err = record.get_error()
+            record = odset.get_record(struct_name, opt_lot)
+            err = is_error(record.status) if record is not None else True
             if err:
                 logger.warning(
                     f"WARNING: Calculation for {struct_name} at the {opt_lot} level of theory "
@@ -139,7 +149,7 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
                 )
                 errored_specs.append((opt_lot, struct_name, record.id))
                 break
-            fmol = record.get_final_molecule()
+            fmol = record.final_molecule
             rmsd = compute_rmsd(ref_geom_fmols[struct_name], fmol, rmsd_symm=True)
             rmsd_tot_dict[struct_name] = rmsd
             rmsd_df.at[struct_name, opt_lot] = rmsd
@@ -299,11 +309,11 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
 
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
-        record = odset.get_record(struct_name, specification=geom_ref_opt_lot)
+        record = odset.get_record(struct_name, geom_ref_opt_lot)
         if config.use_initial_reference_geometry:
-            ref_geom_fmols[struct_name] = record.get_initial_molecule()
+            ref_geom_fmols[struct_name] = record.initial_molecule
         else:
-            ref_geom_fmols[struct_name] = record.get_final_molecule()
+            ref_geom_fmols[struct_name] = record.final_molecule
 
     padded_log(
         logger,
@@ -311,14 +321,11 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
         geom_ref_opt_lot,
     )
 
-    try:
-        if ("uks" in qcf.query_keywords(client)[dft_keyword].values.values() or "uhf" in qcf.query_keywords(client)[dft_keyword].values.values()) and dft_program == "psi4":
-            dft_geom_functionals = {
-                key: ["U" + item for item in value]
-                for key, value in dft_geom_functionals.items()
-            }
-    except TypeError:
-        pass
+    if _is_unrestricted_keyword(dft_keyword) and dft_program == "psi4":
+        dft_geom_functionals = {
+            key: ["U" + item for item in value]
+            for key, value in dft_geom_functionals.items()
+        }
 
     best_opt_lot, rmsd_df = compare_all_rmsd(dft_geom_functionals, odset_dict, ref_geom_fmols)
 
