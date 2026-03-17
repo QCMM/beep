@@ -117,10 +117,7 @@ def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, cc_keywords=None,
             basis=basis,
             keywords=kw,
         )
-        try:
-            cbs_col.add_specification(spec_name, qc_spec)
-        except Exception:
-            pass  # specification already exists
+        cbs_col.add_specification(spec_name, qc_spec)
 
         result = cbs_col.submit(
             specification_names=[spec_name],

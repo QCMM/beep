@@ -1,7 +1,28 @@
 """Geometry benchmark workflow config — maps to launch_geom_benchmark.py argparse flags."""
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Dict
 from pydantic import BaseModel, Field
 from .base import ServerConfig
+
+
+class BSSETestConfig(BaseModel):
+    """Configuration for BSSE/dispersion test via direct Slurm CP jobs."""
+    functional: List[str] = Field(["PBE0"], description="Test functional(s) (default: ['PBE0'])")
+    basis_sets: List[str] = Field(
+        ["def2-svp", "def2-svpd", "def2-tzvpd"],
+        description="Basis sets to test",
+    )
+    dispersion: List[str] = Field(
+        ["", "D3BJ", "D4"],
+        description="Dispersion corrections for uncorrected optimizations (empty string = bare functional)",
+    )
+    cp_dispersion: Optional[List[str]] = Field(
+        None,
+        description="Dispersion corrections for CP-corrected optimizations. Defaults to same as dispersion. D4 is not supported with CP in Psi4.",
+    )
+    partition: str = Field(..., description="Slurm partition for CP jobs")
+    cores: int = Field(6, description="Number of CPU cores per CP job")
+    memory: str = Field("12GB", description="Memory per CP job")
+    walltime: str = Field("24:00:00", description="Slurm walltime for CP jobs")
 
 
 class GeomBenchmarkConfig(BaseModel):
@@ -16,8 +37,10 @@ class GeomBenchmarkConfig(BaseModel):
         ["df-ccsd(t)-f12", "cc-pvdz", "molpro"],
         description="Reference geometry level of theory [method, basis, program]",
     )
+    reference_geometry_keywords: Optional[Dict[str, str]] = Field(None, description="QC keywords for reference geometry (e.g. scf_type, cc_type)")
     tag_reference_geometry: Optional[str] = Field(None, description="Queue tag for reference geometry tasks")
     dft_optimization_program: str = Field("psi4", description="Program for DFT geometry optimizations")
     dft_optimization_keyword: Optional[int] = Field(None, description="QCFractal keyword ID for DFT optimizations")
     tag_dft_geometry: Optional[str] = Field(None, description="Queue tag for DFT geometry tasks")
     use_initial_reference_geometry: bool = Field(False, description="Use initial (unoptimized) reference geometry")
+    bsse_test: Optional[BSSETestConfig] = Field(None, description="Optional BSSE/dispersion test on a single functional")

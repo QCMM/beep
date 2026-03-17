@@ -27,5 +27,6 @@
     "sampling_tag": null,
     "refinement_tag": null,
     "total_binding_sites": null,
+    "sampling_clusters": [],
     "keyword_id": null
 }

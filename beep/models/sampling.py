@@ -1,5 +1,5 @@
 """Sampling workflow config — maps to launch_sampling.py argparse flags."""
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from pydantic import BaseModel, Field
 from .base import ServerConfig, LevelOfTheory
 
@@ -21,4 +21,5 @@ class SamplingConfig(BaseModel):
     sampling_tag: str = Field("sampling", description="Queue tag for sampling computation tasks")
     refinement_tag: str = Field("refinement", description="Queue tag for refinement computation tasks")
     total_binding_sites: int = Field(220, description="Total number of binding sites to generate")
+    sampling_clusters: List[str] = Field([], description="Subset of clusters to sample (empty = all clusters in surface model collection)")
     keyword_id: Optional[int] = Field(None, description="QCFractal keyword ID for custom options")

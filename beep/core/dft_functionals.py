@@ -299,44 +299,53 @@ def double_hybrid():
 
 def geom_hmgga_dz():
     return [
-        "M05-2X_def2-svp",
-        "MPWB1K-D3BJ_def2-svp",
-        "PWB6K-D3BJ_def2-svp",
-        "B3LYP-D3BJ_def2-svp",
-        "B3PW91-D3BJ_def2-svp",
-        "PBE0-D3BJ_def2-svp",
-        "MPWB1K-D3BJ_def2-svpd",
-        "PBE0-D3BJ_def2-svpd",
-        #"PBE0-D3BJ_aug-cc-pV(D+d)Z",
-        "B3LYP-D3BJ_def2-svpd",
+        "MPWB1K-D4_def2-svpd",
+        "PBE0-D4_def2-svpd",
+        "PBE0_def2-svpd",
+        "B3LYP-D4_def2-svpd",
+        "M06-2X_def2-svpd",
+        "WB97X-V_def2-svpd",
+        "M06-L_def2-svpd",
     ]
 
-def  geom_hmgga_tz():
+def geom_hmgga_tz():
     return [
         "M05-2X_def2-tzvp",
-        "MPWB1K-D3BJ_def2-tzvp",
-        "PWB6K-D3BJ_def2-tzvp",
-        "B3LYP-D3BJ_def2-tzvp",
-        "B3PW91-D3BJ_def2-tzvp",
-        "PBE0-D3BJ_def2-tzvp",
-        "MPWB1K-D3BJ_def2-tzvpd",
-        #"MPWB1K-D3BJ_aug-cc-pV(T+d)Z",
-        "PBE0-D3BJ_def2-tzvpd",
-        "B3LYP-D3BJ_def2-tzvpd",
-        "MPWB1K_def2-tzvp",
+        "M05-2X_def2-tzvpd",
+        "MPWB1K-D4_def2-tzvp",
+        "MPWB1K-D4_def2-tzvpd",
+        "B3LYP-D4_def2-tzvp",
+        "B3LYP-D4_def2-tzvpd",
+        "PBE0-D4_def2-tzvp",
+        "PBE0-D4_def2-tzvpd",
+        "PBE0_def2-tzvp",
+        "PBE0_def2-tzvpd",
+        "M06-2X_def2-tzvp",
+        "M06-2X_def2-tzvpd",
+        "WB97X-V_def2-tzvp",
+        "WB97X-V_def2-tzvpd",
+        "M06-L_def2-tzvp",
+        "M06-L_def2-tzvpd",
     ]
 
 def geom_gga_dz():
     return [
-         "PBE-D3BJ_def2-svp", 
-         "BLYP-D3BJ_def2-svp", 
-         "B97-D_def2-svp", 
-         "PW91-D3BJ_def2-svp",
-         "B97-D_def2-svpd", 
-         "BLYP-D3BJ_def2-svpd", 
-         "PBE-D3BJ_def2-svpd", 
-         #"BLYP-D3BJ_aug-cc-pV(D+d)Z", 
-         ]
+        "B97-D_def2-svpd",
+        "BLYP-D4_def2-svpd",
+        "PBE-D4_def2-svpd",
+    ]
+
+def geom_gga_tz():
+    return [
+        "PBE-D4_def2-tzvp",
+        "PBE-D4_def2-tzvpd",
+    ]
 
 def geom_sqm_mb():
-    return ["HF3C_MINIX", "PBEh3c_def2-msvp"]
+    return [
+        "HF3C_MINIX",
+        "PBEh3c_def2-msvp",
+        "B97-3c_def2-mTZVP",
+        "R2SCAN-3c_def2-mTZVPP",
+        "WB97X-3c_vDZP",
+    ]

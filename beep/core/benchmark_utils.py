@@ -8,11 +8,15 @@ from qcelemental.models.molecule import Molecule
 
 
 def create_benchmark_dataset_dict(benchmark_structs):
-    """Build {struct_name: 'mol_surf'} dict from benchmark structure names like 'mol_surf_001'."""
+    """Build {struct_name: dataset_name} dict from benchmark structure names.
+
+    The last '_NNNN' segment is the binding site number; everything before it
+    is the dataset name (e.g. 'H2O_CD1_01_0001' → 'H2O_CD1_01').
+    """
     dataset_dict = {}
     for bchmk_struc_name in benchmark_structs:
-        mol, surf, _ = bchmk_struc_name.split("_")
-        dataset_dict[bchmk_struc_name] = f"{mol}_{surf}"
+        dataset_name = bchmk_struc_name.rsplit("_", 1)[0]
+        dataset_dict[bchmk_struc_name] = dataset_name
     return dataset_dict
 
 

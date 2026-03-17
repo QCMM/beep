@@ -37,8 +37,8 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
     logger = logging.getLogger("beep")
     df_be = pd.DataFrame()
     parts = opt_method.split("_", 1)
-    method = parts[0]
-    basis = parts[1] if len(parts) == 2 else None
+    method = parts[0].upper()
+    basis = parts[1].upper() if len(parts) == 2 else None
 
     logger.info("Joining the energies of the different clusters.")
 
@@ -51,17 +51,15 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
             name_be = f"be_{mol}_{w}_{method}_{basis}"
         else:
             name_be = f"be_{mol}_{w}_{method}"
-        try:
-            ds_be = qcf.get_collection(client, "ReactionDataset", name_be)
-        except KeyError:
+        # Check if stoich-specific dataset exists (Phase 3: separate datasets per stoich type)
+        if not qcf.check_collection_exists(client, "ReactionDataset", f"{name_be}_default"):
             # Fallback: try method-only name for old datasets (e.g. hf3c_minix -> hf3c)
             if basis:
                 name_be_fallback = f"be_{mol}_{w}_{method}"
-                try:
-                    ds_be = qcf.get_collection(client, "ReactionDataset", name_be_fallback)
+                if qcf.check_collection_exists(client, "ReactionDataset", f"{name_be_fallback}_default"):
                     logger.info(f"Found legacy dataset {name_be_fallback} (no basis in name)")
                     name_be = name_be_fallback
-                except KeyError:
+                else:
                     logger.info(f"ReactionDataset {name_be} not found for molecule: {mol}")
                     continue
             else:
@@ -274,6 +272,18 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
             file_handler.close()
             continue
 
+        # Filter to only the requested be_methods (+ basis)
+        if config.be_methods:
+            requested_cols = [f"{bm}/{config.basis}" for bm in config.be_methods]
+            keep_cols = [c for c in df_no_zpve.columns
+                         if c in requested_cols
+                         or c in ("Mean_Eb_all_dft", "StdDev_all_dft")]
+            df_no_zpve = df_no_zpve[keep_cols]
+            # Recompute mean and std over only the requested methods
+            method_cols = [c for c in keep_cols if c not in ("Mean_Eb_all_dft", "StdDev_all_dft")]
+            df_no_zpve["Mean_Eb_all_dft"] = df_no_zpve[method_cols].mean(axis=1)
+            df_no_zpve["StdDev_all_dft"] = df_no_zpve[method_cols].std(axis=1)
+
         res_be_no_zpve, mean, sdev = calculate_mean_std(df_no_zpve, mol, logger)
         log_dataframe(
             logger, res_be_no_zpve,
@@ -295,22 +305,20 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
         df_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
 
         opt_parts = config.opt_method.split("_", 1)
-        opt_suffix = "_".join(opt_parts)
+        opt_suffix = "_".join(p.upper() for p in opt_parts)
         name_hess_be = []
         for cluster in config.hessian_clusters:
             name = f"be_{mol}_{cluster}_{opt_suffix}"
-            try:
-                qcf.get_collection(client, "ReactionDataset", name)
+            if qcf.check_collection_exists(client, "ReactionDataset", f"{name}_be_nocp"):
                 name_hess_be.append(name)
-            except KeyError:
+            else:
                 # Fallback: try method-only name for legacy datasets
                 if len(opt_parts) == 2:
-                    name_fallback = f"be_{mol}_{cluster}_{opt_parts[0]}"
-                    try:
-                        qcf.get_collection(client, "ReactionDataset", name_fallback)
+                    name_fallback = f"be_{mol}_{cluster}_{opt_parts[0].upper()}"
+                    if qcf.check_collection_exists(client, "ReactionDataset", f"{name_fallback}_be_nocp"):
                         logger.info(f"Found legacy hessian dataset {name_fallback}")
                         name_hess_be.append(name_fallback)
-                    except KeyError:
+                    else:
                         logger.info(f"Hessian dataset {name} not found, skipping")
                 else:
                     logger.info(f"Hessian dataset {name} not found, skipping")

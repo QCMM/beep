@@ -236,9 +236,14 @@ def check_optimized_molecule(ds, opt_lot: str, mol_names) -> None:
 def get_molecular_multiplicity(client: PortalClient, dataset,
                                molecule_name: str) -> int:
     """Get spin multiplicity from the initial molecule of a dataset entry."""
-    entry = dataset.get_entry(molecule_name.lower())
-    if entry is None:
-        entry = dataset.get_entry(molecule_name)
+    entry = None
+    for name_variant in [molecule_name, molecule_name.upper(), molecule_name.lower()]:
+        try:
+            entry = dataset.get_entry(name_variant)
+            if entry is not None:
+                break
+        except Exception:
+            continue
     if entry is None:
         raise KeyError(f"Entry '{molecule_name}' not found in dataset")
     return entry.initial_molecule.molecular_multiplicity
@@ -346,7 +351,7 @@ def fetch_opt_molecules(ds_opt, entry_list: List[str], opt_lot: str,
     target_status = RecordStatusEnum(status.lower())
     mol_list = []
     for n in entry_list:
-        record = ds_opt.get_record(n, opt_lot)
+        record = ds_opt.get_record(n, opt_lot, force_refetch=True)
         if record is not None and record.status == target_status:
             mol_list.append((n, record.final_molecule))
     return mol_list
@@ -363,6 +368,10 @@ def add_opt_specification(ds_opt, spec_dict: dict,
     Accepts old-style spec dicts with 'name', 'description',
     'optimization_spec', and 'qc_spec' keys and translates to v0.63
     OptimizationSpecification objects.
+
+    The ``overwrite`` parameter is accepted for backward compatibility but
+    is ignored — v0.63 ``add_specification`` is idempotent (silently
+    reports existing specs without error).
     """
     name = spec_dict.get("name", "default")
     description = spec_dict.get("description", "")
@@ -391,12 +400,6 @@ def add_opt_specification(ds_opt, spec_dict: dict,
         qc_specification=qc_spec,
         keywords=opt_keywords,
     )
-
-    if overwrite:
-        try:
-            ds_opt.delete_specification(name, delete_records=False)
-        except Exception:
-            pass
 
     ds_opt.add_specification(name, opt_spec, description=description)
 
@@ -442,10 +445,7 @@ def submit_energies(client: PortalClient, rdset_base_name: str,
         singlepoint_specification=qc_spec,
         keywords=ReactionKeywords(),
     )
-    try:
-        ds.add_specification(spec_name, rxn_spec)
-    except Exception:
-        pass  # specification already exists
+    ds.add_specification(spec_name, rxn_spec)
 
     return ds.submit(
         specification_names=[spec_name],
@@ -540,30 +540,59 @@ def check_for_completion(client: PortalClient, pid: List[int],
 
 
 def wait_for_completion(client: PortalClient, pid_list: List[int],
-                        frequency: int, logger: logging.Logger) -> None:
-    """Poll until all jobs are complete."""
-    jobs_complete = False
+                        frequency: int, logger: logging.Logger,
+                        max_wait: int = 86400) -> None:
+    """Poll until all jobs reach a terminal state (complete or error).
+
+    Parameters
+    ----------
+    max_wait : int
+        Maximum total wait time in seconds (default 24 hours).
+        Raises ``TimeoutError`` if exceeded.
+    """
+    if not pid_list:
+        return
+
     logger.info("Checking for job completion....")
-    while not jobs_complete:
+    elapsed = 0
+    while True:
         jobs_complete, counts = check_for_completion(client, pid_list, frequency)
         status_str = " ".join(
-            [f"{s}: {count}, " for s, count in counts.items()]
+            f"{s}: {count}" for s, count in counts.items()
         )
-        logger.info("The status of the Optimization jobs: " + status_str)
-        if not jobs_complete:
-            time.sleep(frequency)
+        logger.info(f"The status of the Optimization jobs: {status_str}")
+        if jobs_complete:
+            return
+        elapsed += frequency
+        if elapsed >= max_wait:
+            raise TimeoutError(
+                f"Jobs did not complete within {max_wait}s. "
+                f"Last status: {status_str}"
+            )
+        time.sleep(frequency)
 
 
 def check_jobs_status(client: PortalClient, job_ids: List[int],
                       logger: logging.Logger, wait_interval: int = 600,
-                      print_job_ids: bool = False) -> None:
+                      print_job_ids: bool = False,
+                      max_wait: int = 172800) -> None:
     """
     Continuously monitor and report computation status, processing in chunks.
-    """
-    all_complete = False
-    chunk_size = 1000
 
-    while not all_complete:
+    Parameters
+    ----------
+    max_wait : int
+        Maximum total wait time in seconds (default 48 hours).
+        Raises ``TimeoutError`` if exceeded.
+    """
+    if not job_ids:
+        logger.info("No jobs to monitor.")
+        return
+
+    chunk_size = 1000
+    elapsed = 0
+
+    while True:
         status_counts = {"COMPLETE": 0, "INCOMPLETE": 0, "ERROR": 0}
 
         for i in range(0, len(job_ids), chunk_size):
@@ -596,10 +625,18 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
             logger.info("Some jobs have ERROR status. Proceed with caution.")
 
         if status_counts["INCOMPLETE"] == 0:
-            all_complete = True
             logger.info("All jobs are COMPLETE. Continuing with the execution.")
-        else:
-            time.sleep(wait_interval)
+            return
+
+        elapsed += wait_interval
+        if elapsed >= max_wait:
+            raise TimeoutError(
+                f"Jobs did not complete within {max_wait}s. "
+                f"Status: {status_counts['INCOMPLETE']} incomplete, "
+                f"{status_counts['COMPLETE']} complete, "
+                f"{status_counts['ERROR']} error."
+            )
+        time.sleep(wait_interval)
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +947,7 @@ def compute_hessian(
             u_mols.remove(m.id)
 
     log_formatted_list(
-        logger, u_mols,
+        logger, [str(m) for m in u_mols],
         "Sending Hessian computations for the following molecules:",
         max_rows=5,
     )
@@ -992,7 +1029,10 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
         )
         return None, True
 
-    hess = result.return_result
+    import numpy as np
+    hess_raw = result.return_result
+    n_coords = 3 * len(result.molecule.symbols)
+    hess = np.array(hess_raw).reshape(n_coords, n_coords)
     # Energy may be in extras.qcvars or in properties
     result_dict = result.dict()
     qcvars = result_dict.get("extras", {}).get("qcvars", {})
@@ -1029,234 +1069,3 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
     return therm["ZPE_vib"].data, True
 
 
-# ---------------------------------------------------------------------------
-# Sampling (QCF-coupled version)
-# ---------------------------------------------------------------------------
-
-def run_sampling(
-    method: str,
-    basis: str,
-    program: str,
-    tag: str,
-    kw_id,
-    sampling_opt_dset,
-    refinement_opt_dset,
-    opt_lot: str,
-    rmsd_symm: bool,
-    store_initial: bool,
-    rmsd_val: float,
-    target_mol: Molecule,
-    cluster: Molecule,
-    debug_path,
-    client: PortalClient,
-    sampling_shell: float,
-    sampling_condition: str,
-    logger: logging.Logger,
-):
-    """
-    Run the full sampling loop: generate structures, optimize, filter by RMSD.
-    """
-    from ..core.sampling import generate_shell_list, filter_binding_sites
-    from ..core.molecule_sampler import random_molecule_sampler as mol_sample
-
-    FREQUENCY = 120
-    ATOMS_PER_CLUSTER_MOL = 3
-    binding_site_num = 0
-    n_smpl_mol = 0
-
-    max_structures = int(
-        max(3, (len(cluster.symbols) / ATOMS_PER_CLUSTER_MOL) // 3)
-    )
-    shell_list = generate_shell_list(sampling_shell, sampling_condition)
-
-    logger.info(
-        f"Entering the sampling procedure, will generate a total of "
-        f"{max_structures} structures for each shell. "
-        f"{len(shell_list)} shells will be sampled."
-    )
-
-    if program == "terachem":
-        if len(method.split("-")) == 2:
-            method = method.split("-")[0]
-
-    # Build v0.63 optimization specification
-    qc_keywords = kw_id if isinstance(kw_id, dict) else {}
-    qc_spec = QCSpecification(
-        program=program,
-        driver=SinglepointDriver.deferred,
-        method=method,
-        basis=basis,
-        keywords=qc_keywords,
-    )
-    opt_spec = OptimizationSpecification(
-        program="geometric",
-        qc_specification=qc_spec,
-        keywords={"maxiter": 125},
-    )
-
-    try:
-        sampling_opt_dset.delete_specification(opt_lot, delete_records=False)
-    except Exception:
-        pass
-    sampling_opt_dset.add_specification(
-        opt_lot, opt_spec, description="Geometric Optimization"
-    )
-    logger.info(
-        "Adding the specification {} to the {} OptimizationDataset.".format(
-            opt_lot, sampling_opt_dset.name
-        )
-    )
-
-    for shell in shell_list:
-        logger.info(f"\nStarting sampling within a shell of {shell} Angstrom")
-
-        entry_name_list = []
-        entry_base_name = refinement_opt_dset.name
-        for i in range(max_structures):
-            n_smpl_mol += 1
-            entry_name = entry_base_name + "_" + str(n_smpl_mol).zfill(4)
-            entry_name_list.append(entry_name)
-
-        total_existing_entries = list(sampling_opt_dset.entry_names)
-
-        shell_new_entries = [
-            e for e in entry_name_list if e not in total_existing_entries
-        ]
-        shell_old_entries = [
-            e for e in entry_name_list if e in total_existing_entries
-        ]
-
-        logger.info(
-            "Number of existing entries: {}   {}".format(
-                len(shell_old_entries), " ".join(shell_old_entries)
-            )
-        )
-        logger.info(
-            "Number of new entries: {}   {}".format(
-                len(shell_new_entries), " ".join(shell_new_entries)
-            )
-        )
-
-        n_smpl_mol -= len(shell_new_entries)
-
-        pid_list = get_job_ids(sampling_opt_dset, shell_old_entries, opt_lot)
-
-        if pid_list:
-            logger.debug(
-                f"Procedure IDs of the optimization are: {pid_list}"
-            )
-
-        wait_for_completion(client, pid_list, FREQUENCY, logger)
-
-        if not shell_new_entries:
-            logger.info(
-                "All entries for this shell already exist, "
-                "will proceed to the next shell"
-            )
-            continue
-
-        max_structures = len(shell_new_entries)
-
-        molecules, debug_mol = mol_sample(
-            cluster,
-            target_mol,
-            sampling_shell=shell,
-            max_structures=max_structures,
-            debug=True,
-        )
-
-        logger.info(
-            f"Adding entries for {len(molecules)} new molecules to the "
-            f"{sampling_opt_dset.name} OptimizationDataset "
-        )
-        new_mols = False
-        for i, m in enumerate(molecules):
-            n_smpl_mol += 1
-            try:
-                sampling_opt_dset.add_entry(
-                    name=shell_new_entries[i], initial_molecule=m,
-                )
-                new_mols = True
-            except KeyError as e:
-                logger.info(e)
-
-        if store_initial:
-            logger.info(
-                f"Initial structure set for visualization will be saved "
-                f"in {str(debug_path)}"
-            )
-            filename = (
-                f"{debug_path}_{round(shell, 2):.2f}".replace(".", "")
-                + ".mol"
-            )
-            debug_mol.to_file(filename, "xyz")
-
-        comp_rec = sampling_opt_dset.submit(
-            specification_names=[opt_lot], compute_tag=tag,
-        )
-        logger.info(
-            f"{comp_rec.n_inserted} new, {comp_rec.n_existing} existing "
-            "sampling optimization procedures."
-        )
-
-        pid_list = get_job_ids(sampling_opt_dset, entry_name_list, opt_lot)
-        logger.info(
-            "Procedure IDs of the optimization are: {}".format(
-                " ".join(str(p) for p in pid_list)
-            )
-        )
-
-        wait_for_completion(client, pid_list, FREQUENCY, logger)
-
-        opt_molecules_new = fetch_opt_molecules(
-            sampling_opt_dset, entry_name_list, opt_lot, status="COMPLETE"
-        )
-        opt_mol_num = len(opt_molecules_new)
-        logger.debug(
-            f"{opt_mol_num} COMPLETED molecules in "
-            f"{sampling_opt_dset.name} for this round, "
-            f"{opt_mol_num - len(molecules)} molecules ended in ERROR."
-        )
-
-        # Get existing molecules from refinement dataset
-        opt_molecules = []
-        for entry in refinement_opt_dset.iterate_entries():
-            opt_molecules.append((entry.name, entry.initial_molecule))
-
-        logger.info(
-            f"Filtering {opt_mol_num} new molecules against existing "
-            f"{len(opt_molecules)} molecules using an RMSD criteria "
-            f"of {rmsd_val}"
-        )
-        mol_size = len(target_mol.symbols)
-        unique_mols = filter_binding_sites(
-            opt_molecules_new, opt_molecules, cut_off_val=rmsd_val,
-            rmsd_symm=rmsd_symm, ligand_size=mol_size, logger=logger,
-            grid=0.5, nb_radius=4, dm_tau=1e-3,
-        )
-
-        for mol_info in unique_mols:
-            entry_name, mol_obj = mol_info
-            try:
-                refinement_opt_dset.add_entry(
-                    name=entry_name, initial_molecule=mol_obj,
-                )
-            except KeyError as e:
-                logger.info(f"{e} in {refinement_opt_dset.name}")
-
-        new_mols_count = len(unique_mols)
-        binding_site_num += new_mols_count
-
-        logger.info(
-            f"A total of {new_mols_count} unique binding sites were found "
-            f"after filtering for shell {shell} Angstrom. \n"
-            f"Adding this new binding sites to {refinement_opt_dset.name} "
-            "for refined optimization."
-        )
-
-    total_bind_sites = len(refinement_opt_dset.entry_names)
-    logger.info(
-        f"Finished sampling the cluster. Found {binding_site_num} unique "
-        f"binding sites. Total binding sites: {total_bind_sites}"
-    )
-    return None
