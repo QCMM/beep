@@ -41,12 +41,12 @@ def test_no_duplicates(func):
     assert len(result) == len(set(result))
 
 
-def test_gga_contains_pbe():
-    assert "PBE" in gga()
+def test_gga_contains_pbe_d4():
+    assert "PBE-D4" in gga()
 
 
-def test_hybrid_gga_contains_b3lyp():
-    assert "B3LYP" in hybrid_gga()
+def test_hybrid_gga_contains_b3lyp_d4():
+    assert "B3LYP-D4" in hybrid_gga()
 
 
 def test_meta_hybrid_gga_contains_m062x():

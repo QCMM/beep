@@ -27,3 +27,4 @@ class EnergyBenchmarkConfig(BaseModel):
     tag_be: str = Field(..., description="Queue tag for binding energy tasks")
     tag_cbs: str = Field(..., description="Queue tag for CBS extrapolation tasks")
     use_initial_reference_geometry: bool = Field(False, description="Use initial (unoptimized) reference geometry")
+    custom_dft_functionals: List[str] = Field([], description="Additional DFT functionals to include in the benchmark (e.g. ['RPBE-D4', 'BLYP-D4'])")

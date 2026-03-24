@@ -55,13 +55,14 @@ __all__ = [
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-STOICH_TYPES = ("default", "be_nocp", "ie", "de")
+STOICH_TYPES = ("bsse", "be_nocp", "ie", "de")
 
 
 _COLLECTION_TYPE_MAP = {
     "OptimizationDataset": "optimization",
     "ReactionDataset": "reaction",
     "Dataset": "singlepoint",
+    "SinglepointDataset": "singlepoint",
 }
 
 
@@ -667,11 +668,17 @@ def fetch_reaction_entries(client: PortalClient, rdset_base_name: str,
 
 
 def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
-                          stoich: str = "default", spec_name: str = None):
+                          stoich: str = "bsse", spec_name: str = None):
     """Get computed reaction energies from a stoich-specific ReactionDataset.
 
     Returns a DataFrame with entry names as index and specification names
-    as columns, containing ``total_energy`` values (in Hartree).
+    as columns, containing ``total_energy`` values converted to kcal/mol.
+
+    DFT and D3BJ dispersion specs are automatically combined into composite
+    columns (e.g. ``mpwb1k_def2-tzvpd`` + ``mpwb1k-d3bj`` →
+    ``MPWB1K-D3BJ/def2-tzvpd``), matching the format the old v0.15 server
+    produced.  The bare DFT columns (e.g. ``MPWB1K/def2-tzvpd``) are kept
+    alongside the composite ones.
     """
     import pandas as pd
     import qcelemental as qcel
@@ -682,7 +689,7 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
     spec_names = [spec_name] if spec_name else ds.specification_names
     data = {}
     for sname in spec_names:
-        col_label = sname.replace("_", "/")
+        col_label = sname.replace("_", "/").upper()
         energies = {}
         for entry_name, sn, record in ds.iterate_records(
             specification_names=[sname],
@@ -694,7 +701,27 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
                 )
         data[col_label] = energies
 
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+
+    # Combine DFT + D3BJ dispersion into composite columns.
+    # A D3BJ-only column has no "/" (e.g. "MPWB1K-D3BJ") — look for its
+    # matching DFT column (e.g. "MPWB1K/DEF2-TZVPD") and sum them.
+    d3bj_cols = [c for c in df.columns if "/" not in c
+                 and ("-D3BJ" in c or "-D3MBJ" in c)]
+    for d3bj_col in d3bj_cols:
+        # Derive the bare functional name: "MPWB1K-D3BJ" -> "MPWB1K"
+        for suffix in ("-D3BJ", "-D3MBJ"):
+            if d3bj_col.endswith(suffix):
+                bare = d3bj_col[: -len(suffix)]
+                break
+        # Find the matching DFT column (e.g. "MPWB1K/DEF2-TZVPD")
+        dft_matches = [c for c in df.columns if c.startswith(bare + "/")]
+        for dft_col in dft_matches:
+            basis_part = dft_col.split("/", 1)[1]
+            composite_col = f"{d3bj_col}/{basis_part}"
+            df[composite_col] = df[dft_col] + df[d3bj_col]
+
+    return df
 
 
 def query_results(client: PortalClient, driver: str, molecule,

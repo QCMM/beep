@@ -13,7 +13,7 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
     Generates the Binding Energy (BE) stoichiometry for a given molecular system.
 
     This function computes the BE stoichiometry for different scenarios, including the
-    default BE stoichiometry, BE without counterpoise (nocp), interaction energy (ie),
+    BSSE-corrected BE stoichiometry, BE without counterpoise (nocp), interaction energy (ie),
     and deformation energy (de).
 
     Parameters:
@@ -24,7 +24,7 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
         logger (logging.Logger): Logger instance for logging messages.
 
     Returns:
-        dict: A dictionary mapping scenario names (``'default'``, ``'be_nocp'``,
+        dict: A dictionary mapping scenario names (``'bsse'``, ``'be_nocp'``,
         ``'ie'``, ``'de'``) to lists of ``(Molecule, float)`` tuples representing
         the stoichiometry coefficients.
     """
@@ -62,7 +62,7 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
 
     # Binding energy stoichiometry dictionary
     be_stoic = {
-        "default": [
+        "bsse": [
             (f_struc_mol, 1.0),
             (j4, 1.0),
             (j5, 1.0),

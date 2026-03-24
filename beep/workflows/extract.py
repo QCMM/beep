@@ -52,7 +52,7 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
         else:
             name_be = f"be_{mol}_{w}_{method}"
         # Check if stoich-specific dataset exists (Phase 3: separate datasets per stoich type)
-        if not qcf.check_collection_exists(client, "ReactionDataset", f"{name_be}_default"):
+        if not qcf.check_collection_exists(client, "ReactionDataset", f"{name_be}_bsse"):
             # Fallback: try method-only name for old datasets (e.g. hf3c_minix -> hf3c)
             if basis:
                 name_be_fallback = f"be_{mol}_{w}_{method}"
@@ -67,7 +67,7 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
                 continue
 
         try:
-            df = qcf.fetch_reaction_values(client, name_be, stoich="default")
+            df = qcf.fetch_reaction_values(client, name_be, stoich="bsse")
         except KeyError:
             logger.info(f"ReactionDataset {name_be} exists but seems to be empty, please check.")
             continue
@@ -85,9 +85,16 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
 
     df_be.set_index("OriginalIndex", inplace=True)
 
-    # Identify columns to drop (Without D3BJ)
+    # Identify columns to drop:
+    # 1. Bare DFT columns (e.g. MPWB1K/DEF2-TZVPD) when a D3BJ composite exists
+    # 2. Bare D3BJ-only columns (e.g. MPWB1K-D3BJ) that lack a basis — the
+    #    composite column (MPWB1K-D3BJ/DEF2-TZVPD) already includes them.
     cols_to_drop = []
     for col in df_be.columns:
+        if "/" not in col:
+            # Bare D3BJ-only column (no basis) — drop it
+            cols_to_drop.append(col)
+            continue
         me, ba = col.split("/")
         for suffix in ["-D3BJ", "-D3MBJ"]:
             d3bj_col = f"{me}{suffix}/{ba}"
@@ -128,7 +135,7 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
             continue
 
         # Get default BE values
-        df_vals = qcf.fetch_reaction_values(client, name, stoich="default")
+        df_vals = qcf.fetch_reaction_values(client, name, stoich="bsse")
         df_be = pd.concat([df_be, df_vals], axis=0)
         logger.info(f"Extracting and saving binding energies from {name} for ZPVE correction")
 
@@ -180,25 +187,13 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
 
     logger.info(f"Applying scaling factor {scale_factor} to the ZPVE correction")
     df_zpve["Delta_ZPVE"] *= scale_factor
+
+    # Compute ZPVE-corrected BEs for each method
     for bm in be_methods:
         zpve_col_name = f"{bm}/{basis}+ZPVE"
         df_be[zpve_col_name] = df_be[f"{bm}/{basis}"] + df_zpve["Delta_ZPVE"]
 
-        logger.info(f"Fitting procedure for level of theory {bm} (units: kcal/mol)")
-        x_raw = df_be[f"{bm}/{basis}"].to_numpy(dtype=float)
-        y_raw = df_be[zpve_col_name].to_numpy(dtype=float)
-
-        mask = ~np.isnan(x_raw) & ~np.isnan(y_raw)
-        x = x_raw[mask]
-        y = y_raw[mask]
-
-        m, b = np.polyfit(x, y, 1)
-        r_sq = np.corrcoef(x, y)[0, 1] ** 2
-        fitting_params[bm] = [m, b, r_sq]
-        logger.info(f"Linear model at the {bm} level of theory: BE+ \u0394ZPVE = {m} * BE + {b}")
-        logger.info(f"Fit quality: R\u00b2 = {r_sq}")
-
-    # Universal model: fit mean uncorrected BE vs mean ZPVE-corrected BE
+    # Build a single linear model from mean uncorrected BE vs mean ZPVE-corrected BE
     uncorr_cols = [f"{bm}/{basis}" for bm in be_methods]
     zpve_cols = [f"{bm}/{basis}+ZPVE" for bm in be_methods]
     x_mean = df_be[uncorr_cols].mean(axis=1).to_numpy(dtype=float)
@@ -207,8 +202,8 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
     m, b = np.polyfit(x_mean[mask], y_mean[mask], 1)
     r_sq = np.corrcoef(x_mean[mask], y_mean[mask])[0, 1] ** 2
     fitting_params["Mean"] = [m, b, r_sq]
-    logger.info(f"Universal linear model (mean BE): BE+\u0394ZPVE = {m} * BE + {b}")
-    logger.info(f"Fit quality: R\u00b2 = {r_sq}")
+    logger.info(f"Linear model (mean BE): BE+\u0394ZPVE = {m:.6f} * BE + {b:.6f}")
+    logger.info(f"Fit quality: R\u00b2 = {r_sq:.6f}")
 
     df_be = df_be[[col for col in df_be.columns if "+ZPVE" in col]]
 

@@ -19,13 +19,13 @@ def _make_struc_mol(ws3_cluster, h2_mol):
 def test_be_stoichiometry_keys(ws3_cluster, h2_mol, test_logger):
     struc = _make_struc_mol(ws3_cluster, h2_mol)
     result = be_stoichiometry(h2_mol, ws3_cluster, struc, test_logger)
-    assert set(result.keys()) == {"default", "be_nocp", "ie", "de"}
+    assert set(result.keys()) == {"bsse", "be_nocp", "ie", "de"}
 
 
 def test_be_stoichiometry_default_count(ws3_cluster, h2_mol, test_logger):
     struc = _make_struc_mol(ws3_cluster, h2_mol)
     result = be_stoichiometry(h2_mol, ws3_cluster, struc, test_logger)
-    assert len(result["default"]) == 7
+    assert len(result["bsse"]) == 7
 
 
 def test_be_stoichiometry_be_nocp_count(ws3_cluster, h2_mol, test_logger):
@@ -49,7 +49,7 @@ def test_be_stoichiometry_de_count(ws3_cluster, h2_mol, test_logger):
 def test_be_stoichiometry_coefficients(ws3_cluster, h2_mol, test_logger):
     struc = _make_struc_mol(ws3_cluster, h2_mol)
     result = be_stoichiometry(h2_mol, ws3_cluster, struc, test_logger)
-    coeffs = [c for _, c in result["default"]]
+    coeffs = [c for _, c in result["bsse"]]
     assert coeffs == [1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0]
 
 
@@ -80,12 +80,12 @@ def test_real_co_w2_stoichiometry(co_w2_0001, test_logger):
 
     result = be_stoichiometry(co_mol, w2_mol, co_w2_0001, test_logger)
 
-    assert set(result.keys()) == {"default", "be_nocp", "ie", "de"}
-    assert len(result["default"]) == 7
+    assert set(result.keys()) == {"bsse", "be_nocp", "ie", "de"}
+    assert len(result["bsse"]) == 7
     assert len(result["be_nocp"]) == 3
 
     # Verify fragments have correct atom counts
-    for mol, coeff in result["default"]:
+    for mol, coeff in result["bsse"]:
         assert len(mol.symbols) in (2, 6, 8)  # CO, w2, or full structure
 
 
@@ -103,7 +103,7 @@ def test_real_co_w3_stoichiometry(co_w3_0001, test_logger):
 
     result = be_stoichiometry(co_mol, w3_mol, co_w3_0001, test_logger)
 
-    assert len(result["default"]) == 7
+    assert len(result["bsse"]) == 7
     # be_nocp coefficients should sum to zero (energy conservation)
     coeff_sum = sum(c for _, c in result["be_nocp"])
     assert abs(coeff_sum - (-1.0)) < 1e-10  # +1 - 1 - 1 = -1
@@ -129,11 +129,11 @@ def test_real_two_binding_sites_differ(co_w2_0001, co_w2_0007, test_logger):
 
     # Both should have the same structure (same keys, same counts)
     assert stoic1.keys() == stoic2.keys()
-    assert len(stoic1["default"]) == len(stoic2["default"])
+    assert len(stoic1["bsse"]) == len(stoic2["bsse"])
 
     # But the geometries should differ (different binding sites)
-    geom1 = stoic1["default"][0][0].geometry
-    geom2 = stoic2["default"][0][0].geometry
+    geom1 = stoic1["bsse"][0][0].geometry
+    geom2 = stoic2["bsse"][0][0].geometry
     assert not np.allclose(geom1, geom2, atol=1e-6)
 
 
@@ -170,10 +170,10 @@ def test_real_co_w5_stoichiometry_matches_server(co_w5_0001, test_logger):
     result = be_stoichiometry(co_mol, w5_mol, co_w5_0001, test_logger)
 
     # --- default (counterpoise) ---
-    assert len(result["default"]) == 7
-    d_coeffs = [c for _, c in result["default"]]
+    assert len(result["bsse"]) == 7
+    d_coeffs = [c for _, c in result["bsse"]]
     assert d_coeffs == [1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0]
-    d_natoms = [len(m.symbols) for m, _ in result["default"]]
+    d_natoms = [len(m.symbols) for m, _ in result["bsse"]]
     assert d_natoms == [17, 2, 15, 17, 17, 15, 2]
 
     # --- be_nocp ---
@@ -240,6 +240,6 @@ def test_real_co_w5_two_sites_same_decomposition(co_w5_0001, co_w5_0002, test_lo
         assert coeffs1 == coeffs2
 
     # But geometries differ (different binding configurations)
-    geom1 = stoic1["default"][0][0].geometry
-    geom2 = stoic2["default"][0][0].geometry
+    geom1 = stoic1["bsse"][0][0].geometry
+    geom2 = stoic2["bsse"][0][0].geometry
     assert not np.allclose(geom1, geom2, atol=1e-6)

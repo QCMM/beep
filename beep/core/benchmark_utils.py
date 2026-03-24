@@ -38,23 +38,56 @@ def create_molecular_fragments(mol, len_f1):
 
 
 def get_errors_dataframe(df, ref_en_dict):
-    """Compute absolute and relative error DataFrames against reference energies."""
-    def construct_key(index):
-        return "_".join(index.split("_")[:3])
+    """Compute absolute and relative error DataFrames against reference energies.
 
-    df = df[df.index.map(construct_key).isin(ref_en_dict.keys())]
+    df: DataFrame where either rows or columns contain structure names that
+        can be matched to ref_en_dict keys by longest prefix match.
+    ref_en_dict: {structure_name: reference_energy} e.g. {'H2O_CD1_01_0002': -2.5}
+    """
+    def _match_ref_key(name):
+        for key in sorted(ref_en_dict.keys(), key=len, reverse=True):
+            if name.startswith(key):
+                return key
+        return None
 
     abs_error_df = pd.DataFrame(index=df.index, columns=df.columns)
     rel_error_df = pd.DataFrame(index=df.index, columns=df.columns)
 
+    # Try matching on index (rows = structures, columns = functionals)
     for row_index in df.index:
-        ref_value = ref_en_dict["_".join(row_index.split("_")[:3])]
+        ref_key = _match_ref_key(str(row_index))
+        if ref_key is None:
+            continue
+        ref_value = ref_en_dict[ref_key]
         for col in df.columns:
-            abs_error = df.at[row_index, col] - ref_value
-            abs_error_df.at[row_index, col] = abs_error
-            rel_error_df.at[row_index, col] = abs_error / ref_value
+            val = df.at[row_index, col]
+            if pd.notna(val):
+                abs_error = val - ref_value
+                abs_error_df.at[row_index, col] = abs_error
+                rel_error_df.at[row_index, col] = abs_error / ref_value if ref_value != 0 else None
 
-    return abs_error_df, rel_error_df
+    result_ae = abs_error_df.dropna(how='all')
+    result_re = rel_error_df.dropna(how='all')
+
+    # If nothing matched on index, try columns (rows = functionals, columns = structures)
+    if result_ae.empty:
+        abs_error_df = pd.DataFrame(index=df.index, columns=df.columns)
+        rel_error_df = pd.DataFrame(index=df.index, columns=df.columns)
+        for col in df.columns:
+            ref_key = _match_ref_key(str(col))
+            if ref_key is None:
+                continue
+            ref_value = ref_en_dict[ref_key]
+            for row_index in df.index:
+                val = df.at[row_index, col]
+                if pd.notna(val):
+                    abs_error = val - ref_value
+                    abs_error_df.at[row_index, col] = abs_error
+                    rel_error_df.at[row_index, col] = abs_error / ref_value if ref_value != 0 else None
+        result_ae = abs_error_df.dropna(how='all')
+        result_re = rel_error_df.dropna(how='all')
+
+    return result_ae, result_re
 
 
 def compute_rmsd(mol1, mol2, rmsd_symm):

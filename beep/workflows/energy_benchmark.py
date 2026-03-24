@@ -15,7 +15,7 @@ from ..core.logging_utils import (
     padded_log, log_formatted_list, log_progress, log_energy_mae, beep_banner,
 )
 from ..core.stoichiometry import be_stoichiometry
-from ..core.dft_functionals import hybrid_gga, lrc, meta_hybrid_gga
+from ..core.dft_functionals import gga, meta_gga, hybrid_gga, lrc, meta_hybrid_gga
 from ..core.plotting_utils import (
     plot_violins, plot_density_panels, plot_mean_errors, plot_ie_vs_de,
 )
@@ -47,10 +47,13 @@ def populate_dataset_with_structures(cbs_col, ref_geom_fmols, bchmk_structs,
     logger = logging.getLogger("beep")
     for name, fmol in ref_geom_fmols.items():
         if name in bchmk_structs:
-            mol_name, surf_name, _ = name.split("_")
+            # Extract surface model name: 'H2O_CD1_01_0001' → dataset 'H2O_CD1_01' → surf 'CD1_01'
+            dataset_name = name.rsplit("_", 1)[0]
+            mol_name = dataset_name.split("_")[0]
+            surf_name = dataset_name.split(f"{mol_name}_", 1)[1]
             surf_record = (
-                odset_dict[surf_name.upper()]
-                .get_record(surf_name.upper(), geom_ref_opt_lot)
+                odset_dict[surf_name]
+                .get_record(surf_name, geom_ref_opt_lot)
             )
             if config.use_initial_reference_geometry:
                 surf_mod_mol = surf_record.initial_molecule
@@ -185,10 +188,14 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
 
 def get_energy_record(ds, struct, method, basis):
     spec_name = f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df"
-    record = ds.get_record(struct.upper(), spec_name)
-    if record is None:
-        # Try lowercase entry name as fallback
-        record = ds.get_record(struct, spec_name)
+    record = None
+    for name_variant in [struct, struct.upper()]:
+        try:
+            record = ds.get_record(name_variant, spec_name)
+            if record is not None:
+                break
+        except Exception:
+            continue
     if record is None:
         raise KeyError(
             f"No record for entry '{struct}' with specification '{spec_name}'"
@@ -204,13 +211,18 @@ def get_cbs_energy(ds, struct, cbs_lot_list):
     for lot in cbs_lot_list:
         method, basis = lot.split("_")
         rec = get_energy_record(ds, struct, method, basis)
+        props = rec.properties
 
         if "mp2" in method:
-            cbs_lot_df.at[basis, "MP2"] = rec.dict()["extras"]["qcvars"]["MP2 CORRELATION ENERGY"]
+            cbs_lot_df.at[basis, "MP2"] = props.get("mp2 correlation energy",
+                                                      props.get("mp2_correlation_energy"))
         elif "ccsd(t)" in method:
-            cbs_lot_df.at[basis, "MP2"] = rec.dict()["extras"]["qcvars"]["MP2 CORRELATION ENERGY"]
-            cbs_lot_df.at[basis, "CCSD"] = rec.dict()["extras"]["qcvars"]["CCSD CORRELATION ENERGY"]
-            cbs_lot_df.at[basis, "CCSD(T)"] = rec.dict()["extras"]["qcvars"]["CCSD(T) CORRELATION ENERGY"]
+            cbs_lot_df.at[basis, "MP2"] = props.get("mp2 correlation energy",
+                                                      props.get("mp2_correlation_energy"))
+            cbs_lot_df.at[basis, "CCSD"] = props.get("ccsd correlation energy",
+                                                       props.get("ccsd_correlation_energy"))
+            cbs_lot_df.at[basis, "CCSD(T)"] = props.get("ccsd(t) correlation energy",
+                                                          props.get("ccsd(t)_correlation_energy"))
         else:
             cbs_lot_df.at[basis, method.upper()] = rec.return_result
 
@@ -250,11 +262,13 @@ def get_reference_be_result(bchmk_structs, cbs_col, cbs_list):
     for bench_struct in bchmk_structs:
         padded_log(logger, f"Calculating CBS extrapolations for {bench_struct}")
         logger.info("\nInteraction Energy : IE\nDeformation Energy : DE\nBinding Energy : BE\n")
-        mol_name, surf_name, _ = bench_struct.split("_")
+        dataset_name = bench_struct.rsplit("_", 1)[0]
+        mol_name = dataset_name.split("_")[0]
+        surf_name = dataset_name.split(f"{mol_name}_", 1)[1]
 
         struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list)
         mol_cbs_en = get_cbs_energy(cbs_col, mol_name.upper(), cbs_list)
-        surf_cbs_en = get_cbs_energy(cbs_col, surf_name.upper(), cbs_list)
+        surf_cbs_en = get_cbs_energy(cbs_col, surf_name, cbs_list)
         struct_cbs_en_f1 = get_cbs_energy(cbs_col, bench_struct + "_f1", cbs_list)
         struct_cbs_en_f2 = get_cbs_energy(cbs_col, bench_struct + "_f2", cbs_list)
 
@@ -323,15 +337,17 @@ def _fetch_be_molecules(odset, bench_struct, lot_geom):
     Returns (smol_mol, surf_mol, struc_mol) — the small molecule, surface model,
     and full complex, all as optimized geometries.
     """
-    mol_name, surf_name, _ = bench_struct.split("_")
+    dataset_name = bench_struct.rsplit("_", 1)[0]
+    mol_name = dataset_name.split("_")[0]
+    surf_name = dataset_name.split(f"{mol_name}_", 1)[1]
     smol_mol = (
         odset[mol_name.upper()]
         .get_record(mol_name.upper(), lot_geom)
         .final_molecule
     )
     surf_mol = (
-        odset[surf_name.upper()]
-        .get_record(surf_name.upper(), lot_geom)
+        odset[surf_name]
+        .get_record(surf_name, lot_geom)
         .final_molecule
     )
     struc_mol = (
@@ -345,7 +361,7 @@ def _fetch_be_molecules(odset, bench_struct, lot_geom):
 def compute_be_dft_energies_eb(client, rdset_base_name, all_dft, tag,
                                 basis="def2-tzvpd", program="psi4"):
     logger = logging.getLogger("beep")
-    logger.info(f"Computing energies for the following stoichiometries: {' '.join(qcf.STOICH_TYPES)} (default = be)")
+    logger.info(f"Computing energies for the following stoichiometries: {' '.join(qcf.STOICH_TYPES)} (bsse = be)")
     log_formatted_list(logger, all_dft, "Sending DFT energy computations for the following functionals:")
 
     total_submitted = 0
@@ -428,7 +444,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     odset_dict = {smol_name: smol_dset}
     for bchmk_struct_name, odset_name in bchmk_dset_names.items():
         odset_dict[bchmk_struct_name] = qcf.get_collection(client, "OptimizationDataset", odset_name)
-        surf_mod = bchmk_struct_name.split("_")[1].upper()
+        surf_mod = odset_name.split(f"{smol_name}_", 1)[1]
         odset_dict[surf_mod] = qcf.get_collection(client, "OptimizationDataset", surf_dset_name)
 
     ref_geom_fmols = {}
@@ -476,10 +492,15 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     )
 
     dft_func = {
+        "GGA": gga(),
+        "Meta GGA": meta_gga(),
         "Hybrid GGA": hybrid_gga(),
         "Long range corrected": lrc(),
         "Meta Hybrid GGA": meta_hybrid_gga(),
     }
+
+    if config.custom_dft_functionals:
+        dft_func["Custom"] = config.custom_dft_functionals
 
     for name, dft_f_list in dft_func.items():
         padded_log(logger, f"Sending computations for {name} functionals with a {config.be_basis} basis")
@@ -489,7 +510,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
         qcf.check_jobs_status(client, dft_ids, logger)
 
     padded_log(logger, "Retriving energies from ReactionDataset")
-    df_be = qcf.fetch_reaction_values(client, rdset_base, stoich="default").dropna(axis=1)
+    df_be = qcf.fetch_reaction_values(client, rdset_base, stoich="bsse").dropna(axis=1)
     df_ie = qcf.fetch_reaction_values(client, rdset_base, stoich="ie").dropna(axis=1)
     df_de = qcf.fetch_reaction_values(client, rdset_base, stoich="de").dropna(axis=1)
 
@@ -532,14 +553,17 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     df_de_re_plt = pd.read_json(folder_path_json / "DE_RE_DFT.json", orient="index")
     df_ie_re_plt = pd.read_json(folder_path_json / "IE_RE_DFT.json", orient="index")
 
-    plot_violins(df_be_plt, bchmk_structs, smol_name, folder_path_plots, ref_df)
-    padded_log(logger, "Generating violin plots")
-    plot_density_panels(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-    padded_log(logger, "Generating density plots")
-    plot_mean_errors(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-    padded_log(logger, "Generating MAE plots")
-    plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-    padded_log(logger, "Generating IE vs DE plots")
+    try:
+        plot_violins(df_be_plt, bchmk_structs, smol_name, folder_path_plots, ref_df)
+        padded_log(logger, "Generating violin plots")
+        plot_density_panels(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+        padded_log(logger, "Generating density plots")
+        plot_mean_errors(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+        padded_log(logger, "Generating MAE plots")
+        plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+        padded_log(logger, "Generating IE vs DE plots")
+    except Exception as e:
+        logger.warning(f"Plotting failed: {e}. Data files are saved, plots can be regenerated.")
 
     padded_log(logger, "BINDING ENERGY BENCHMARK RESULTS", padding_char=gear)
     padded_log(logger, "BINDING ENERGY MAE")

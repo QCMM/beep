@@ -190,7 +190,7 @@ def plot_density_panels(df, bchmk_struct, opt_lot, mol_name, folder_path_plots, 
     """
     struct_dict = {}
     for struct in bchmk_struct:
-        df_f = df[df.index.str.contains(struct)] * -1
+        df_f = df[df.index.astype(str).str.contains(struct)] * -1
         if df_f.empty:
             continue
         struct_dict[struct] = df_f
@@ -232,7 +232,7 @@ def plot_mean_errors(df, bchmk_struct, opt_lot, mol_name, folder_path_plots):
     fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 15), squeeze=False)  # Adjust size and force 2D array
 
     for i, lot in enumerate(opt_lot):
-        df_tmp = df[df.index.str.contains(lot)].abs()
+        df_tmp = df[df.index.astype(str).str.contains(lot)].abs()
         mean_errors = df_tmp.mean(axis=0)
 
         # Find the 10 columns with the lowest mean error
@@ -257,13 +257,13 @@ def plot_ie_vs_de(df_de, df_ie, bchmk_struct, opt_lot, mol_name, folder_path_plo
     fig, axes = plt.subplots(n_rows, n_col, figsize=(10, 15), squeeze=False)
 
     for i, lot in enumerate(opt_lot):
-        df_tmp_de = df_de[df_de.index.str.contains(lot)].abs()
+        df_tmp_de = df_de[df_de.index.astype(str).str.contains(lot)].abs()
         mean_errors_de = df_tmp_de.mean(axis=0)
-        mean_errors_de.index = mean_errors_de.index.str.replace("^de-", "", regex=True)
+        mean_errors_de.index = mean_errors_de.index.astype(str).str.replace("^de-", "", regex=True)
 
-        df_tmp_ie = df_ie[df_ie.index.str.contains(lot)].abs()
+        df_tmp_ie = df_ie[df_ie.index.astype(str).str.contains(lot)].abs()
         mean_errors_ie = df_tmp_ie.mean(axis=0)
-        mean_errors_ie.index = mean_errors_ie.index.str.replace("^ie-", "", regex=True)
+        mean_errors_ie.index = mean_errors_ie.index.astype(str).str.replace("^ie-", "", regex=True)
 
         distances = np.sqrt(mean_errors_de**2 + mean_errors_ie**2)
         closest_indices = distances.nsmallest(5).index

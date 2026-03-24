@@ -117,60 +117,43 @@ def gauss_fitting(nbins: int, data: np.ndarray, p0: List[float], logger: logging
 
 def apply_lin_models(df_be, df_be_zpve, meth_fit_dict, be_methods, basis, mol, be_range,
                      generate_plots=False):
-    """Apply linear ZPVE correction models to binding energies."""
+    """Apply the mean linear ZPVE correction model to binding energies.
+
+    Uses a single linear model fitted on the mean BE across all methods
+    to predict ZPVE-corrected BEs for each method individually.
+    """
     logger = logging.getLogger("beep")
     lin_zpve_df = pd.DataFrame()
 
     gear = "\u2699"
     padded_log(logger, "Applying linear model to correct for ZPVE", padding_char=gear)
-    for method, factors in meth_fit_dict.items():
-        if method == "Mean":
-            continue  # handled below
-        m, n, R2 = factors
-        column_name = f"{method}/{basis}"
-        zpve_column_name = f"{column_name}+ZPVE"
 
-        logger.info(f"Applying linear model to {column_name} BEs")
-        if column_name in df_be.columns and zpve_column_name in df_be_zpve.columns:
+    if "Mean" not in meth_fit_dict:
+        raise KeyError("No mean linear model found in fitting parameters")
+
+    m, n, R2 = meth_fit_dict["Mean"]
+    logger.info(f"Linear model: BE+\u0394ZPVE = {m:.6f} * BE + {n:.6f} (R\u00b2={R2:.6f})")
+
+    # Apply the mean linear model to each method's BE individually
+    for bm in be_methods:
+        column_name = f"{bm}/{basis}"
+        if column_name in df_be.columns:
             scaled_column_name = f"{column_name}_lin_ZPVE"
             lin_zpve_df[scaled_column_name] = df_be[column_name] * m + n
-
-            common_indices = df_be.index.intersection(df_be_zpve.index)
-            df_be_filtered = df_be.loc[common_indices]
-            df_be_zpve_filtered = df_be_zpve.loc[common_indices]
-
-            x = df_be_filtered[column_name].to_numpy(dtype=float)
-            y = df_be_zpve_filtered[zpve_column_name].to_numpy(dtype=float)
-
-            if generate_plots:
-                logger.info(
-                    f"Creating BE vs BE + \u0394ZPVE plot for {column_name} saving as {mol}/zpve_{mol}_{method}.svg"
-                )
-                fig = zpve_plot(x, y, [m, n, R2])
-                fig.savefig(f"{mol}/zpve_{mol}_{method}.svg")
-                plt.close(fig)
-        else:
-            raise KeyError(
-                f"Column {column_name} or {zpve_column_name} not present in the BE or ZPVE dataframe"
-            )
+            logger.info(f"Applied linear model to {column_name}")
 
     lin_zpve_df["Mean_Eb_all_dft"] = lin_zpve_df.mean(axis=1)
     lin_zpve_df["StdDev_all_dft"] = lin_zpve_df.std(axis=1)
 
-    # Universal model: apply mean linear fit to the mean uncorrected BE
-    if "Mean" in meth_fit_dict:
-        m, n, R2 = meth_fit_dict["Mean"]
-        lin_zpve_df["Mean_lin_ZPVE"] = df_be["Mean_Eb_all_dft"] * m + n
-        logger.info(f"Applied universal mean linear model: Mean_BE+\u0394ZPVE = {m:.6f} * Mean_BE + {n:.6f} (R\u00b2={R2:.6f})")
+    if generate_plots:
+        common_indices = df_be.index.intersection(df_be_zpve.index)
+        x = df_be.loc[common_indices, "Mean_Eb_all_dft"].to_numpy(dtype=float)
+        y = df_be_zpve.loc[common_indices, "Mean_Eb_all_dft"].to_numpy(dtype=float)
+        logger.info(f"Creating mean BE vs BE + \u0394ZPVE plot saving as {mol}/zpve_{mol}_Mean.svg")
+        fig = zpve_plot(x, y, [m, n, R2])
+        fig.savefig(f"{mol}/zpve_{mol}_Mean.svg")
+        plt.close(fig)
 
-        if generate_plots:
-            common_indices = df_be.index.intersection(df_be_zpve.index)
-            x = df_be.loc[common_indices, "Mean_Eb_all_dft"].to_numpy(dtype=float)
-            y = df_be_zpve.loc[common_indices, "Mean_Eb_all_dft"].to_numpy(dtype=float)
-            logger.info(f"Creating universal mean BE vs BE + \u0394ZPVE plot saving as {mol}/zpve_{mol}_Mean.svg")
-            fig = zpve_plot(x, y, [m, n, R2])
-            fig.savefig(f"{mol}/zpve_{mol}_Mean.svg")
-            plt.close(fig)
     lin_zpve_df = lin_zpve_df[
         (lin_zpve_df["Mean_Eb_all_dft"] >= be_range[1])
         & (lin_zpve_df["Mean_Eb_all_dft"] <= be_range[0])
@@ -180,8 +163,11 @@ def apply_lin_models(df_be, df_be_zpve, meth_fit_dict, be_methods, basis, mol, b
 
 
 def calculate_mean_std(df_res, mol, logger):
-    """Calculate mean and std rows for a binding energy DataFrame."""
-    df_with_stats = df_res.copy()
+    """Calculate mean and std for a binding energy DataFrame.
+
+    Returns the DataFrame unchanged (no summary rows appended) plus
+    the mean and std values for logging.
+    """
     data_only_df = df_res.loc[~df_res.index.str.startswith(("Mean_", "StdDev_"))]
 
     if len(data_only_df) == 0:
@@ -191,20 +177,11 @@ def calculate_mean_std(df_res, mol, logger):
             "the binding energy, causing all values to fall outside the BE "
             "range. Returning NaN for mean and standard deviation."
         )
-        return df_with_stats, np.nan, np.nan
+        return df_res, np.nan, np.nan
 
-    mean_row = data_only_df.mean()
-    std_row = data_only_df.std()
+    mean_val = data_only_df["Mean_Eb_all_dft"].mean()
 
     stddev_values = data_only_df["StdDev_all_dft"].values
-    sem = np.sqrt((1 / len(stddev_values) ** 2) * np.sum(stddev_values**2))
+    std_val = np.sqrt((1 / len(stddev_values) ** 2) * np.sum(stddev_values**2))
 
-    std_row["StdDev_all_dft"] = sem
-
-    df_with_stats.loc[f"Mean_{mol}"] = mean_row
-    df_with_stats.loc[f"StdDev_{mol}"] = std_row
-
-    mean_val = df_with_stats.loc[f"Mean_{mol}", "Mean_Eb_all_dft"]
-    std_val = df_with_stats.loc[f"StdDev_{mol}", "StdDev_all_dft"]
-
-    return df_with_stats, mean_val, std_val
+    return df_res, mean_val, std_val
