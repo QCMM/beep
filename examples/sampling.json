@@ -9,6 +9,7 @@
     "molecule": null,
     "surface_model_collection": null,
     "small_molecule_collection": null,
+    "atoms_collection": "atoms",
     "sampling_shell": 2.0,
     "sampling_condition": "normal",
     "sampling_level_of_theory": {

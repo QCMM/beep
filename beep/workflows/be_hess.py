@@ -19,7 +19,8 @@ welcome_msg = beep_banner(
 
 
 def check_collections(client, surface_model_name, molecule_collection_name,
-                       molecule_name, optimization_level):
+                       molecule_name, optimization_level,
+                       atoms_collection="atoms"):
     logger = logging.getLogger("beep")
     try:
         molecule_dataset = qcf.get_collection(client, "OptimizationDataset", molecule_collection_name)
@@ -34,8 +35,15 @@ def check_collections(client, surface_model_name, molecule_collection_name,
         else:
             final_molecule = qcf.fetch_final_molecule(molecule_dataset, molecule_name, optimization_level)
     except KeyError:
-        logger.info(f"{molecule_name} is not optimized at the requested level of theory, please optimize them first.")
-        raise
+        # Molecule not in OptimizationDataset — try the atoms collection
+        try:
+            final_molecule = qcf.fetch_atom_molecule(
+                client, atoms_collection, molecule_name
+            )
+            logger.info(f"{molecule_name} is an atom, fetched from '{atoms_collection}'")
+        except KeyError:
+            logger.info(f"{molecule_name} is not optimized at the requested level of theory, please optimize them first.")
+            raise
 
     try:
         surface_dataset = qcf.get_collection(client, "OptimizationDataset", surface_model_name)
@@ -153,7 +161,7 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
         )
 
         keyword = None
-        if mult == 2:
+        if mult != 1:
             keyword = {"reference": "uks"}
 
         padded_log(logger, f"Sending computations for {rdset_name}", padding_char="*", total_length=60)
@@ -188,9 +196,11 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
 
     padded_log(logger, f"Checking for the state of the OptimizationDatasets")
     opt_lot = config.opt_level_of_theory
+    atoms_col = getattr(config, 'atoms_collection', 'atoms')
     surf_opt_ds, smol_mol = check_collections(
         client, config.surface_model_collection,
         config.small_molecule_collection, config.molecule, opt_lot,
+        atoms_collection=atoms_col,
     )
 
     padded_log(logger, f"Checking refinement status (pass 1)")

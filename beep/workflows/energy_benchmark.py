@@ -76,7 +76,7 @@ def get_cc_keywords(mol_mult):
     if mol_mult == 1:
         logger.info(f"\n\nKeywords for closed shell coupled cluster computation")
         kw = {"scf_type": "df", "cc_type": "df", "freeze_core": "true"}
-    elif mol_mult == 2:
+    elif mol_mult != 1:
         logger.info(f"\n\nKeywords for open shell coupled cluster computation")
         kw = {
             "reference": "uhf",

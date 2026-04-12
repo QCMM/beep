@@ -11,6 +11,7 @@ class BeHessConfig(BaseModel):
     molecule: str = Field(..., description="Name of the target molecule")
     surface_model_collection: str = Field("Water_22", description="Name of the surface model collection")
     small_molecule_collection: str = Field("Small_molecules", description="Name of the small molecule collection")
+    atoms_collection: str = Field("atoms", description="Name of the SinglepointDataset containing atomic species")
     level_of_theory: List[str] = Field([], description="Levels of theory for single-point energy calculations")
     exclude_clusters: List[str] = Field([], description="Cluster names to exclude from computation")
     opt_level_of_theory: str = Field(..., description="Level of theory used for geometry optimization (method_basis format)")

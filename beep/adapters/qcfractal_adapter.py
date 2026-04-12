@@ -310,6 +310,23 @@ def wait_for_dataset_completion(client: PortalClient, ds_opt, opt_lot: str,
 # Molecule queries
 # ---------------------------------------------------------------------------
 
+def fetch_atom_molecule(client: PortalClient, atoms_collection: str,
+                        atom_name: str) -> Molecule:
+    """Fetch an atom's molecule from a SinglepointDataset.
+
+    Atoms (single-atom species) are stored in a dedicated SinglepointDataset
+    rather than an OptimizationDataset since they cannot be optimized.
+    """
+    ds = client.get_dataset("singlepoint", atoms_collection)
+    entry = ds.get_entry(atom_name)
+    if entry is None:
+        raise KeyError(
+            f"Atom '{atom_name}' not found in singlepoint dataset "
+            f"'{atoms_collection}'"
+        )
+    return entry.molecule
+
+
 def fetch_molecules(client: PortalClient, mol_ids) -> List[Molecule]:
     """Query molecules by ID(s). Always returns a list."""
     if not isinstance(mol_ids, (list, tuple)):
@@ -981,7 +998,7 @@ def compute_hessian(
 
     logger.info(f"\nWill compute Hessian at {method}/{basis} level of theory")
     kw = {"function_kwargs": {"dertype": 1}}
-    if mult == 2:
+    if mult != 1:
         kw["reference"] = "uks"
 
     logger.info(f"\nComputing Hessian at {method}/{basis} level of theory")

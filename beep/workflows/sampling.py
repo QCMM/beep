@@ -364,10 +364,20 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         cluster_names = all_cluster_names
         logger.info(f"  Surface model clusters: {len(cluster_names)}  ({', '.join(cluster_names)})")
 
-    # Check if all the molecules are optimized at the requested level of theory
-    if len(qcf.fetch_initial_molecule(ds_sm, smol_name, opt_lot).symbols) == 1:
+    # Check if all the molecules are optimized at the requested level of theory.
+    # Atoms (single-atom species) live in a SinglepointDataset, not an
+    # OptimizationDataset, so we fetch them from the atoms_collection.
+    try:
+        init_mol = qcf.fetch_initial_molecule(ds_sm, smol_name, opt_lot)
+        is_atom = len(init_mol.symbols) == 1
+    except KeyError:
+        # Molecule not in the OptimizationDataset — try the atoms collection
+        init_mol = qcf.fetch_atom_molecule(client, config.atoms_collection, smol_name)
+        is_atom = True
+
+    if is_atom:
         qcf.check_optimized_molecule(ds_wc, opt_lot, cluster_names)
-        args_dict["target_mol"] = qcf.fetch_initial_molecule(ds_sm, smol_name, opt_lot)
+        args_dict["target_mol"] = init_mol
     else:
         qcf.check_optimized_molecule(ds_sm, opt_lot, [smol_name])
         qcf.check_optimized_molecule(ds_wc, opt_lot, cluster_names)

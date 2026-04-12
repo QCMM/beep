@@ -9,6 +9,7 @@
     "molecule": null,
     "surface_model_collection": null,
     "small_molecule_collection": null,
+    "atoms_collection": "atoms",
     "level_of_theory": [],
     "exclude_clusters": [],
     "opt_level_of_theory": null,

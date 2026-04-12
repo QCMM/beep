@@ -11,6 +11,7 @@ class SamplingConfig(BaseModel):
     molecule: str = Field(..., description="Name of the target molecule in the small molecule collection")
     surface_model_collection: str = Field("Water_22", description="Name of the surface model collection")
     small_molecule_collection: str = Field("Small_molecules", description="Name of the small molecule collection")
+    atoms_collection: str = Field("atoms", description="Name of the SinglepointDataset containing atomic species")
     sampling_shell: float = Field(2.0, description="Radius of the sampling shell in Angstrom")
     sampling_condition: str = Field("normal", description="Sampling density: sparse|normal|fine|hyperfine")
     sampling_level_of_theory: LevelOfTheory = Field(..., description="Level of theory for initial sampling optimizations")

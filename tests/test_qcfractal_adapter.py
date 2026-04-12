@@ -180,3 +180,37 @@ def test_query_keywords_raises():
     mock_client = MagicMock()
     with pytest.raises(NotImplementedError):
         query_keywords(mock_client)
+
+
+# ---------------------------------------------------------------------------
+# Atom handling
+# ---------------------------------------------------------------------------
+
+def test_fetch_atom_molecule():
+    from beep.adapters.qcfractal_adapter import fetch_atom_molecule
+
+    mock_client = MagicMock()
+    mock_ds = MagicMock()
+    sentinel_mol = MagicMock()
+    mock_entry = MagicMock()
+    mock_entry.molecule = sentinel_mol
+
+    mock_client.get_dataset.return_value = mock_ds
+    mock_ds.get_entry.return_value = mock_entry
+
+    result = fetch_atom_molecule(mock_client, "atoms", "O")
+    mock_client.get_dataset.assert_called_once_with("singlepoint", "atoms")
+    mock_ds.get_entry.assert_called_once_with("O")
+    assert result is sentinel_mol
+
+
+def test_fetch_atom_molecule_not_found():
+    from beep.adapters.qcfractal_adapter import fetch_atom_molecule
+
+    mock_client = MagicMock()
+    mock_ds = MagicMock()
+    mock_client.get_dataset.return_value = mock_ds
+    mock_ds.get_entry.return_value = None
+
+    with pytest.raises(KeyError, match="not found"):
+        fetch_atom_molecule(mock_client, "atoms", "Xe")

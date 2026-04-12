@@ -227,10 +227,8 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
     logger.info(welcome_msg)
 
-    dset_smol = qcf.get_collection(client, "OptimizationDataset", config.mol_coll_name)
     ds_w = qcf.get_collection(client, "OptimizationDataset", config.surface_model)
-
-    mol_list = config.molecules or list(dset_smol.entry_names)
+    mol_list = config.molecules
 
     final_result_nz = ""
     final_result_dz = ""
