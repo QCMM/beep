@@ -11,7 +11,7 @@
     "small_molecule_collection": null,
     "surface_model_collection": null,
     "opt_level_of_theory": [],
-    "reference_be_level_of_theory": [],
+    "reference_geometry_level_of_theory": "ccsd(t)_aug-cc-pvtz",
     "be_level_of_theory": [],
     "cbs_level_of_theory": [],
     "keyword_id": null,

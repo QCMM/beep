@@ -31,7 +31,7 @@ welcome_msg = beep_banner(
 
 
 def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
-                       exclude_clusters=None):
+                       exclude_clusters=None, stoichiometry="bsse"):
     if exclude_clusters is None:
         exclude_clusters = []
     logger = logging.getLogger("beep")
@@ -52,11 +52,11 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
         else:
             name_be = f"be_{mol}_{w}_{method}"
         # Check if stoich-specific dataset exists (Phase 3: separate datasets per stoich type)
-        if not qcf.check_collection_exists(client, "ReactionDataset", f"{name_be}_bsse"):
+        if not qcf.check_collection_exists(client, "ReactionDataset", f"{name_be}_{stoichiometry}"):
             # Fallback: try method-only name for old datasets (e.g. hf3c_minix -> hf3c)
             if basis:
                 name_be_fallback = f"be_{mol}_{w}_{method}"
-                if qcf.check_collection_exists(client, "ReactionDataset", f"{name_be_fallback}_default"):
+                if qcf.check_collection_exists(client, "ReactionDataset", f"{name_be_fallback}_{stoichiometry}"):
                     logger.info(f"Found legacy dataset {name_be_fallback} (no basis in name)")
                     name_be = name_be_fallback
                 else:
@@ -67,7 +67,7 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
                 continue
 
         try:
-            df = qcf.fetch_reaction_values(client, name_be, stoich="bsse")
+            df = qcf.fetch_reaction_values(client, name_be, stoich=stoichiometry)
         except KeyError:
             logger.info(f"ReactionDataset {name_be} exists but seems to be empty, please check.")
             continue
@@ -119,7 +119,8 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
 
 
 def zpve_correction(name_be, be_methods, lot_opt, basis, client,
-                    scale_factor=1.0, be_range=(-0.1, -25.0)):
+                    scale_factor=1.0, be_range=(-0.1, -25.0),
+                    imag_threshold=50.0, stoichiometry="bsse"):
     logger = logging.getLogger("beep")
     entry_list, df_nocp, df_be, fitting_params = [], pd.DataFrame(), pd.DataFrame(), {}
 
@@ -135,7 +136,7 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
             continue
 
         # Get default BE values
-        df_vals = qcf.fetch_reaction_values(client, name, stoich="bsse")
+        df_vals = qcf.fetch_reaction_values(client, name, stoich=stoichiometry)
         df_be = pd.concat([df_be, df_vals], axis=0)
         logger.info(f"Extracting and saving binding energies from {name} for ZPVE correction")
 
@@ -149,19 +150,46 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
 
     for entry in entry_list:
         logger.info(f"Processing structure {entry}")
-        mol_list = df_nocp[df_nocp["name"] == entry]["molecule"].tolist()
+        entry_df = df_nocp[df_nocp["name"] == entry]
+        coeff_list = entry_df["coefficient"].tolist()
+        mol_id_list = entry_df["molecule"].tolist()
 
-        d, d_bol = qcf.get_zpve_mol(client, mol_list[0], lot_opt)
-        m1, _ = qcf.get_zpve_mol(client, mol_list[1], lot_opt, on_imaginary="raise")
-        m2, _ = qcf.get_zpve_mol(client, mol_list[2], lot_opt, on_imaginary="raise")
+        # Identify dimer (coefficient +1) vs fragments (coefficient -1)
+        dimer_idx = [i for i, c in enumerate(coeff_list) if c > 0]
+        frag_idxs = [i for i, c in enumerate(coeff_list) if c < 0]
 
-        if len(qcf.fetch_molecules(client, mol_list[2])[0].symbols) == 1:
+        if len(dimer_idx) != 1 or len(frag_idxs) != 2:
+            logger.warning(f"Unexpected stoichiometry for {entry}: coefficients={coeff_list}. Skipping.")
+            todelete.append(entry)
+            continue
+
+        dimer_mol = mol_id_list[dimer_idx[0]]
+        frag1_mol = mol_id_list[frag_idxs[0]]
+        frag2_mol = mol_id_list[frag_idxs[1]]
+
+        d, d_bol = qcf.get_zpve_mol(client, dimer_mol, lot_opt,
+                                      imag_threshold=imag_threshold)
+        try:
+            m1, _ = qcf.get_zpve_mol(client, frag1_mol, lot_opt,
+                                      on_imaginary="raise",
+                                      imag_threshold=imag_threshold)
+            m2, _ = qcf.get_zpve_mol(client, frag2_mol, lot_opt,
+                                      on_imaginary="raise",
+                                      imag_threshold=imag_threshold)
+        except ValueError as e:
+            logger.warning(
+                f"Skipping {entry}: fragment has imaginary frequencies. {e}"
+            )
+            todelete.append(entry)
+            continue
+
+        if len(qcf.fetch_molecules(client, frag2_mol)[0].symbols) == 1:
             if not (m1):
-                logger.info(f"Molecules {mol_list[1]} have no Hessian. Compute them first.")
+                logger.info(f"Molecules {frag1_mol} have no Hessian. Compute them first.")
                 raise IndexError
         else:
             if not (m1 and m2):
-                logger.info(f"Molecules {mol_list[1]} and {mol_list[2]} have no Hessian. Compute them first.")
+                logger.info(f"Molecules {frag1_mol} and {frag2_mol} have no Hessian. Compute them first.")
                 raise IndexError
 
         if not d_bol:
@@ -258,6 +286,7 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
             client, mol, ds_w, config.opt_method,
             be_range=tuple(config.be_range),
             exclude_clusters=config.exclude_clusters,
+            stoichiometry=config.stoichiometry,
         )
         if not success:
             logger.warning(f"No valid binding energies found for {mol}. Skipping...")
@@ -297,64 +326,71 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
         )
         df_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
 
-        opt_parts = config.opt_method.split("_", 1)
-        opt_suffix = "_".join(p.upper() for p in opt_parts)
-        name_hess_be = []
-        for cluster in config.hessian_clusters:
-            name = f"be_{mol}_{cluster}_{opt_suffix}"
-            if qcf.check_collection_exists(client, "ReactionDataset", f"{name}_be_nocp"):
-                name_hess_be.append(name)
-            else:
-                # Fallback: try method-only name for legacy datasets
-                if len(opt_parts) == 2:
-                    name_fallback = f"be_{mol}_{cluster}_{opt_parts[0].upper()}"
-                    if qcf.check_collection_exists(client, "ReactionDataset", f"{name_fallback}_be_nocp"):
-                        logger.info(f"Found legacy hessian dataset {name_fallback}")
-                        name_hess_be.append(name_fallback)
+        try:
+            opt_parts = config.opt_method.split("_", 1)
+            opt_suffix = "_".join(p.upper() for p in opt_parts)
+            name_hess_be = []
+            for cluster in config.hessian_clusters:
+                name = f"be_{mol}_{cluster}_{opt_suffix}"
+                if qcf.check_collection_exists(client, "ReactionDataset", f"{name}_be_nocp"):
+                    name_hess_be.append(name)
+                else:
+                    # Fallback: try method-only name for legacy datasets
+                    if len(opt_parts) == 2:
+                        name_fallback = f"be_{mol}_{cluster}_{opt_parts[0].upper()}"
+                        if qcf.check_collection_exists(client, "ReactionDataset", f"{name_fallback}_be_nocp"):
+                            logger.info(f"Found legacy hessian dataset {name_fallback}")
+                            name_hess_be.append(name_fallback)
+                        else:
+                            logger.info(f"Hessian dataset {name} not found, skipping")
                     else:
                         logger.info(f"Hessian dataset {name} not found, skipping")
-                else:
-                    logger.info(f"Hessian dataset {name} not found, skipping")
 
-        df_zpve, fit_data_dict, imag_todelete = zpve_correction(
-            name_hess_be, config.be_methods, config.opt_method,
-            config.basis, client=client,
-            scale_factor=config.scale_factor,
-            be_range=tuple(config.be_range),
-        )
+            df_zpve, fit_data_dict, imag_todelete = zpve_correction(
+                name_hess_be, config.be_methods, config.opt_method,
+                config.basis, client=client,
+                scale_factor=config.scale_factor,
+                be_range=tuple(config.be_range),
+                imag_threshold=config.imag_threshold,
+                stoichiometry=config.stoichiometry,
+            )
 
-        df_zpve_lin = apply_lin_models(
-            df_no_zpve, df_zpve, fit_data_dict,
-            config.be_methods, config.basis, mol, tuple(config.be_range),
-            generate_plots=config.generate_plots,
-        )
+            df_zpve_lin = apply_lin_models(
+                df_no_zpve, df_zpve, fit_data_dict,
+                config.be_methods, config.basis, mol, tuple(config.be_range),
+                generate_plots=config.generate_plots,
+            )
 
-        df_zpve_lin.drop(imag_todelete, inplace=True, errors='ignore')
-        df_no_zpve.drop(imag_todelete, inplace=True, errors='ignore')
+            df_zpve_lin.drop(imag_todelete, inplace=True, errors='ignore')
+            df_no_zpve.drop(imag_todelete, inplace=True, errors='ignore')
 
-        res_be_no_zpve, mean, sdev = calculate_mean_std(df_no_zpve, mol, logger)
-        res_be_zpve, mean, sdev = calculate_mean_std(df_zpve, mol, logger)
-        res_be_lin_zpve, mean, sdev = calculate_mean_std(df_zpve_lin, mol, logger)
+            res_be_no_zpve, mean, sdev = calculate_mean_std(df_no_zpve, mol, logger)
+            res_be_zpve, mean, sdev = calculate_mean_std(df_zpve, mol, logger)
+            res_be_lin_zpve, mean, sdev = calculate_mean_std(df_zpve_lin, mol, logger)
 
-        padded_log(logger, "Average binding energy results", padding_char=gear)
-        log_dataframe(logger, res_be_no_zpve, f"\nBinding energies without ZPVE correction for {mol}\n")
-        log_dataframe(logger, res_be_zpve, f"\nBinding energies with direct ZPVE correction for {mol}\n")
-        log_dataframe(logger, res_be_lin_zpve, f"\nBinding energies with linear model ZPVE correction for {mol}\n")
+            padded_log(logger, "Average binding energy results", padding_char=gear)
+            log_dataframe(logger, res_be_no_zpve, f"\nBinding energies without ZPVE correction for {mol}\n")
+            log_dataframe(logger, res_be_zpve, f"\nBinding energies with direct ZPVE correction for {mol}\n")
+            log_dataframe(logger, res_be_lin_zpve, f"\nBinding energies with linear model ZPVE correction for {mol}\n")
 
-        en_log_mol = ""
-        en_log_mol = write_energy_log(res_be_no_zpve, mol, en_log_mol, "(NO ZPVE):")
-        en_log_mol = write_energy_log(res_be_zpve, mol, en_log_mol, "(Direct ZPVE):")
-        en_log_mol = write_energy_log(res_be_lin_zpve, mol, en_log_mol, "(Linear model ZPVE):")
-        logger.info(en_log_mol)
+            en_log_mol = ""
+            en_log_mol = write_energy_log(res_be_no_zpve, mol, en_log_mol, "(NO ZPVE):")
+            en_log_mol = write_energy_log(res_be_zpve, mol, en_log_mol, "(Direct ZPVE):")
+            en_log_mol = write_energy_log(res_be_lin_zpve, mol, en_log_mol, "(Linear model ZPVE):")
+            logger.info(en_log_mol)
 
-        final_result_nz = write_energy_log(res_be_no_zpve, mol, final_result_nz, "(NO ZPVE):")
-        final_result_dz = write_energy_log(res_be_zpve, mol, final_result_dz, "(Direct ZPVE):")
-        final_result_lz = write_energy_log(res_be_lin_zpve, mol, final_result_lz, "(Linear model ZPVE):")
+            final_result_nz = write_energy_log(res_be_no_zpve, mol, final_result_nz, "(NO ZPVE):")
+            final_result_dz = write_energy_log(res_be_zpve, mol, final_result_dz, "(Direct ZPVE):")
+            final_result_lz = write_energy_log(res_be_lin_zpve, mol, final_result_lz, "(Linear model ZPVE):")
 
-        padded_log(logger, "Saving all dataframes to CSV", padding_char=gear)
-        res_be_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
-        res_be_zpve.to_csv(f"{res_folder}/be_zpve_{mol}.csv")
-        res_be_lin_zpve.to_csv(f"{res_folder}/be_lin_zpve_{mol}.csv")
+            padded_log(logger, "Saving all dataframes to CSV", padding_char=gear)
+            res_be_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
+            res_be_zpve.to_csv(f"{res_folder}/be_zpve_{mol}.csv")
+            res_be_lin_zpve.to_csv(f"{res_folder}/be_lin_zpve_{mol}.csv")
+
+        except (IndexError, KeyError, ValueError, TypeError) as e:
+            logger.warning(f"ZPVE correction failed for {mol}: {e}. Saving no-ZPVE results only.")
+            final_result_nz = write_energy_log(res_be_no_zpve, mol, final_result_nz, "(NO ZPVE):")
 
         # Remove per-molecule file handler
         logger.removeHandler(file_handler)

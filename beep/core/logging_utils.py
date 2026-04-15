@@ -360,19 +360,34 @@ def write_energy_log(df: pd.DataFrame, mol: str, existing_content: str = "", com
     if not content:
         content += f"{'':<50}{'BE Average':<50}{'BE Standard Deviation'}\n"
 
-    if len(df) < 2:
+    if len(df) == 0:
         content += f"{mol} {comment:<30}NO DATA (all structures filtered out)\n"
         return content
 
-    last_two_rows = df.iloc[-2:]
+    # BE Average: mean of Mean_Eb_all_dft ± mean of StdDev_all_dft (inter-method spread)
+    mean_be = df["Mean_Eb_all_dft"].mean()
+    mean_intermethod = df["StdDev_all_dft"].mean()
+
+    # BE Standard Deviation: std of Mean_Eb_all_dft across binding sites ± its SEM
+    std_be = df["Mean_Eb_all_dft"].std()
+    sem_std = df["StdDev_all_dft"].std()
+
     content += f"{mol} {comment:<30}"
-    for i, (_, row) in enumerate(last_two_rows.iterrows()):
-        mean_values = []
-        for unit in ['kcal/mol', 'K']:
-            conv = qcel.constants.conversion_factor('kcal/mol', unit)
-            mean_val = abs(round(conv * row['Mean_Eb_all_dft'], 2))
-            std_val = abs(round(conv * row['StdDev_all_dft'], 2))
-            mean_values.append(f"{mean_val:.2f} ± {std_val:.2f} [{unit}]")
-        content += f"{'   '.join(mean_values):<50}"
+    # Column 1: BE Average
+    avg_values = []
+    for unit in ['kcal/mol', 'K']:
+        conv = qcel.constants.conversion_factor('kcal/mol', unit)
+        avg_val = abs(round(conv * mean_be, 2))
+        avg_unc = abs(round(conv * mean_intermethod, 2))
+        avg_values.append(f"{avg_val:.2f} ± {avg_unc:.2f} [{unit}]")
+    content += f"{'   '.join(avg_values):<50}"
+    # Column 2: BE Standard Deviation
+    std_values = []
+    for unit in ['kcal/mol', 'K']:
+        conv = qcel.constants.conversion_factor('kcal/mol', unit)
+        std_val = round(conv * std_be, 2)
+        std_unc = abs(round(conv * sem_std, 2))
+        std_values.append(f"{std_val:.2f} ± {std_unc:.2f} [{unit}]")
+    content += f"{'   '.join(std_values):<50}"
     content += "\n"
     return content

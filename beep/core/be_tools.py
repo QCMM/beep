@@ -181,7 +181,6 @@ def calculate_mean_std(df_res, mol, logger):
 
     mean_val = data_only_df["Mean_Eb_all_dft"].mean()
 
-    stddev_values = data_only_df["StdDev_all_dft"].values
-    std_val = np.sqrt((1 / len(stddev_values) ** 2) * np.sum(stddev_values**2))
+    std_val = data_only_df["Mean_Eb_all_dft"].std()
 
     return df_res, mean_val, std_val

@@ -415,8 +415,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
 
     logger.info(welcome_msg)
-    gr_method, gr_basis, gr_program = config.reference_be_level_of_theory
-    geom_ref_opt_lot = gr_method + "_" + gr_basis
+    geom_ref_opt_lot = config.reference_geometry_level_of_theory
 
     bchmk_structs = config.benchmark_structures
     surf_dset_name = config.surface_model_collection
@@ -432,7 +431,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     smol_dset = qcf.get_collection(client, "OptimizationDataset", smol_dset_name)
     mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
     logger.info(f"\nThe molecular multiplicity of {smol_name} is {mol_mult}\n\n")
-    logger.info(f"Retriving data of the reference equilibirum geometries at {gr_method}/{gr_basis}:\n")
+    logger.info(f"Retriving data of the reference equilibrium geometries at {geom_ref_opt_lot}:\n")
 
     odset_dict = {}
     bchmk_dset_names = create_benchmark_dataset_dict(bchmk_structs)

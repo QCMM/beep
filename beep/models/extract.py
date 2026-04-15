@@ -17,5 +17,7 @@ class ExtractConfig(BaseModel):
     scale_factor: float = Field(0.958, description="ZPVE scale factor for the level of theory")
     basis: str = Field("def2-tzvp", description="Basis set used for binding energy calculations")
     exclude_clusters: List[str] = Field([], description="Cluster names to exclude from extraction")
+    stoichiometry: str = Field("bsse", description="Stoichiometry type for BE extraction: bsse (BSSE-corrected), be_nocp, ie, or de")
     no_zpve: bool = Field(False, description="Skip ZPVE correction")
+    imag_threshold: float = Field(50.0, description="Imaginary frequencies below this value (cm⁻¹) are ignored in ZPVE. Default 50 cm⁻¹")
     generate_plots: bool = Field(False, description="Generate binding energy distribution plots")

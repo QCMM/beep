@@ -1029,10 +1029,17 @@ def compute_hessian(
 # ---------------------------------------------------------------------------
 
 def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
-                 on_imaginary: str = "return"):
+                 on_imaginary: str = "return",
+                 imag_threshold: float = 50.0):
     """
     Compute vibrational analysis for a molecule and handle imaginary frequencies.
     Fetches hessian data from QCFractal.
+
+    Parameters
+    ----------
+    imag_threshold : float
+        Imaginary frequencies with magnitude below this value (in cm⁻¹)
+        are ignored (dropped from ZPVE sum). Default 50 cm⁻¹.
     """
     from ..core.zpve import _vibanal_wfn
 
@@ -1090,20 +1097,37 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
         hess=hess, molecule=result_mol, energy=energy
     )
 
-    imag_freqs = [num for num in vib["omega"].data if abs(num.imag) > 1]
-    if imag_freqs:
+    all_imag = [num for num in vib["omega"].data if abs(num.imag) > 1]
+    small_imag = [f for f in all_imag if abs(f.imag) < imag_threshold]
+    significant_imag = [f for f in all_imag if abs(f.imag) >= imag_threshold]
+
+    if small_imag:
+        logger.info(
+            f"Molecule {mol}: {len(small_imag)} small imaginary "
+            f"frequencies below {imag_threshold} cm⁻¹ ignored: "
+            f"{[round(f.imag, 1) for f in small_imag]}"
+        )
+
+    if significant_imag:
         if on_imaginary == "raise":
-            import numpy as np
             np.savetxt(f"{mol}_hess.dat", hess, fmt="%.18e")
             raise ValueError(
-                f"There are imaginary frequencies: {imag_freqs}. "
+                f"There are {len(significant_imag)} significant imaginary "
+                f"frequencies (>= {imag_threshold} cm⁻¹): {significant_imag}. "
                 f"You need to reoptimize {mol}."
             )
         elif on_imaginary == "return":
-            logger.info(
-                f"There are imaginary frequencies: {imag_freqs}, "
-                "proceed with caution."
-            )
+            if len(significant_imag) > 1:
+                logger.warning(
+                    f"Molecule {mol}: {len(significant_imag)} significant "
+                    f"imaginary frequencies: {significant_imag}. "
+                    "Structure may be at a higher-order saddle point."
+                )
+            else:
+                logger.info(
+                    f"Molecule {mol}: 1 significant imaginary frequency: "
+                    f"{significant_imag[0]}, proceed with caution."
+                )
             return therm["ZPE_vib"].data, False
         else:
             raise ValueError(

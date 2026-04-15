@@ -12,10 +12,10 @@ class EnergyBenchmarkConfig(BaseModel):
     benchmark_structures: List[str] = Field(..., description="List of benchmark structure identifiers")
     small_molecule_collection: str = Field("Small_molecules", description="Name of the small molecule collection")
     surface_model_collection: str = Field("small water", description="Name of the surface model collection")
-    opt_level_of_theory: List[str] = Field(..., description="Optimization level of theory [method, basis, program]")
-    reference_be_level_of_theory: List[str] = Field(
-        ["df-ccsd(t)-f12", "cc-pvdz", "molpro"],
-        description="Reference binding energy level of theory [method, basis, program]",
+    opt_level_of_theory: List[str] = Field(..., description="DFT geometry optimization levels of theory (list of method_basis strings, e.g. ['mpwb1k-d3bj_def2-tzvpd'])")
+    reference_geometry_level_of_theory: str = Field(
+        "ccsd(t)_aug-cc-pvtz",
+        description="Specification name (method_basis) of the reference geometry optimization. The structures optimized at this level are used to compute the CCSD(T)/CBS reference binding energy.",
     )
     be_level_of_theory: List[str] = Field([], description="Levels of theory for BE single-point calculations")
     cbs_level_of_theory: List[str] = Field([], description="Levels of theory for CBS extrapolation")

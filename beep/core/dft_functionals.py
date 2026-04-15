@@ -167,8 +167,8 @@ def geom_hmgga_dz():
         "PBE0_def2-svpd",
         "B3LYP-D4_def2-svpd",
         "M06-2X_def2-svpd",
-        "WB97X-V_def2-svpd",
-        "M06-L_def2-svpd",
+        "WB97X-D4_def2-svpd",
+        "R2SCAN-D4_def2-svpd",
     ]
 
 def geom_hmgga_tz():
@@ -185,10 +185,10 @@ def geom_hmgga_tz():
         "PBE0_def2-tzvpd",
         "M06-2X_def2-tzvp",
         "M06-2X_def2-tzvpd",
-        "WB97X-V_def2-tzvp",
-        "WB97X-V_def2-tzvpd",
-        "M06-L_def2-tzvp",
-        "M06-L_def2-tzvpd",
+        "WB97X-D4_def2-tzvp",
+        "WB97X-D4_def2-tzvpd",
+        "R2SCAN-D4_def2-tzvp",
+        "R2SCAN-D4_def2-tzvpd",
     ]
 
 def geom_gga_dz():

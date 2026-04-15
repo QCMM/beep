@@ -34,10 +34,13 @@ class GeomBenchmarkConfig(BaseModel):
     small_molecule_collection: str = Field("Small_molecules", description="Name of the small molecule collection")
     surface_model_collection: str = Field("small water", description="Name of the surface model collection")
     reference_geometry_level_of_theory: List[str] = Field(
-        ["df-ccsd(t)-f12", "cc-pvdz", "molpro"],
+        ["ccsd(t)", "aug-cc-pvtz", "psi4"],
         description="Reference geometry level of theory [method, basis, program]",
     )
-    reference_geometry_keywords: Optional[Dict[str, str]] = Field(None, description="QC keywords for reference geometry (e.g. scf_type, cc_type)")
+    reference_geometry_keywords: Optional[Dict[str, str]] = Field(
+        {"scf_type": "df", "cc_type": "df", "freeze_core": "true"},
+        description="QC keywords for reference geometry (e.g. scf_type, cc_type)",
+    )
     tag_reference_geometry: Optional[str] = Field(None, description="Queue tag for reference geometry tasks")
     dft_optimization_program: str = Field("psi4", description="Program for DFT geometry optimizations")
     dft_optimization_keyword: Optional[int] = Field(None, description="QCFractal keyword ID for DFT optimizations")

@@ -175,7 +175,7 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
         err = None
         for struct_name, odset in odset_dict.items():
             record = odset.get_record(struct_name, opt_lot)
-            err = is_error(record.status) if record is not None else True
+            err = (is_error(record.status) or record.status.value == "cancelled") if record is not None else True
             if err:
                 logger.warning(
                     f"WARNING: Calculation for {struct_name} at the {opt_lot} level of theory "
