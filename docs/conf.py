@@ -27,10 +27,8 @@ copyright = ("2022, Stefan Vogt-Geisse. Project structure based on the "
              "Computational Molecular Science Python Cookiecutter version 1.6")
 author = 'Stefan Vogt-Geisse'
 
-# The short X.Y version
-version = ''
-# The full version, including alpha/beta/rc tags
-release = ''
+release = beep.__version__
+version = ".".join(release.split(".")[:2])
 
 
 # -- General configuration ---------------------------------------------------

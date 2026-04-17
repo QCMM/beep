@@ -1,14 +1,14 @@
 """Geometry benchmark workflow config — maps to launch_geom_benchmark.py argparse flags."""
 from typing import Optional, Literal, List, Dict
-from pydantic import BaseModel, Field
-from .base import ServerConfig
+from pydantic import BaseModel, Field, field_validator
+from .base import ServerConfig, uppercase_list
 
 
 class BSSETestConfig(BaseModel):
     """Configuration for BSSE/dispersion test via direct Slurm CP jobs."""
     functional: List[str] = Field(["PBE0"], description="Test functional(s) (default: ['PBE0'])")
     basis_sets: List[str] = Field(
-        ["def2-svp", "def2-svpd", "def2-tzvpd"],
+        ["DEF2-SVP", "DEF2-SVPD", "DEF2-TZVPD"],
         description="Basis sets to test",
     )
     dispersion: List[str] = Field(
@@ -24,6 +24,11 @@ class BSSETestConfig(BaseModel):
     memory: str = Field("12GB", description="Memory per CP job")
     walltime: str = Field("24:00:00", description="Slurm walltime for CP jobs")
 
+    _upper_functional = field_validator("functional")(uppercase_list)
+    _upper_basis_sets = field_validator("basis_sets")(uppercase_list)
+    _upper_dispersion = field_validator("dispersion")(uppercase_list)
+    _upper_cp_dispersion = field_validator("cp_dispersion")(uppercase_list)
+
 
 class GeomBenchmarkConfig(BaseModel):
     """Configuration for the geometry benchmark workflow."""
@@ -34,7 +39,7 @@ class GeomBenchmarkConfig(BaseModel):
     small_molecule_collection: str = Field("Small_molecules", description="Name of the small molecule collection")
     surface_model_collection: str = Field("small water", description="Name of the surface model collection")
     reference_geometry_level_of_theory: List[str] = Field(
-        ["ccsd(t)", "aug-cc-pvtz", "psi4"],
+        ["CCSD(T)", "AUG-CC-PVTZ", "psi4"],
         description="Reference geometry level of theory [method, basis, program]",
     )
     reference_geometry_keywords: Optional[Dict[str, str]] = Field(
@@ -47,3 +52,15 @@ class GeomBenchmarkConfig(BaseModel):
     tag_dft_geometry: Optional[str] = Field(None, description="Queue tag for DFT geometry tasks")
     use_initial_reference_geometry: bool = Field(False, description="Use initial (unoptimized) reference geometry")
     bsse_test: Optional[BSSETestConfig] = Field(None, description="Optional BSSE/dispersion test on a single functional")
+
+    @field_validator("reference_geometry_level_of_theory")
+    @classmethod
+    def _upper_ref_geom_lot(cls, v):
+        """Uppercase method (index 0) and basis (index 1); leave program (index 2) as-is."""
+        if not isinstance(v, list):
+            return v
+        out = list(v)
+        for i in (0, 1):
+            if i < len(out) and isinstance(out[i], str) and out[i]:
+                out[i] = out[i].upper()
+        return out

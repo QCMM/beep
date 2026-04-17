@@ -1,7 +1,7 @@
 """BE + Hessian workflow config — maps to launch_be_hess.py argparse flags."""
 from typing import Optional, Literal, List
-from pydantic import BaseModel, Field
-from .base import ServerConfig
+from pydantic import BaseModel, Field, field_validator
+from .base import ServerConfig, uppercase_str, uppercase_list
 
 
 class BeHessConfig(BaseModel):
@@ -20,3 +20,6 @@ class BeHessConfig(BaseModel):
     program: str = Field("psi4", description="QC program to use")
     energy_tag: Optional[str] = Field(None, description="Queue tag for energy computation tasks")
     hessian_tag: Optional[str] = Field(None, description="Queue tag for Hessian computation tasks")
+
+    _upper_lot = field_validator("level_of_theory")(uppercase_list)
+    _upper_opt_lot = field_validator("opt_level_of_theory")(uppercase_str)

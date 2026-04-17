@@ -12,18 +12,13 @@ authors = [
     {name = "Stefan Vogt-Geisse", email = "stvogtgeisse@qcmmlab.com"},
     {name = "Giulia M. Bovolenta"},
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "matplotlib",
     "scipy",
-    "tqdm",
     "seaborn",
-    "pydantic>=1.10,<2",
-    "numpy<2",
-    "pandas>=1.4",
-    "qcportal>=0.50",
-    "qcelemental>=0.25",
-    "networkx",
+    "qcportal>=0.63",
+    "qcelemental",
 ]
 
 [project.optional-dependencies]

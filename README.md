@@ -3,19 +3,29 @@
 # BEEP — Binding Energy Evaluation Platform
 
 BEEP is a binding energy evaluation platform and database for molecules on interstellar ice-grain mantles.
-It automates the full computational pipeline — from structure sampling through geometry optimization, binding energy computation, and data extraction — using a [QCFractal](https://github.com/MolSSI/QCFractal) (v0.15) server as the computation backend.
+It automates the full computational pipeline — from structure sampling through geometry optimization, binding energy computation, and data extraction — using a [QCFractal](https://github.com/MolSSI/QCFractal) (v0.63+) server as the computation backend.
 
 ## Installation
 
-BEEP requires Python 3.9+ and installs via pip:
+BEEP requires Python 3.10+ and the QCFractal v0.63+ stack. The supported install
+path is to clone a `qcfractal-0.64` conda environment and pip-install BEEP on top:
 
 ```bash
-pip install .
+conda create --clone qcfractal-0.64 -p /path/to/envs/beep-0.12
+/path/to/envs/beep-0.12/bin/pip install .
 ```
 
-This pulls in the core dependencies: `qcportal`, `qcelemental`, `pydantic`, `numpy`, `pandas`, `scipy`, `matplotlib`, `seaborn`, and `tqdm`.
+Pure `pip install .` also works in any environment that already has the
+QCFractal stack (qcportal, qcelemental, qcfractalcompute) available.
 
-**Note:** To run computations you also need a running QCFractal server (v0.15) with compute workers. See the [QCFractal documentation](https://docs.qcarchive.molssi.org) for server setup.
+Direct dependencies declared in `pyproject.toml`:
+`qcportal>=0.63`, `qcelemental`, `matplotlib`, `scipy`, `seaborn`.
+`numpy`, `pandas`, `pydantic`, `tqdm`, and `pyyaml` come transitively through
+`qcportal`.
+
+**Note:** To run computations you also need a running QCFractal server (v0.63+)
+with compute workers. See the [QCFractal documentation](https://docs.qcarchive.molssi.org)
+for server setup.
 
 ## Usage
 

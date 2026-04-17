@@ -191,6 +191,7 @@ tests/test_data_output/
 psi.*.clean
 timer.dat
 
-MIGRATION.md
+# Local scratch / ad-hoc runs
+test_run/
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks
 
