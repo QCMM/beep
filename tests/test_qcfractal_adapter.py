@@ -214,3 +214,106 @@ def test_fetch_atom_molecule_not_found():
 
     with pytest.raises(KeyError, match="not found"):
         fetch_atom_molecule(mock_client, "atoms", "Xe")
+
+
+# ---------------------------------------------------------------------------
+# Dispersion splitting
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "method, expected",
+    [
+        ("pbe-d3bj",    ("pbe",    "pbe-d3bj",    "dftd3")),
+        ("b3lyp-d3mbj", ("b3lyp",  "b3lyp-d3mbj", "dftd3")),
+        ("mpwb1k-d3m",  ("mpwb1k", "mpwb1k-d3m",  "dftd3")),
+        ("pbe-d3",      ("pbe",    "pbe-d3",      "dftd3")),
+        ("b3lyp-d4",    ("b3lyp",  "b3lyp-d4",    "dftd4")),
+        ("PBE-D3BJ",    ("PBE",    "PBE-D3BJ",    "dftd3")),  # case preserved in bare/full
+        ("wb97x-v",     ("wb97x-v", None, None)),  # intrinsic dispersion, not split
+        ("wb97m-v",     ("wb97m-v", None, None)),
+        ("hf3c",        ("hf3c",   None, None)),
+        ("pbe",         ("pbe",    None, None)),
+    ],
+)
+def test_split_dispersion(method, expected):
+    from beep.adapters.qcfractal_adapter import _split_dispersion
+    assert _split_dispersion(method) == expected
+
+
+# ---------------------------------------------------------------------------
+# compute_be_dft_energies — dispatch to separated-pair vs integrated form
+# ---------------------------------------------------------------------------
+
+def _fake_submit_result(n_inserted=1, n_existing=0):
+    r = MagicMock()
+    r.n_inserted = n_inserted
+    r.n_existing = n_existing
+    return r
+
+
+@patch("beep.adapters.qcfractal_adapter.submit_energies")
+def test_compute_be_dft_energies_splits_dispersion(mock_submit):
+    """D3BJ method → two submit_energies calls per stoich: bare DFT + bare dispersion."""
+    from beep.adapters.qcfractal_adapter import compute_be_dft_energies, STOICH_TYPES
+
+    mock_submit.return_value = _fake_submit_result()
+    logger = MagicMock()
+
+    compute_be_dft_energies(
+        client=MagicMock(), rdset_base_name="be_H2O_W5_01",
+        all_dft=["pbe-d3bj_def2-tzvp"], tag="test",
+        program="psi4", logger=logger,
+    )
+
+    # Two calls per stoich type: bare DFT (psi4) + bare dispersion (dftd3)
+    assert mock_submit.call_count == 2 * len(STOICH_TYPES)
+
+    dft_calls = [c for c in mock_submit.call_args_list if c.kwargs["program"] == "psi4"]
+    disp_calls = [c for c in mock_submit.call_args_list if c.kwargs["program"] == "dftd3"]
+    assert len(dft_calls) == len(STOICH_TYPES)
+    assert len(disp_calls) == len(STOICH_TYPES)
+
+    assert dft_calls[0].kwargs["method"] == "pbe"
+    assert dft_calls[0].kwargs["basis"] == "def2-tzvp"
+    assert disp_calls[0].kwargs["method"] == "pbe-d3bj"
+    assert disp_calls[0].kwargs["basis"] is None
+
+
+@patch("beep.adapters.qcfractal_adapter.submit_energies")
+def test_compute_be_dft_energies_integrated_for_non_dispersion(mock_submit):
+    """HF-3c has no dispersion suffix → single integrated spec per stoich."""
+    from beep.adapters.qcfractal_adapter import compute_be_dft_energies, STOICH_TYPES
+
+    mock_submit.return_value = _fake_submit_result()
+    logger = MagicMock()
+
+    compute_be_dft_energies(
+        client=MagicMock(), rdset_base_name="be_H2O_W5_01",
+        all_dft=["hf3c_minix"], tag="test",
+        program="psi4", logger=logger,
+    )
+
+    assert mock_submit.call_count == len(STOICH_TYPES)
+    for call in mock_submit.call_args_list:
+        assert call.kwargs["method"] == "hf3c"
+        assert call.kwargs["basis"] == "minix"
+        assert call.kwargs["program"] == "psi4"
+
+
+@patch("beep.adapters.qcfractal_adapter.submit_energies")
+def test_compute_be_dft_energies_d4_uses_dftd4_program(mock_submit):
+    """D4 dispersion routes to dftd4 program (not dftd3)."""
+    from beep.adapters.qcfractal_adapter import compute_be_dft_energies
+
+    mock_submit.return_value = _fake_submit_result()
+
+    compute_be_dft_energies(
+        client=MagicMock(), rdset_base_name="be_H2O_W5_01",
+        all_dft=["b3lyp-d4_def2-tzvp"], tag="test",
+        program="psi4", logger=MagicMock(),
+    )
+
+    disp_calls = [c for c in mock_submit.call_args_list if c.kwargs["program"] == "dftd4"]
+    assert len(disp_calls) > 0
+    assert disp_calls[0].kwargs["method"] == "b3lyp-d4"
+    assert disp_calls[0].kwargs["basis"] is None

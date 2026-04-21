@@ -443,12 +443,16 @@ def submit_optimizations(ds_opt, opt_lot: str, tag: str, subset=None):
 
 
 def submit_energies(client: PortalClient, rdset_base_name: str,
-                    method: str, basis: str, program: str,
+                    method: str, basis: Optional[str], program: str,
                     stoich: str, tag: str, keywords=None):
-    """Submit energy computations to a stoichiometry-specific ReactionDataset."""
+    """Submit energy computations to a stoichiometry-specific ReactionDataset.
+
+    If ``basis`` is ``None`` the spec is named after the method alone (used for
+    bare dispersion specs like ``pbe-d3bj`` that have no basis set).
+    """
     ds_name = _stoich_dataset_name(rdset_base_name, stoich)
     ds = client.get_dataset("reaction", ds_name)
-    spec_name = f"{method}_{basis}".lower()
+    spec_name = (f"{method}_{basis}" if basis else method).lower()
 
     kw_dict = keywords if isinstance(keywords, dict) else {}
     qc_spec = QCSpecification(
@@ -873,6 +877,31 @@ def create_or_load_reaction_dataset(
     return rdset_name
 
 
+# Dispersion suffixes recognized by compute_be_dft_energies. Order matters:
+# longer suffixes first so "-d3mbj" matches before "-d3".
+_DISPERSION_PROGRAMS = (
+    ("-d3mbj", "dftd3"),
+    ("-d3bj",  "dftd3"),
+    ("-d3m",   "dftd3"),
+    ("-d4",    "dftd4"),
+    ("-d3",    "dftd3"),
+)
+
+
+def _split_dispersion(method: str) -> Tuple[str, Optional[str], Optional[str]]:
+    """Split ``method`` into (bare_functional, full_dispersion_method, disp_program).
+
+    Returns (method, None, None) when no known dispersion suffix is present
+    (plain DFT, HF-3c, WB97X-V / WB97M-V intrinsic VV10, etc.).
+    """
+    m = method.lower()
+    for suffix, program in _DISPERSION_PROGRAMS:
+        if m.endswith(suffix):
+            bare = method[: -len(suffix)]
+            return bare, method, program
+    return method, None, None
+
+
 def compute_be_dft_energies(
     client: PortalClient,
     rdset_base_name: str,
@@ -885,8 +914,15 @@ def compute_be_dft_energies(
     """
     Submit DFT energy computations for BE calculations.
 
-    Submits across all stoichiometry-specific datasets. Returns a list of
-    record IDs for monitoring.
+    For dispersion-corrected functionals (``-d3``, ``-d3bj``, ``-d3m``,
+    ``-d3mbj``, ``-d4``) two specs are submitted per level of theory: the
+    bare DFT piece on ``program`` (typically psi4) and the bare dispersion
+    piece on ``dftd3``/``dftd4`` with ``basis=None``. This matches the
+    separated-pair form produced by the v0.15→v0.63 migration script and
+    allows ``fetch_reaction_values`` to recombine them into composite
+    columns. Non-dispersion methods are submitted as a single integrated
+    spec. Submits across all stoichiometry-specific datasets. Returns a
+    list of record IDs for monitoring.
     """
     logger.info(
         f"Computing energies for the following stoichiometries: "
@@ -906,19 +942,36 @@ def compute_be_dft_energies(
 
     for i, lot in enumerate(all_dft):
         method, basis = lot.split("_")
+        bare, disp_method, disp_program = _split_dispersion(method)
         logger.info(f"Processing method: {method}, basis: {basis}")
 
         lot_submitted = 0
         lot_existing = 0
 
         for stoich in STOICH_TYPES:
-            result = submit_energies(
-                client, rdset_base_name,
-                method=method, basis=basis, program=program,
-                stoich=stoich, tag=tag, keywords=keyword,
-            )
-            lot_submitted += result.n_inserted
-            lot_existing += result.n_existing
+            if disp_method is None:
+                # No dispersion suffix — single integrated spec
+                result = submit_energies(
+                    client, rdset_base_name,
+                    method=method, basis=basis, program=program,
+                    stoich=stoich, tag=tag, keywords=keyword,
+                )
+                lot_submitted += result.n_inserted
+                lot_existing += result.n_existing
+            else:
+                # Separated pair: bare DFT + bare dispersion
+                dft_result = submit_energies(
+                    client, rdset_base_name,
+                    method=bare, basis=basis, program=program,
+                    stoich=stoich, tag=tag, keywords=keyword,
+                )
+                disp_result = submit_energies(
+                    client, rdset_base_name,
+                    method=disp_method, basis=None, program=disp_program,
+                    stoich=stoich, tag=tag, keywords=None,
+                )
+                lot_submitted += dft_result.n_inserted + disp_result.n_inserted
+                lot_existing += dft_result.n_existing + disp_result.n_existing
 
         all_submitted += lot_submitted
         all_existing += lot_existing
