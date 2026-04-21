@@ -695,21 +695,32 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
     Returns a DataFrame with entry names as index and specification names
     as columns, containing ``total_energy`` values converted to kcal/mol.
 
-    DFT and D3BJ dispersion specs are automatically combined into composite
-    columns (e.g. ``mpwb1k_def2-tzvpd`` + ``mpwb1k-d3bj`` →
-    ``MPWB1K-D3BJ/def2-tzvpd``), matching the format the old v0.15 server
-    produced.  The bare DFT columns (e.g. ``MPWB1K/def2-tzvpd``) are kept
-    alongside the composite ones.
+    Dispersion-corrected DFT is assumed to be stored as a separated pair
+    (bare DFT under ``psi4`` + bare dispersion under ``dftd3``/``dftd4``)
+    matching the v0.63 migration convention. The bare pieces are summed
+    into a composite column (e.g. ``mpwb1k_def2-tzvpd`` + ``mpwb1k-d3bj``
+    → ``MPWB1K-D3BJ/DEF2-TZVPD``) for every suffix in
+    ``DISPERSION_SUFFIXES``. Integrated specs (method carrying a
+    dispersion suffix together with a basis, e.g. ``mpwb1k-d3bj_def2-tzvpd``)
+    are skipped with a warning — BEEP no longer supports that layout.
     """
     import pandas as pd
     import qcelemental as qcel
 
+    logger = logging.getLogger("beep")
     ds_name = _stoich_dataset_name(rdset_base_name, stoich)
     ds = client.get_dataset("reaction", ds_name)
 
     spec_names = [spec_name] if spec_name else ds.specification_names
     data = {}
     for sname in spec_names:
+        if "_" in sname and _has_dispersion_suffix(sname.split("_", 1)[0]):
+            logger.warning(
+                f"Skipping integrated dispersion spec '{sname}' in {ds_name} "
+                f"— BEEP expects the separated pair (bare DFT + bare dispersion)."
+            )
+            continue
+
         col_label = sname.replace("_", "/").upper()
         energies = {}
         for entry_name, sn, record in ds.iterate_records(
@@ -724,23 +735,24 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
 
     df = pd.DataFrame(data)
 
-    # Combine DFT + D3BJ dispersion into composite columns.
-    # A D3BJ-only column has no "/" (e.g. "MPWB1K-D3BJ") — look for its
-    # matching DFT column (e.g. "MPWB1K/DEF2-TZVPD") and sum them.
-    d3bj_cols = [c for c in df.columns if "/" not in c
-                 and ("-D3BJ" in c or "-D3MBJ" in c)]
-    for d3bj_col in d3bj_cols:
-        # Derive the bare functional name: "MPWB1K-D3BJ" -> "MPWB1K"
-        for suffix in ("-D3BJ", "-D3MBJ"):
-            if d3bj_col.endswith(suffix):
-                bare = d3bj_col[: -len(suffix)]
+    # Sum bare-DFT + bare-dispersion into composite columns. A bare-dispersion
+    # column has no "/" (no basis in its spec name) and ends with one of
+    # DISPERSION_SUFFIXES; pair it with a matching "BARE/BASIS" column.
+    suffixes_upper = tuple(s.upper() for s in DISPERSION_SUFFIXES)
+    disp_cols = [
+        c for c in df.columns
+        if "/" not in c and any(c.endswith(suf) for suf in suffixes_upper)
+    ]
+    for disp_col in disp_cols:
+        for suffix in suffixes_upper:
+            if disp_col.endswith(suffix):
+                bare = disp_col[: -len(suffix)]
                 break
-        # Find the matching DFT column (e.g. "MPWB1K/DEF2-TZVPD")
         dft_matches = [c for c in df.columns if c.startswith(bare + "/")]
         for dft_col in dft_matches:
             basis_part = dft_col.split("/", 1)[1]
-            composite_col = f"{d3bj_col}/{basis_part}"
-            df[composite_col] = df[dft_col] + df[d3bj_col]
+            composite_col = f"{disp_col}/{basis_part}"
+            df[composite_col] = df[dft_col] + df[disp_col]
 
     return df
 
@@ -877,15 +889,18 @@ def create_or_load_reaction_dataset(
     return rdset_name
 
 
-# Dispersion suffixes recognized by compute_be_dft_energies. Order matters:
-# longer suffixes first so "-d3mbj" matches before "-d3".
-_DISPERSION_PROGRAMS = (
+# Dispersion suffixes recognized by BEEP's separated-pair dispersion handling.
+# Order matters: longer suffixes first so "-d3mbj" matches before "-d3".
+# Single source of truth — consumed by compute_be_dft_energies (write side)
+# and fetch_reaction_values / extract.py (read side).
+DISPERSION_PROGRAMS: Tuple[Tuple[str, str], ...] = (
     ("-d3mbj", "dftd3"),
     ("-d3bj",  "dftd3"),
     ("-d3m",   "dftd3"),
     ("-d4",    "dftd4"),
     ("-d3",    "dftd3"),
 )
+DISPERSION_SUFFIXES: Tuple[str, ...] = tuple(s for s, _ in DISPERSION_PROGRAMS)
 
 
 def _split_dispersion(method: str) -> Tuple[str, Optional[str], Optional[str]]:
@@ -895,11 +910,17 @@ def _split_dispersion(method: str) -> Tuple[str, Optional[str], Optional[str]]:
     (plain DFT, HF-3c, WB97X-V / WB97M-V intrinsic VV10, etc.).
     """
     m = method.lower()
-    for suffix, program in _DISPERSION_PROGRAMS:
+    for suffix, program in DISPERSION_PROGRAMS:
         if m.endswith(suffix):
             bare = method[: -len(suffix)]
             return bare, method, program
     return method, None, None
+
+
+def _has_dispersion_suffix(name: str) -> bool:
+    """Return True if ``name`` ends with a known dispersion suffix."""
+    m = name.lower()
+    return any(m.endswith(s) for s in DISPERSION_SUFFIXES)
 
 
 def compute_be_dft_energies(

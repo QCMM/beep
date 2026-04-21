@@ -317,3 +317,84 @@ def test_compute_be_dft_energies_d4_uses_dftd4_program(mock_submit):
     assert len(disp_calls) > 0
     assert disp_calls[0].kwargs["method"] == "b3lyp-d4"
     assert disp_calls[0].kwargs["basis"] is None
+
+
+# ---------------------------------------------------------------------------
+# fetch_reaction_values — separated-pair recombination, integrated-spec skip
+# ---------------------------------------------------------------------------
+
+def _fake_reaction_dataset(records_by_spec):
+    """Build a mock ReactionDataset for fetch_reaction_values tests.
+
+    ``records_by_spec`` is a dict: spec_name → {entry_name: total_energy_hartree}.
+    """
+    ds = MagicMock()
+    ds.specification_names = list(records_by_spec.keys())
+
+    def _iterate(specification_names, status):
+        sname = specification_names[0]
+        for entry_name, energy in records_by_spec[sname].items():
+            rec = MagicMock()
+            rec.total_energy = energy
+            yield entry_name, sname, rec
+
+    ds.iterate_records.side_effect = _iterate
+    return ds
+
+
+@patch("beep.adapters.qcfractal_adapter._stoich_dataset_name",
+       return_value="be_H2O_W5_01_bsse")
+def test_fetch_reaction_values_d4_separated_pair(mock_ds_name):
+    """Separated pair for D4 recombines into composite column."""
+    from beep.adapters.qcfractal_adapter import fetch_reaction_values
+
+    # In hartree; composite column should be sum of the two pieces
+    records = {
+        "b3lyp_def2-tzvp": {"entry1": -1.0},
+        "b3lyp-d4":         {"entry1": -0.01},
+    }
+    mock_client = MagicMock()
+    mock_client.get_dataset.return_value = _fake_reaction_dataset(records)
+
+    df = fetch_reaction_values(mock_client, "be_H2O_W5_01", stoich="bsse")
+
+    assert "B3LYP-D4/DEF2-TZVP" in df.columns
+    # Sum in kcal/mol (hartree2kcalmol ≈ 627.5)
+    import qcelemental as qcel
+    expected = (-1.0 - 0.01) * qcel.constants.hartree2kcalmol
+    assert df.loc["entry1", "B3LYP-D4/DEF2-TZVP"] == pytest.approx(expected)
+
+
+@patch("beep.adapters.qcfractal_adapter._stoich_dataset_name",
+       return_value="be_H2O_W5_01_bsse")
+def test_fetch_reaction_values_skips_integrated_spec(mock_ds_name, caplog):
+    """Integrated specs (dispersion suffix before underscore) are skipped with a warning."""
+    from beep.adapters.qcfractal_adapter import fetch_reaction_values
+
+    records = {
+        "pbe_def2-tzvp":           {"entry1": -1.0},
+        "pbe-d3bj":                {"entry1": -0.02},
+        "pbe-d3bj_def2-tzvp":      {"entry1": -99.0},   # integrated — should be skipped
+    }
+    mock_client = MagicMock()
+    mock_client.get_dataset.return_value = _fake_reaction_dataset(records)
+
+    # The "beep" logger may have propagate disabled from prior tests — force
+    # propagation so caplog can see the warning.
+    import logging
+    beep_logger = logging.getLogger("beep")
+    prev_propagate = beep_logger.propagate
+    beep_logger.propagate = True
+    try:
+        with caplog.at_level(logging.WARNING, logger="beep"):
+            df = fetch_reaction_values(mock_client, "be_H2O_W5_01", stoich="bsse")
+    finally:
+        beep_logger.propagate = prev_propagate
+
+    assert any("integrated dispersion spec 'pbe-d3bj_def2-tzvp'" in r.message
+               for r in caplog.records)
+
+    # Composite column comes from the separated pair, not the skipped integrated value
+    import qcelemental as qcel
+    expected = (-1.0 - 0.02) * qcel.constants.hartree2kcalmol
+    assert df.loc["entry1", "PBE-D3BJ/DEF2-TZVP"] == pytest.approx(expected)

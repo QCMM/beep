@@ -14,7 +14,7 @@ from ..core.logging_utils import (
 )
 from ..core.be_tools import apply_lin_models, calculate_mean_std
 from ..adapters import qcfractal_adapter as qcf
-from ..adapters.qcfractal_adapter import FractalClient
+from ..adapters.qcfractal_adapter import FractalClient, DISPERSION_SUFFIXES
 
 warnings.filterwarnings("ignore")
 
@@ -86,19 +86,21 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
     df_be.set_index("OriginalIndex", inplace=True)
 
     # Identify columns to drop:
-    # 1. Bare DFT columns (e.g. MPWB1K/DEF2-TZVPD) when a D3BJ composite exists
-    # 2. Bare D3BJ-only columns (e.g. MPWB1K-D3BJ) that lack a basis — the
-    #    composite column (MPWB1K-D3BJ/DEF2-TZVPD) already includes them.
+    # 1. Bare DFT columns (e.g. MPWB1K/DEF2-TZVPD) when a dispersion composite
+    #    (MPWB1K-D3BJ/DEF2-TZVPD) already exists.
+    # 2. Bare dispersion-only columns (e.g. MPWB1K-D3BJ) with no basis — the
+    #    composite column already includes their contribution.
+    suffixes_upper = [s.upper() for s in DISPERSION_SUFFIXES]
     cols_to_drop = []
     for col in df_be.columns:
         if "/" not in col:
-            # Bare D3BJ-only column (no basis) — drop it
+            # Bare dispersion-only column (no basis) — drop it
             cols_to_drop.append(col)
             continue
         me, ba = col.split("/")
-        for suffix in ["-D3BJ", "-D3MBJ"]:
-            d3bj_col = f"{me}{suffix}/{ba}"
-            if suffix not in me and d3bj_col in df_be.columns:
+        for suffix in suffixes_upper:
+            disp_col = f"{me}{suffix}/{ba}"
+            if suffix not in me and disp_col in df_be.columns:
                 cols_to_drop.append(col)
                 break
 
