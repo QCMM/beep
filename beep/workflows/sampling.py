@@ -322,10 +322,10 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
     qc_keyword = config.keyword_id
 
     if basis:
-        opt_lot = method + "_" + basis
+        opt_lot = (method + "_" + basis).lower()
     else:
-        opt_lot = method
-    ropt_lot = rmethod + "_" + rbasis
+        opt_lot = method.lower()
+    ropt_lot = (rmethod + "_" + rbasis).lower()
 
     # --- Configuration summary ---
     logger.info(config_summary_msg(config))

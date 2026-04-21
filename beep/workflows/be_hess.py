@@ -195,7 +195,7 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
     logger.info(welcome_msg)
 
     padded_log(logger, f"Checking for the state of the OptimizationDatasets")
-    opt_lot = config.opt_level_of_theory
+    opt_lot = config.opt_level_of_theory.lower()
     atoms_col = getattr(config, 'atoms_collection', 'atoms')
     surf_opt_ds, smol_mol = check_collections(
         client, config.surface_model_collection,

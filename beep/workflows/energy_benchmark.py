@@ -111,7 +111,7 @@ def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, cc_keywords=None,
 
         # SCF uses no special keywords; correlated methods use df keywords
         kw = {} if "scf" in lot else cc_keywords
-        spec_name = f"{method}_{basis}" if not kw else f"{method}_{basis}_df"
+        spec_name = (f"{method}_{basis}" if not kw else f"{method}_{basis}_df").lower()
 
         qc_spec = QCSpecification(
             program="psi4",
@@ -148,7 +148,7 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
 
         for lot in cbs_list:
             method, basis = lot.split("_")
-            spec_name = f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df"
+            spec_name = (f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df").lower()
 
             for entry_name, sn, record in dataset.iterate_records(
                 specification_names=[spec_name],
@@ -187,7 +187,7 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
 
 
 def get_energy_record(ds, struct, method, basis):
-    spec_name = f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df"
+    spec_name = (f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df").lower()
     record = None
     for name_variant in [struct, struct.upper()]:
         try:
@@ -415,12 +415,12 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
 
     logger.info(welcome_msg)
-    geom_ref_opt_lot = config.reference_geometry_level_of_theory
+    geom_ref_opt_lot = config.reference_geometry_level_of_theory.lower()
 
     bchmk_structs = config.benchmark_structures
     surf_dset_name = config.surface_model_collection
     smol_dset_name = config.small_molecule_collection
-    dft_opt_lot = config.opt_level_of_theory
+    dft_opt_lot = [lot.lower() for lot in config.opt_level_of_theory]
 
     padded_log(logger, "Starting BEEP Energy benchmark procedure", padding_char=wstar)
     logger.info(f"Molecule: {smol_name}")

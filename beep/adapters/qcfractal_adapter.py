@@ -391,7 +391,7 @@ def add_opt_specification(ds_opt, spec_dict: dict,
     is ignored — v0.63 ``add_specification`` is idempotent (silently
     reports existing specs without error).
     """
-    name = spec_dict.get("name", "default")
+    name = spec_dict.get("name", "default").lower()
     description = spec_dict.get("description", "")
     qc_spec_dict = spec_dict.get("qc_spec", {})
     opt_spec_dict = spec_dict.get("optimization_spec", {})
@@ -448,7 +448,7 @@ def submit_energies(client: PortalClient, rdset_base_name: str,
     """Submit energy computations to a stoichiometry-specific ReactionDataset."""
     ds_name = _stoich_dataset_name(rdset_base_name, stoich)
     ds = client.get_dataset("reaction", ds_name)
-    spec_name = f"{method}_{basis}"
+    spec_name = f"{method}_{basis}".lower()
 
     kw_dict = keywords if isinstance(keywords, dict) else {}
     qc_spec = QCSpecification(

@@ -35,23 +35,10 @@ welcome_msg = beep_banner(
 )
 
 
-def _is_unrestricted_keyword(qc_keyword):
-    """Check if keyword dict indicates unrestricted reference (uks/uhf)."""
-    if qc_keyword is None:
-        return False
-    if isinstance(qc_keyword, dict):
-        vals = [str(v).lower() for v in qc_keyword.values()]
-        return "uks" in vals or "uhf" in vals
-    return False
-
-
 def create_and_add_specification(client, odset, method, basis, program,
                                   qc_keyword, geom_keywords=None):
     logger = logging.getLogger("beep")
-    spec_name = f"{method}_{basis}"
-    if _is_unrestricted_keyword(qc_keyword) and program == "psi4":
-        logger.debug(f"Using unrestricted keywords for specification on {odset.name}")
-        spec_name = "U" + spec_name
+    spec_name = f"{method}_{basis}".lower()
 
     spec = {
         "name": spec_name,
@@ -85,12 +72,14 @@ def optimize_dft_molecule(client, odset, struct_name, method, basis, program,
     return qcf.submit_optimizations(odset, spec_name, tag=opt_tag, subset={struct_name})
 
 
-def wait_for_completion(client, odset_dict, opt_lot, program, qc_keyword=None,
+def wait_for_completion(client, odset_dict, opt_lot, program,
                          wait_interval=600, check_errors=False,
                          ref_spec=None):
     logger = logging.getLogger("beep")
     if isinstance(opt_lot, str):
         opt_lot = [opt_lot]
+
+    ref_spec_key = ref_spec.lower() if ref_spec else None
 
     logger.info("\nChecking if the computations have finished\n")
     while True:
@@ -102,15 +91,14 @@ def wait_for_completion(client, odset_dict, opt_lot, program, qc_keyword=None,
         ref_error = 0
 
         for lot in opt_lot:
-            if _is_unrestricted_keyword(qc_keyword) and program == "psi4":
-                lot = "U" + lot
+            lot_key = lot.lower()
             for struct_name, odset in odset_dict.items():
-                record = odset.get_record(struct_name, lot)
+                record = odset.get_record(struct_name, lot_key)
                 if record is None:
                     continue
                 if is_error(record.status) and check_errors:
                     raise RuntimeError(
-                        f"Error encountered in computation for {struct_name} with spec '{lot}'"
+                        f"Error encountered in computation for {struct_name} with spec '{lot_key}'"
                     )
                 if is_complete(record.status):
                     dft_complete += 1
@@ -119,9 +107,9 @@ def wait_for_completion(client, odset_dict, opt_lot, program, qc_keyword=None,
                 elif is_error(record.status):
                     dft_error += 1
 
-        if ref_spec:
+        if ref_spec_key:
             for struct_name, odset in odset_dict.items():
-                record = odset.get_record(struct_name, ref_spec)
+                record = odset.get_record(struct_name, ref_spec_key)
                 if record is None:
                     continue
                 if is_complete(record.status):
@@ -171,10 +159,11 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
 
     errored_specs = []
     for i, opt_lot in enumerate(dft_lot):
+        opt_lot_key = opt_lot.lower()
         rmsd_tot_dict = {}
         err = None
         for struct_name, odset in odset_dict.items():
-            record = odset.get_record(struct_name, opt_lot)
+            record = odset.get_record(struct_name, opt_lot_key)
             err = (is_error(record.status) or record.status.value == "cancelled") if record is not None else True
             if err:
                 logger.warning(
@@ -502,7 +491,7 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     hl_tag = config.tag_reference_geometry
     dft_tag = config.tag_dft_geometry
     gr_method, gr_basis, gr_program = config.reference_geometry_level_of_theory
-    geom_ref_opt_lot = gr_method + "_" + gr_basis
+    geom_ref_opt_lot = (gr_method + "_" + gr_basis).lower()
 
     bchmk_structs = config.benchmark_structures
     surf_dset_name = config.surface_model_collection
@@ -613,7 +602,7 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     cp_jobs = _submit_cp_jobs(config, client, bchmk_dset_names, smol_name, res_folder)
 
     wait_for_completion(
-        client, odset_dict, all_dft_functionals, dft_program, dft_keyword,
+        client, odset_dict, all_dft_functionals, dft_program,
         wait_interval=200, check_errors=False,
         ref_spec=geom_ref_opt_lot,
     )
@@ -634,12 +623,6 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
         "Start of RMSD comparison between DFT and {} geometries",
         geom_ref_opt_lot,
     )
-
-    if _is_unrestricted_keyword(dft_keyword) and dft_program == "psi4":
-        dft_geom_functionals = {
-            key: ["U" + item for item in value]
-            for key, value in dft_geom_functionals.items()
-        }
 
     best_opt_lot, rmsd_df = compare_all_rmsd(dft_geom_functionals, odset_dict, ref_geom_fmols)
 
