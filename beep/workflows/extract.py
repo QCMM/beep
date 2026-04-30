@@ -186,13 +186,18 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
             continue
 
         if len(qcf.fetch_molecules(client, frag2_mol)[0].symbols) == 1:
-            if not (m1):
-                logger.info(f"Molecules {frag1_mol} have no Hessian. Compute them first.")
-                raise IndexError
+            if not m1:
+                raise RuntimeError(
+                    f"Missing hessian at {lot_opt} for fragment molecule "
+                    f"{frag1_mol} (entry {entry})."
+                )
         else:
-            if not (m1 and m2):
-                logger.info(f"Molecules {frag1_mol} and {frag2_mol} have no Hessian. Compute them first.")
-                raise IndexError
+            missing = [m for m, ok in [(frag1_mol, m1), (frag2_mol, m2)] if not ok]
+            if missing:
+                raise RuntimeError(
+                    f"Missing hessian at {lot_opt} for fragment molecule(s) "
+                    f"{missing} (entry {entry})."
+                )
 
         if not d_bol:
             logger.info(f"Appending structure {entry} to the list for deletion.")

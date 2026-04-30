@@ -757,17 +757,6 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
     return df
 
 
-def query_results(client: PortalClient, driver: str, molecule,
-                  method: str, basis: str):
-    """Query singlepoint result records from the server."""
-    return list(client.query_singlepoints(
-        driver=driver,
-        molecule_id=molecule if isinstance(molecule, int) else None,
-        method=method,
-        basis=basis,
-    ))
-
-
 # ---------------------------------------------------------------------------
 # RMSD filter (QCF-coupled version that fetches from server)
 # ---------------------------------------------------------------------------
@@ -1132,27 +1121,29 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
     lot_parts = lot_opt.split("_", 1)
     method = lot_parts[0]
     basis = lot_parts[1] if len(lot_parts) == 2 else None
-    if method[0] == "U":
-        method = method[1:]
 
-    try:
-        results = list(client.query_singlepoints(
-            driver=SinglepointDriver.hessian,
-            molecule_id=mol,
-            method=method,
-            basis=basis,
-        ))
-        result = results[0]
+    results = list(client.query_singlepoints(
+        driver=SinglepointDriver.hessian,
+        molecule_id=mol,
+        method=method,
+        basis=basis,
+    ))
+    if not results:
         logger.info(
-            f"Molecule {mol} with molecular formula {mol_form} "
-            "has a Hessian calculation."
-        )
-    except (IndexError, StopIteration):
-        logger.info(
-            f"Molecule {mol} with molecular formula {mol_form} "
-            "has not finished computing."
+            f"No hessian record at {method}/{basis} for molecule {mol} "
+            f"({mol_form})."
         )
         return None, True
+    if len(results) > 1:
+        logger.warning(
+            f"Found {len(results)} hessian records for molecule {mol} "
+            f"({mol_form}) at {method}/{basis}; using the first."
+        )
+    result = results[0]
+    logger.info(
+        f"Molecule {mol} with molecular formula {mol_form} "
+        "has a Hessian calculation."
+    )
 
     import numpy as np
     hess_raw = result.return_result
