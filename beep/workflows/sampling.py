@@ -179,6 +179,7 @@ def run_sampling(
 
         qcf.wait_for_completion(client, pid_list, FREQUENCY, logger)
 
+        added_names = []
         if not shell_new_entries:
             logger.info(
                 "All entries for this shell already exist."
@@ -200,10 +201,10 @@ def run_sampling(
             )
             for i, m in enumerate(molecules):
                 n_smpl_mol += 1
+                name = shell_new_entries[i]
                 try:
-                    qcf.add_opt_entry(
-                        sampling_opt_dset, shell_new_entries[i], m,
-                    )
+                    qcf.add_opt_entry(sampling_opt_dset, name, m)
+                    added_names.append(name)
                 except KeyError as e:
                     logger.info(e)
 
@@ -226,7 +227,8 @@ def run_sampling(
                 "sampling optimization procedures."
             )
 
-        pid_list = qcf.get_job_ids(sampling_opt_dset, entry_name_list, opt_lot)
+        present_entries = shell_old_entries + added_names
+        pid_list = qcf.get_job_ids(sampling_opt_dset, present_entries, opt_lot)
         if pid_list:
             logger.info(
                 "Procedure IDs of the optimization are: {}".format(
@@ -237,14 +239,13 @@ def run_sampling(
         qcf.wait_for_completion(client, pid_list, FREQUENCY, logger)
 
         opt_molecules_new = qcf.fetch_opt_molecules(
-            sampling_opt_dset, entry_name_list, opt_lot, status="COMPLETE"
+            sampling_opt_dset, present_entries, opt_lot, status="COMPLETE"
         )
         opt_mol_num = len(opt_molecules_new)
-        n_expected = len(shell_new_entries) if shell_new_entries else len(entry_name_list)
         logger.debug(
             f"{opt_mol_num} COMPLETED molecules in "
             f"{sampling_opt_dset.name} for this round, "
-            f"{n_expected - opt_mol_num} molecules ended in ERROR."
+            f"{len(present_entries) - opt_mol_num} molecules ended in ERROR."
         )
 
         # Get existing molecules from refinement dataset

@@ -21,5 +21,6 @@
     "tag_dft_geometry": null,
     "tag_be": null,
     "tag_cbs": null,
-    "use_initial_reference_geometry": false
+    "use_initial_reference_geometry": false,
+    "custom_dft_functionals": []
 }

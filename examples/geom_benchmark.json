@@ -16,5 +16,6 @@
     "dft_optimization_program": null,
     "dft_optimization_keyword": null,
     "tag_dft_geometry": null,
-    "use_initial_reference_geometry": false
+    "use_initial_reference_geometry": false,
+    "bsse_test": null
 }

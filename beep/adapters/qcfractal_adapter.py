@@ -532,9 +532,18 @@ def query_keywords(client: PortalClient):
 # ---------------------------------------------------------------------------
 
 def get_job_ids(ds_opt, entry_list: List[str], opt_lot: str) -> List[int]:
-    """Get record IDs for optimization entries."""
+    """Get record IDs for optimization entries.
+
+    Names not present in the dataset are skipped silently; the server
+    raises HTTP 400 on missing entries and we don't want callers to
+    crash when they ask for names that were never inserted (e.g. when
+    pose generation returns fewer structures than requested).
+    """
+    known = set(ds_opt.entry_names)
     pid_list = []
     for n in entry_list:
+        if n not in known:
+            continue
         record = ds_opt.get_record(n, opt_lot)
         if record is not None:
             pid_list.append(record.id)

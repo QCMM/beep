@@ -13,6 +13,7 @@ from beep.adapters.qcfractal_adapter import (
     fetch_opt_molecules,
     check_for_completion,
     create_keyword_set,
+    get_job_ids,
     query_keywords,
     is_complete,
     is_incomplete,
@@ -98,6 +99,27 @@ def test_fetch_opt_molecules_filters_by_status():
 # ---------------------------------------------------------------------------
 # Job monitoring
 # ---------------------------------------------------------------------------
+
+def test_get_job_ids_skips_missing_entries():
+    """get_job_ids must not raise if entry_list contains names that aren't
+    in the dataset — pose generation can short-return, leaving requested
+    names un-inserted (see reports/bugs/beep_sampling_get_job_ids_missing_entries.md).
+    """
+    mock_ds = MagicMock()
+    mock_ds.entry_names = ["e1", "e2"]  # "e3" is asked for but absent
+
+    rec1 = MagicMock(); rec1.id = 101
+    rec2 = MagicMock(); rec2.id = 102
+    mock_ds.get_record.side_effect = lambda n, lot: {"e1": rec1, "e2": rec2}[n]
+
+    pids = get_job_ids(mock_ds, ["e1", "e3", "e2"], "opt_lot")
+
+    assert pids == [101, 102]
+    # get_record never called for the missing name — saved a server round-trip
+    assert mock_ds.get_record.call_count == 2
+    called_names = [c.args[0] for c in mock_ds.get_record.call_args_list]
+    assert "e3" not in called_names
+
 
 def test_check_for_completion_all_done():
     mock_client = MagicMock()
