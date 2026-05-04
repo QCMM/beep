@@ -19,6 +19,7 @@ dependencies = [
     "seaborn",
     "qcportal>=0.63",
     "qcelemental",
+    "networkx",
 ]
 
 [project.optional-dependencies]

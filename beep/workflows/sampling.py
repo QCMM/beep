@@ -391,6 +391,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
     # --- Sampling loop ---
     count = 0
     cluster_results = []
+    refinement_dsets = []
 
     for c, w in enumerate(cluster_names):
         args_dict["cluster"] = qcf.fetch_final_molecule(ds_wc, w, opt_lot)
@@ -425,12 +426,28 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         n_sites = len(ds_ref.entry_names)
         count += n_sites
         cluster_results.append((w, n_sites))
+        refinement_dsets.append((w, ds_ref))
 
         logger.info(f"\n  {bcheck} Cluster {w}: {n_sites} binding sites  |  Running total: {count}")
 
         if count > config.total_binding_sites:
             logger.info(f"\n  Target of {config.total_binding_sites} binding sites reached. Stopping early.")
             break
+
+    # --- Wait for refinement optimizations to finish ---
+    REFINEMENT_POLL_FREQUENCY = 120
+    logger.info(f"\n{'=' * 80}")
+    logger.info(f"  Waiting for refinement optimizations to complete ({ropt_lot})")
+    logger.info(f"{'=' * 80}\n")
+    for w, ds_ref in refinement_dsets:
+        entries = list(ds_ref.entry_names)
+        pids = qcf.get_job_ids(ds_ref, entries, ropt_lot)
+        if not pids:
+            logger.info(f"  {w}: no refinement records to wait on.")
+            continue
+        logger.info(f"  {w}: waiting on {len(pids)} refinement opt(s).")
+        qcf.wait_for_completion(client, pids, REFINEMENT_POLL_FREQUENCY, logger)
+        logger.info(f"  {w}: refinement complete. {bcheck}")
 
     # --- Final summary ---
     logger.info(f"\n\n{'=' * 80}")
