@@ -436,6 +436,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
     # --- Wait for refinement optimizations to finish ---
     REFINEMENT_POLL_FREQUENCY = 120
+    REFINEMENT_MAX_WAIT = 7 * 24 * 3600  # one week
     logger.info(f"\n{'=' * 80}")
     logger.info(f"  Waiting for refinement optimizations to complete ({ropt_lot})")
     logger.info(f"{'=' * 80}\n")
@@ -446,7 +447,10 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
             logger.info(f"  {w}: no refinement records to wait on.")
             continue
         logger.info(f"  {w}: waiting on {len(pids)} refinement opt(s).")
-        qcf.wait_for_completion(client, pids, REFINEMENT_POLL_FREQUENCY, logger)
+        qcf.wait_for_completion(
+            client, pids, REFINEMENT_POLL_FREQUENCY, logger,
+            max_wait=REFINEMENT_MAX_WAIT,
+        )
         logger.info(f"  {w}: refinement complete. {bcheck}")
 
     # --- Final summary ---
