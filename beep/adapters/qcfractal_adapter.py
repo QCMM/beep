@@ -606,7 +606,8 @@ def wait_for_completion(client: PortalClient, pid_list: List[int],
 def check_jobs_status(client: PortalClient, job_ids: List[int],
                       logger: logging.Logger, wait_interval: int = 600,
                       print_job_ids: bool = False,
-                      max_wait: int = 172800) -> None:
+                      max_wait: int = 172800,
+                      auto_recover_services: bool = True) -> None:
     """
     Continuously monitor and report computation status, processing in chunks.
 
@@ -615,6 +616,15 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
     max_wait : int
         Maximum total wait time in seconds (default 48 hours).
         Raises ``TimeoutError`` if exceeded.
+    auto_recover_services : bool
+        If True (default), service records (e.g. ReactionRecord) found at
+        ERROR status are reset once per ``check_jobs_status`` call. The
+        server re-iterates the service: if its child records are now in
+        non-error states (e.g. they were reset externally to recover from
+        an infrastructure failure), the service transitions to COMPLETE
+        on its own; otherwise it returns to ERROR and stays there. Leaf
+        records (singlepoints, optimizations) are never auto-reset.
+        Set to False to preserve old behavior (ERROR is fully terminal).
     """
     if not job_ids:
         logger.info("No jobs to monitor.")
@@ -622,9 +632,11 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
 
     chunk_size = 1000
     elapsed = 0
+    reset_attempted: set = set()  # service IDs we've already reset this call
 
     while True:
         status_counts = {"COMPLETE": 0, "INCOMPLETE": 0, "ERROR": 0}
+        services_to_recover: List[int] = []
 
         for i in range(0, len(job_ids), chunk_size):
             chunk = job_ids[i:i + chunk_size]
@@ -643,6 +655,12 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
                         logger.info(
                             f"Job ID {job.id}: Unknown status - {job.status}"
                         )
+
+                    if (auto_recover_services
+                            and job.status == RecordStatusEnum.error
+                            and getattr(job, "is_service", False)
+                            and job.id not in reset_attempted):
+                        services_to_recover.append(job.id)
                 else:
                     logger.info("Job not found in the database")
 
@@ -652,10 +670,24 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
             f"{status_counts['ERROR']} ERROR\n"
         )
 
+        if services_to_recover:
+            logger.info(
+                f"Auto-recovering {len(services_to_recover)} errored "
+                f"service record(s) — server will re-iterate and transition "
+                f"to COMPLETE if children are now OK, else back to ERROR."
+            )
+            try:
+                client.reset_records(services_to_recover)
+                reset_attempted.update(services_to_recover)
+            except Exception as e:
+                logger.warning(
+                    f"Auto-recovery reset failed (will retry next cycle): {e}"
+                )
+
         if status_counts["ERROR"] > 0:
             logger.info("Some jobs have ERROR status. Proceed with caution.")
 
-        if status_counts["INCOMPLETE"] == 0:
+        if status_counts["INCOMPLETE"] == 0 and not services_to_recover:
             logger.info("All jobs are COMPLETE. Continuing with the execution.")
             return
 

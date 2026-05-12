@@ -12,6 +12,7 @@ from beep.adapters.qcfractal_adapter import (
     check_collection_exists,
     fetch_opt_molecules,
     check_for_completion,
+    check_jobs_status,
     create_keyword_set,
     get_job_ids,
     query_keywords,
@@ -145,6 +146,90 @@ def test_check_for_completion_incomplete():
     done, counts = check_for_completion(mock_client, [1, 2])
     assert done is False
     assert counts["INCOMPLETE"] == 1
+
+
+def _service_record(rec_id, status, is_service=True):
+    r = MagicMock()
+    r.id = rec_id
+    r.status = status
+    r.is_service = is_service
+    return r
+
+
+@patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
+def test_check_jobs_status_auto_recovers_errored_services():
+    """When a parent ReactionRecord is at ERROR, check_jobs_status should
+    reset it once so the server re-iterates the service. If the children
+    have since been fixed, the service transitions to COMPLETE on its own.
+    """
+    mock_client = MagicMock()
+    logger = MagicMock()
+
+    err_svc = _service_record(101, RecordStatusEnum.error, is_service=True)
+    done_svc = _service_record(101, RecordStatusEnum.complete, is_service=True)
+
+    # First poll: service is ERROR → should trigger reset.
+    # Second poll: server has re-iterated and the service is now COMPLETE → exit.
+    mock_client.get_records.side_effect = [[err_svc], [done_svc]]
+
+    check_jobs_status(mock_client, [101], logger, wait_interval=1)
+
+    mock_client.reset_records.assert_called_once_with([101])
+
+
+@patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
+def test_check_jobs_status_does_not_reset_leaf_records():
+    """Singlepoint / leaf records (is_service=False) must NEVER be
+    auto-reset — that would trigger needless recomputation."""
+    mock_client = MagicMock()
+    logger = MagicMock()
+
+    err_leaf = _service_record(202, RecordStatusEnum.error, is_service=False)
+    # Loop exits after one poll because INCOMPLETE==0 and no recoverables.
+    mock_client.get_records.return_value = [err_leaf]
+
+    check_jobs_status(mock_client, [202], logger, wait_interval=1)
+
+    mock_client.reset_records.assert_not_called()
+
+
+@patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
+def test_check_jobs_status_resets_each_service_only_once():
+    """A service stuck at ERROR (real child error) must not be reset on
+    every polling cycle. After the first reset, subsequent ERRORs are
+    accepted as terminal."""
+    mock_client = MagicMock()
+    logger = MagicMock()
+
+    err_svc_a = _service_record(303, RecordStatusEnum.error, is_service=True)
+    err_svc_b = _service_record(303, RecordStatusEnum.error, is_service=True)
+    # Three polls in a row, same service in ERROR; only the first triggers reset.
+    mock_client.get_records.side_effect = [[err_svc_a], [err_svc_b], [err_svc_b]]
+
+    check_jobs_status(mock_client, [303], logger, wait_interval=1, max_wait=2)
+
+    # After the second poll, services_to_recover is empty and
+    # INCOMPLETE==0, so the loop exits there. Only one reset call.
+    assert mock_client.reset_records.call_count == 1
+    mock_client.reset_records.assert_called_with([303])
+
+
+@patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
+def test_check_jobs_status_auto_recover_disabled():
+    """Setting auto_recover_services=False preserves the old behavior:
+    ERROR is fully terminal, no reset attempts."""
+    mock_client = MagicMock()
+    logger = MagicMock()
+
+    err_svc = _service_record(404, RecordStatusEnum.error, is_service=True)
+    mock_client.get_records.return_value = [err_svc]
+
+    check_jobs_status(
+        mock_client, [404], logger, wait_interval=1,
+        auto_recover_services=False,
+    )
+
+    mock_client.reset_records.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
