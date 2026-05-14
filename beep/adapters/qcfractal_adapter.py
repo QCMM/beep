@@ -740,10 +740,13 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
     (bare DFT under ``psi4`` + bare dispersion under ``dftd3``/``dftd4``)
     matching the v0.63 migration convention. The bare pieces are summed
     into a composite column (e.g. ``mpwb1k_def2-tzvpd`` + ``mpwb1k-d3bj``
-    → ``MPWB1K-D3BJ/DEF2-TZVPD``) for every suffix in
+    → ``mpwb1k-d3bj/def2-tzvpd``) for every suffix in
     ``DISPERSION_SUFFIXES``. Integrated specs (method carrying a
     dispersion suffix together with a basis, e.g. ``mpwb1k-d3bj_def2-tzvpd``)
     are skipped with a warning — BEEP no longer supports that layout.
+
+    Column labels are lowercase, matching the lowercase QCSpec convention
+    used by every workflow (see ``models/base.py::lowercase_str``).
     """
     import pandas as pd
     import qcelemental as qcel
@@ -762,7 +765,7 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
             )
             continue
 
-        col_label = sname.replace("_", "/").upper()
+        col_label = sname.replace("_", "/")
         energies = {}
         for entry_name, sn, record in ds.iterate_records(
             specification_names=[sname],
@@ -778,14 +781,13 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
 
     # Sum bare-DFT + bare-dispersion into composite columns. A bare-dispersion
     # column has no "/" (no basis in its spec name) and ends with one of
-    # DISPERSION_SUFFIXES; pair it with a matching "BARE/BASIS" column.
-    suffixes_upper = tuple(s.upper() for s in DISPERSION_SUFFIXES)
+    # DISPERSION_SUFFIXES; pair it with a matching "bare/basis" column.
     disp_cols = [
         c for c in df.columns
-        if "/" not in c and any(c.endswith(suf) for suf in suffixes_upper)
+        if "/" not in c and any(c.endswith(suf) for suf in DISPERSION_SUFFIXES)
     ]
     for disp_col in disp_cols:
-        for suffix in suffixes_upper:
+        for suffix in DISPERSION_SUFFIXES:
             if disp_col.endswith(suffix):
                 bare = disp_col[: -len(suffix)]
                 break

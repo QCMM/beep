@@ -86,19 +86,17 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
     df_be.set_index("OriginalIndex", inplace=True)
 
     # Identify columns to drop:
-    # 1. Bare DFT columns (e.g. MPWB1K/DEF2-TZVPD) when a dispersion composite
-    #    (MPWB1K-D3BJ/DEF2-TZVPD) already exists.
-    # 2. Bare dispersion-only columns (e.g. MPWB1K-D3BJ) with no basis — the
+    # 1. Bare DFT columns (e.g. mpwb1k/def2-tzvpd) when a dispersion composite
+    #    (mpwb1k-d3bj/def2-tzvpd) already exists.
+    # 2. Bare dispersion-only columns (e.g. mpwb1k-d3bj) with no basis — the
     #    composite column already includes their contribution.
-    suffixes_upper = [s.upper() for s in DISPERSION_SUFFIXES]
     cols_to_drop = []
     for col in df_be.columns:
         if "/" not in col:
-            # Bare dispersion-only column (no basis) — drop it
             cols_to_drop.append(col)
             continue
         me, ba = col.split("/")
-        for suffix in suffixes_upper:
+        for suffix in DISPERSION_SUFFIXES:
             disp_col = f"{me}{suffix}/{ba}"
             if suffix not in me and disp_col in df_be.columns:
                 cols_to_drop.append(col)

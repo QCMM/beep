@@ -500,11 +500,11 @@ def test_fetch_reaction_values_d4_separated_pair(mock_ds_name):
 
     df = fetch_reaction_values(mock_client, "be_H2O_W5_01", stoich="bsse")
 
-    assert "B3LYP-D4/DEF2-TZVP" in df.columns
+    assert "b3lyp-d4/def2-tzvp" in df.columns
     # Sum in kcal/mol (hartree2kcalmol ≈ 627.5)
     import qcelemental as qcel
     expected = (-1.0 - 0.01) * qcel.constants.hartree2kcalmol
-    assert df.loc["entry1", "B3LYP-D4/DEF2-TZVP"] == pytest.approx(expected)
+    assert df.loc["entry1", "b3lyp-d4/def2-tzvp"] == pytest.approx(expected)
 
 
 @patch("beep.adapters.qcfractal_adapter._stoich_dataset_name",
@@ -539,4 +539,4 @@ def test_fetch_reaction_values_skips_integrated_spec(mock_ds_name, caplog):
     # Composite column comes from the separated pair, not the skipped integrated value
     import qcelemental as qcel
     expected = (-1.0 - 0.02) * qcel.constants.hartree2kcalmol
-    assert df.loc["entry1", "PBE-D3BJ/DEF2-TZVP"] == pytest.approx(expected)
+    assert df.loc["entry1", "pbe-d3bj/def2-tzvp"] == pytest.approx(expected)
