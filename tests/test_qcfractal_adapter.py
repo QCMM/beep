@@ -15,6 +15,7 @@ from beep.adapters.qcfractal_adapter import (
     check_jobs_status,
     create_keyword_set,
     get_job_ids,
+    get_zpve_mol,
     query_keywords,
     is_complete,
     is_incomplete,
@@ -212,6 +213,40 @@ def test_check_jobs_status_resets_each_service_only_once():
     # INCOMPLETE==0, so the loop exits there. Only one reset call.
     assert mock_client.reset_records.call_count == 1
     mock_client.reset_records.assert_called_with([303])
+
+
+def test_get_zpve_mol_filters_incomplete_records():
+    """get_zpve_mol must skip hessian records whose `properties` is None —
+    a 'complete'-tagged record can still be mid-write or otherwise
+    inconsistent, and `result.return_result` would crash on it.
+
+    Regression for the case where multiple hessian records exist for the
+    same molecule + spec and the first one is unusable.
+    """
+    mock_client = MagicMock()
+
+    # Mock molecule with multiple symbols so we skip the atom early-return.
+    mock_mol = MagicMock()
+    mock_mol.symbols = ["O", "H", "H", "H", "H", "H", "H", "H", "H", "H", "H"]
+    mock_mol.dict.return_value = {"identifiers": {"molecular_formula": "H10O"}}
+    mock_client.get_molecules.return_value = [mock_mol]
+
+    # Bad record: complete-tagged but properties is None (server inconsistency).
+    bad_record = MagicMock()
+    bad_record.properties = None
+
+    mock_client.query_singlepoints.return_value = iter([bad_record])
+
+    # With our filter, this should hit the "no usable record" branch and
+    # return (None, True) instead of crashing on result.return_result.
+    zpve, ok = get_zpve_mol(mock_client, 12345, "mpwb1k-d3bj_def2-tzvpd")
+    assert zpve is None
+    assert ok is True
+
+    # Verify the query was made with status=complete, narrowing to
+    # server-side completes before we even client-side filter.
+    kwargs = mock_client.query_singlepoints.call_args.kwargs
+    assert kwargs["status"] == RecordStatusEnum.complete
 
 
 @patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)

@@ -1168,17 +1168,22 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
         molecule_id=mol,
         method=method,
         basis=basis,
+        status=RecordStatusEnum.complete,
     ))
+    # Defensive: even a "complete" record can have None properties if the
+    # server is in an inconsistent state (e.g. mid-write). Skip those —
+    # `result.return_result` dereferences properties and would crash.
+    results = [r for r in results if r.properties is not None]
     if not results:
         logger.info(
-            f"No hessian record at {method}/{basis} for molecule {mol} "
-            f"({mol_form})."
+            f"No complete hessian record at {method}/{basis} for molecule "
+            f"{mol} ({mol_form})."
         )
         return None, True
     if len(results) > 1:
         logger.warning(
-            f"Found {len(results)} hessian records for molecule {mol} "
-            f"({mol_form}) at {method}/{basis}; using the first."
+            f"Found {len(results)} complete hessian records for molecule "
+            f"{mol} ({mol_form}) at {method}/{basis}; using the first."
         )
     result = results[0]
     logger.info(
