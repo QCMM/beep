@@ -1,18 +1,18 @@
 """Geometry benchmark workflow config — maps to launch_geom_benchmark.py argparse flags."""
 from typing import Optional, Literal, List, Dict
 from pydantic import BaseModel, Field, field_validator
-from .base import ServerConfig, uppercase_list
+from .base import ServerConfig, lowercase_list
 
 
 class BSSETestConfig(BaseModel):
     """Configuration for BSSE/dispersion test via direct Slurm CP jobs."""
-    functional: List[str] = Field(["PBE0"], description="Test functional(s) (default: ['PBE0'])")
+    functional: List[str] = Field(["pbe0"], description="Test functional(s) (default: ['pbe0'])")
     basis_sets: List[str] = Field(
-        ["DEF2-SVP", "DEF2-SVPD", "DEF2-TZVPD"],
+        ["def2-svp", "def2-svpd", "def2-tzvpd"],
         description="Basis sets to test",
     )
     dispersion: List[str] = Field(
-        ["", "D3BJ", "D4"],
+        ["", "d3bj", "d4"],
         description="Dispersion corrections for uncorrected optimizations (empty string = bare functional)",
     )
     cp_dispersion: Optional[List[str]] = Field(
@@ -24,10 +24,10 @@ class BSSETestConfig(BaseModel):
     memory: str = Field("12GB", description="Memory per CP job")
     walltime: str = Field("24:00:00", description="Slurm walltime for CP jobs")
 
-    _upper_functional = field_validator("functional")(uppercase_list)
-    _upper_basis_sets = field_validator("basis_sets")(uppercase_list)
-    _upper_dispersion = field_validator("dispersion")(uppercase_list)
-    _upper_cp_dispersion = field_validator("cp_dispersion")(uppercase_list)
+    _lower_functional = field_validator("functional")(lowercase_list)
+    _lower_basis_sets = field_validator("basis_sets")(lowercase_list)
+    _lower_dispersion = field_validator("dispersion")(lowercase_list)
+    _lower_cp_dispersion = field_validator("cp_dispersion")(lowercase_list)
 
 
 class GeomBenchmarkConfig(BaseModel):
@@ -39,7 +39,7 @@ class GeomBenchmarkConfig(BaseModel):
     small_molecule_collection: str = Field("Small_molecules", description="Name of the small molecule collection")
     surface_model_collection: str = Field("small water", description="Name of the surface model collection")
     reference_geometry_level_of_theory: List[str] = Field(
-        ["CCSD(T)", "AUG-CC-PVTZ", "psi4"],
+        ["ccsd(t)", "aug-cc-pvtz", "psi4"],
         description="Reference geometry level of theory [method, basis, program]",
     )
     reference_geometry_keywords: Optional[Dict[str, str]] = Field(
@@ -55,12 +55,12 @@ class GeomBenchmarkConfig(BaseModel):
 
     @field_validator("reference_geometry_level_of_theory")
     @classmethod
-    def _upper_ref_geom_lot(cls, v):
-        """Uppercase method (index 0) and basis (index 1); leave program (index 2) as-is."""
+    def _lower_ref_geom_lot(cls, v):
+        """Lowercase method (index 0) and basis (index 1); leave program (index 2) as-is."""
         if not isinstance(v, list):
             return v
         out = list(v)
         for i in (0, 1):
             if i < len(out) and isinstance(out[i], str) and out[i]:
-                out[i] = out[i].upper()
+                out[i] = out[i].lower()
         return out
