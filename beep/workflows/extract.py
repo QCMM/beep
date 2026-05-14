@@ -185,19 +185,18 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
             todelete.append(entry)
             continue
 
-        if len(qcf.fetch_molecules(client, frag2_mol)[0].symbols) == 1:
-            if not m1:
-                raise RuntimeError(
-                    f"Missing hessian at {lot_opt} for fragment molecule "
-                    f"{frag1_mol} (entry {entry})."
-                )
-        else:
-            missing = [m for m, ok in [(frag1_mol, m1), (frag2_mol, m2)] if not ok]
-            if missing:
-                raise RuntimeError(
-                    f"Missing hessian at {lot_opt} for fragment molecule(s) "
-                    f"{missing} (entry {entry})."
-                )
+        # m1/m2 are the ZPVE values from get_zpve_mol; None means no hessian
+        # record was found, 0.0 is a valid value for atomic fragments (no
+        # vibrational modes). Use `is None` to distinguish them.
+        missing = [
+            mol_id for mol_id, zpve in [(frag1_mol, m1), (frag2_mol, m2)]
+            if zpve is None
+        ]
+        if missing:
+            raise RuntimeError(
+                f"Missing hessian at {lot_opt} for fragment molecule(s) "
+                f"{missing} (entry {entry})."
+            )
 
         if not d_bol:
             logger.info(f"Appending structure {entry} to the list for deletion.")
