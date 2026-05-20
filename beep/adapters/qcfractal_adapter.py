@@ -671,6 +671,11 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
         )
 
         if services_to_recover:
+            # Mark IDs as attempted *before* the call so a server-side
+            # failure (e.g. transient HTTP 500) doesn't wedge the loop:
+            # without this, the same IDs are re-selected every cycle and
+            # the workflow never exits. Best-effort: try once, move on.
+            reset_attempted.update(services_to_recover)
             logger.info(
                 f"Auto-recovering {len(services_to_recover)} errored "
                 f"service record(s) — server will re-iterate and transition "
@@ -678,10 +683,9 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
             )
             try:
                 client.reset_records(services_to_recover)
-                reset_attempted.update(services_to_recover)
             except Exception as e:
                 logger.warning(
-                    f"Auto-recovery reset failed (will retry next cycle): {e}"
+                    f"Auto-recovery reset failed (will not retry these IDs): {e}"
                 )
 
         if status_counts["ERROR"] > 0:

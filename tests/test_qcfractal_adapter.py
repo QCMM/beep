@@ -250,6 +250,34 @@ def test_get_zpve_mol_filters_incomplete_records():
 
 
 @patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
+def test_check_jobs_status_loop_exits_when_reset_fails():
+    """Regression for `reports/BUG_check_jobs_status_infinite_loop.md`.
+
+    If `client.reset_records` raises (e.g. transient HTTP 500), the
+    service IDs must still be marked as attempted so the same IDs aren't
+    re-selected forever. Otherwise the workflow gets wedged at
+    `INCOMPLETE == 0, ERROR == N` and runs until ``max_wait``.
+    """
+    mock_client = MagicMock()
+    logger = MagicMock()
+
+    err_svc_a = _service_record(505, RecordStatusEnum.error, is_service=True)
+    err_svc_b = _service_record(505, RecordStatusEnum.error, is_service=True)
+    # Two polls: same service ERROR both times. After the first reset
+    # attempt fails, the service must NOT be re-attempted on the second.
+    mock_client.get_records.side_effect = [[err_svc_a], [err_svc_b]]
+    mock_client.reset_records.side_effect = RuntimeError(
+        "Request failed: HTTP 500 (simulated server overload)"
+    )
+
+    # If the bug were present, this would hit max_wait and raise TimeoutError.
+    check_jobs_status(mock_client, [505], logger, wait_interval=1, max_wait=10)
+
+    # reset_records called exactly once — second cycle skipped the ID
+    assert mock_client.reset_records.call_count == 1
+
+
+@patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
 def test_check_jobs_status_auto_recover_disabled():
     """Setting auto_recover_services=False preserves the old behavior:
     ERROR is fully terminal, no reset attempts."""
