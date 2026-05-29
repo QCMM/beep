@@ -149,11 +149,19 @@ def test_check_for_completion_incomplete():
     assert counts["INCOMPLETE"] == 1
 
 
-def _service_record(rec_id, status, is_service=True):
+def _service_record(rec_id, status, is_service=True, children_errors=None):
+    """Build a mock record for check_jobs_status tests.
+
+    ``children_errors`` controls the conservative auto-recovery path:
+    an empty list (default) means "no errored children" → eligible for
+    reset; a non-empty list means "real child error present" → must NOT
+    be reset.
+    """
     r = MagicMock()
     r.id = rec_id
     r.status = status
     r.is_service = is_service
+    r.children_errors = [] if children_errors is None else children_errors
     return r
 
 
@@ -275,6 +283,83 @@ def test_check_jobs_status_loop_exits_when_reset_fails():
 
     # reset_records called exactly once — second cycle skipped the ID
     assert mock_client.reset_records.call_count == 1
+
+
+@patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
+def test_check_jobs_status_skips_services_with_errored_children():
+    """Conservative auto-recovery: a parent service whose children are
+    themselves in ERROR has a *real* failure (data missing). Resetting it
+    is useless at best and wasteful at worst (server-side cascade
+    re-runs the failing child). Leave the parent alone.
+    """
+    mock_client = MagicMock()
+    logger = MagicMock()
+
+    # Parent at ERROR, with one child in error (chemistry-error scenario).
+    bad_child = MagicMock()
+    err_svc = _service_record(
+        707, RecordStatusEnum.error,
+        is_service=True, children_errors=[bad_child],
+    )
+    mock_client.get_records.return_value = [err_svc]
+
+    check_jobs_status(mock_client, [707], logger, wait_interval=1)
+
+    # No reset attempt: children_errors non-empty → conservative skip
+    mock_client.reset_records.assert_not_called()
+
+
+@patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
+def test_check_jobs_status_picks_up_child_reset_without_workflow_restart():
+    """When the user resets an errored child externally (mid-workflow),
+    the next polling cycle must notice that children_errors is now
+    empty and reset the parent. This matches the qcportal-0.15 UX where
+    resetting a record made the workflow continue automatically without
+    a be_hess restart.
+
+    Models a realistic poll: one stuck-ERROR service the user is fixing
+    (id 808) plus one INCOMPLETE service (id 809) that keeps the loop
+    alive across cycles. Without 809, the loop would exit at cycle 1
+    before the user's reset takes effect.
+    """
+    mock_client = MagicMock()
+    logger = MagicMock()
+
+    bad_child = MagicMock()
+    # 808: stuck ERROR, child still in error → skip (no reset).
+    svc_stuck = _service_record(
+        808, RecordStatusEnum.error,
+        is_service=True, children_errors=[bad_child],
+    )
+    # 808 again, user has reset the child externally → children_errors empty.
+    svc_clean = _service_record(
+        808, RecordStatusEnum.error,
+        is_service=True, children_errors=[],
+    )
+    # 808 has re-iterated → COMPLETE.
+    svc_done = _service_record(
+        808, RecordStatusEnum.complete, is_service=True,
+    )
+    # 809 keeps the loop alive — INCOMPLETE for the first two cycles,
+    # then COMPLETE on the third.
+    other_running = _service_record(
+        809, RecordStatusEnum.running, is_service=True,
+    )
+    other_done = _service_record(
+        809, RecordStatusEnum.complete, is_service=True,
+    )
+
+    mock_client.get_records.side_effect = [
+        [svc_stuck, other_running],   # cycle 1: 808 skipped, 809 running → keep polling
+        [svc_clean, other_running],   # cycle 2: user reset child → reset 808
+        [svc_done, other_done],       # cycle 3: both COMPLETE → exit
+    ]
+
+    check_jobs_status(mock_client, [808, 809], logger, wait_interval=1)
+
+    # Reset happened exactly once — when 808's children became clean.
+    # 809 was never reset (it was running, not errored).
+    mock_client.reset_records.assert_called_once_with([808])
 
 
 @patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)

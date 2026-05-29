@@ -660,7 +660,25 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
                             and job.status == RecordStatusEnum.error
                             and getattr(job, "is_service", False)
                             and job.id not in reset_attempted):
-                        services_to_recover.append(job.id)
+                        # Conservative recovery: only reset the parent if
+                        # NO child is currently in ERROR. A child error
+                        # means the service's ERROR is real (data is
+                        # missing) and resetting the parent would either
+                        # no-op or trigger a server-side cascade that
+                        # re-runs the failing child. Leave the parent
+                        # alone — the user can reset offending children
+                        # externally, and the *next* polling cycle will
+                        # see children_errors empty and recover the
+                        # parent automatically (matches the 0.15 UX of
+                        # "reset child → workflow picks it up, no
+                        # restart needed").
+                        try:
+                            if not job.children_errors:
+                                services_to_recover.append(job.id)
+                        except Exception:
+                            # Transient failure on the children_errors
+                            # HTTP call — skip this cycle, try next.
+                            pass
                 else:
                     logger.info("Job not found in the database")
 
