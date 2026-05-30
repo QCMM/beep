@@ -219,15 +219,21 @@ def run_sampling(
                 )
                 debug_mol.to_file(filename, "xyz")
 
+        # Always submit at the current sampling LOT for the union of newly-
+        # added entries plus entries already in the dataset (from a prior
+        # run, possibly at a different LOT). QCFractal dedups server-side:
+        # entries already computed at this spec become n_existing no-ops;
+        # entries that have never been computed at this spec get fresh opts.
+        present_entries = shell_old_entries + added_names
+        if present_entries:
             comp_rec = qcf.submit_optimizations(
-                sampling_opt_dset, opt_lot, tag=tag,
+                sampling_opt_dset, opt_lot, tag=tag, subset=present_entries,
             )
             logger.info(
                 f"{comp_rec.n_inserted} new, {comp_rec.n_existing} existing "
                 "sampling optimization procedures."
             )
 
-        present_entries = shell_old_entries + added_names
         pid_list = qcf.get_job_ids(sampling_opt_dset, present_entries, opt_lot)
         if pid_list:
             logger.info(

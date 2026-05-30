@@ -1,4 +1,6 @@
 """Tests for beep/core/sampling.py."""
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
 from qcelemental.models.molecule import Molecule
@@ -167,3 +169,80 @@ def test_filter_real_co_w5_distinct_kept(co_w5_0001, co_w5_0002, test_logger):
         logger=test_logger, ligand_size=ligand_size,
     )
     assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# run_sampling — workflow-level case-B regression
+# ---------------------------------------------------------------------------
+
+def test_run_sampling_submits_at_new_lot_when_all_entries_exist(test_logger):
+    """Regression for reports/BUG_beep_sampling_spec_change.md.
+
+    When the user re-runs sampling at a different LOT against a dataset
+    whose entries already exist (from a prior LOT), the workflow must
+    still call submit_optimizations at the current LOT for those
+    pre-existing entries. The old code only submitted when there were
+    *new* entries to add, so a LOT change on already-populated datasets
+    silently produced zero new opts.
+    """
+    from beep.workflows.sampling import run_sampling
+
+    cluster_name = "CO_W3_01"
+    # Names that the workflow will construct for max_structures=3
+    existing_entry_names = [f"{cluster_name}_{i:04d}" for i in (1, 2, 3)]
+
+    sampling_dset = MagicMock()
+    sampling_dset.name = f"pre_{cluster_name}"
+    sampling_dset.entry_names = existing_entry_names
+    # iterate_entries yields nothing — keeps the "existing molecules" list empty
+    refinement_dset = MagicMock()
+    refinement_dset.name = cluster_name
+    refinement_dset.iterate_entries.return_value = iter([])
+    refinement_dset.entry_names = []
+
+    cluster_mol = MagicMock(); cluster_mol.symbols = ["O", "H", "H"]
+    target_mol = MagicMock(); target_mol.symbols = ["C", "O"]
+
+    client = MagicMock()
+
+    submit_call_kwargs = []
+
+    def fake_submit_optimizations(ds_opt, opt_lot, tag, subset=None):
+        submit_call_kwargs.append(
+            {"ds": ds_opt.name, "opt_lot": opt_lot, "tag": tag,
+             "subset": list(subset) if subset else None}
+        )
+        r = MagicMock(); r.n_inserted = len(subset or []); r.n_existing = 0
+        return r
+
+    with patch("beep.workflows.sampling.qcf") as mock_qcf:
+        mock_qcf.add_opt_specification.return_value = None
+        mock_qcf.get_job_ids.return_value = []
+        mock_qcf.wait_for_completion.return_value = None
+        mock_qcf.submit_optimizations.side_effect = fake_submit_optimizations
+        mock_qcf.fetch_opt_molecules.return_value = []
+        mock_qcf.add_opt_entry.return_value = None
+
+        # generate_shell_list("sparse", 2.0) returns a single shell, so the
+        # per-shell loop runs exactly once.
+        run_sampling(
+            method="gfn2-xtb", basis=None, program="xtb",
+            tag="sampling", kw_id=None,
+            sampling_opt_dset=sampling_dset,
+            refinement_opt_dset=refinement_dset,
+            opt_lot="gfn2-xtb",
+            rmsd_symm=False, store_initial=False, rmsd_val=0.4,
+            target_mol=target_mol, cluster=cluster_mol,
+            debug_path="/tmp/dbg",
+            client=client,
+            sampling_shell=2.0, sampling_condition="sparse",
+            logger=test_logger,
+        )
+
+    # The fix: submit_optimizations MUST be called for the pre-existing
+    # entries at the new opt_lot, even though no new entries were added.
+    assert len(submit_call_kwargs) == 1, submit_call_kwargs
+    call = submit_call_kwargs[0]
+    assert call["opt_lot"] == "gfn2-xtb"
+    assert call["tag"] == "sampling"
+    assert sorted(call["subset"]) == sorted(existing_entry_names)
