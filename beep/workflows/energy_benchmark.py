@@ -11,6 +11,7 @@ import qcelemental as qcel
 from pathlib import Path
 
 from ..models.energy_benchmark import EnergyBenchmarkConfig
+from ..models.base import safe_config_dump
 from ..core.logging_utils import (
     padded_log, log_formatted_list, log_progress, log_energy_mae, beep_banner,
 )
@@ -412,7 +413,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     # Save a copy of the input config
     config_path = res_folder / f"energy_benchmark_{smol_name}.json"
-    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+    config_path.write_text(safe_config_dump(config))
 
     logger.info(welcome_msg)
     geom_ref_opt_lot = config.reference_geometry_level_of_theory.lower()

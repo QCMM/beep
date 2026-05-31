@@ -1,6 +1,22 @@
 """Base config models shared across workflows."""
+import json
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
+
+
+def safe_config_dump(config) -> str:
+    """JSON-serialize a workflow config without exposing credentials.
+
+    Strips ``server.password`` and ``server.username`` before dumping.
+    Every workflow writes a copy of its input config to disk for
+    reproducibility; this helper ensures that copy never contains
+    plaintext credentials.
+    """
+    return json.dumps(
+        config.model_dump(exclude={"server": {"password", "username"}}),
+        indent=4,
+        default=str,
+    )
 
 
 def lowercase_str(v):
@@ -27,7 +43,19 @@ class ServerConfig(BaseModel):
     address: str = Field("localhost:7777", description="Server address (host:port)")
     username: Optional[str] = Field(None, description="Username for authentication")
     password: Optional[str] = Field(None, description="Password for authentication")
-    verify: bool = Field(False, description="Verify SSL certificate")
+    # Default is `False` because BEEP deployments typically target QCFractal
+    # servers on internal HTTP-only addresses (e.g. `http://qcf-astrochem`) or
+    # reverse-proxied with TLS terminated upstream — there is no client-side
+    # certificate to verify. Set to `True` when the server is reachable over
+    # HTTPS with a publicly-trusted certificate.
+    verify: bool = Field(
+        False,
+        description=(
+            "Verify the server's TLS certificate. Defaults to False for "
+            "internal HTTP-only QCFractal deployments; set True for "
+            "HTTPS servers with a trusted certificate."
+        ),
+    )
 
 
 class LevelOfTheory(BaseModel):

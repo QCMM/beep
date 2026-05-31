@@ -111,7 +111,13 @@ def status_label(status):
 
 def connect(address: str = "localhost:7777", username: str = None,
             password: str = None, verify: bool = False) -> PortalClient:
-    """Create and return a PortalClient connection."""
+    """Create and return a PortalClient connection.
+
+    ``verify`` defaults to False because BEEP deployments typically target
+    QCFractal servers on internal HTTP-only addresses or reverse-proxied
+    with TLS terminated upstream. Pass ``verify=True`` for HTTPS servers
+    with a publicly-trusted certificate. See ``models.base.ServerConfig``.
+    """
     return PortalClient(
         address=address, verify=verify,
         username=username, password=password,

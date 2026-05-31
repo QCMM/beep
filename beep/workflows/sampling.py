@@ -1,9 +1,9 @@
 """Sampling workflow — refactored from workflows/launch_sampling.py."""
-import json
 import logging
 from pathlib import Path
 
 from ..models.sampling import SamplingConfig
+from ..models.base import safe_config_dump
 from ..core.logging_utils import padded_log, beep_banner
 from ..adapters import qcfractal_adapter as qcf
 from ..adapters.qcfractal_adapter import FractalClient
@@ -315,7 +315,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
     # Save a copy of the input config
     config_path = res_folder / f"sampling_{smol_name}.json"
-    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+    config_path.write_text(safe_config_dump(config))
 
     logger.info(welcome_msg)
 

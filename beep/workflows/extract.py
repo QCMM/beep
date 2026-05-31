@@ -1,5 +1,4 @@
 """Extract BE data workflow — refactored from workflows/launch_extract_be_data.py."""
-import json
 import logging
 import warnings
 from typing import List, Tuple, Dict
@@ -9,6 +8,7 @@ import pandas as pd
 import qcelemental as qcel
 from pathlib import Path
 from ..models.extract import ExtractConfig
+from ..models.base import safe_config_dump
 from ..core.logging_utils import (
     padded_log, log_dataframe, write_energy_log, beep_banner,
 )
@@ -284,7 +284,7 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
 
         # Save a copy of the input config
         config_path = res_folder / f"extract_{mol}.json"
-        config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+        config_path.write_text(safe_config_dump(config))
 
         df_no_zpve, success = concatenate_frames(
             client, mol, ds_w, config.opt_method,

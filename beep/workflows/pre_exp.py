@@ -1,11 +1,11 @@
 """Pre-exponential factor workflow — refactored from workflows/launch_pre_exp.py."""
-import json
 import logging
 from pathlib import Path
 
 import pandas as pd
 
 from ..models.pre_exp import PreExpConfig
+from ..models.base import safe_config_dump
 from ..core.pre_exponential import (
     get_mass, get_sym_num, parse_coordinates,
     align_to_z_axis, get_moments_of_inertia, pre_exponential_factor,
@@ -70,7 +70,7 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
 
     # Save a copy of the input config
     config_path = res_folder / f"pre_exp_{folder_label}.json"
-    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+    config_path.write_text(safe_config_dump(config))
 
     main_logger.info(welcome_msg)
 

@@ -193,5 +193,6 @@ timer.dat
 
 # Local scratch / ad-hoc runs
 test_run/
+nohup.out
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks
 

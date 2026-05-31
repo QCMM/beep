@@ -10,7 +10,7 @@ from beep.models import (
     GeomBenchmarkConfig,
     PreExpConfig,
 )
-from beep.models.base import ServerConfig, LevelOfTheory
+from beep.models.base import ServerConfig, LevelOfTheory, safe_config_dump
 
 # ---------------------------------------------------------------------------
 # Defaults and edge cases
@@ -102,6 +102,31 @@ def test_energy_benchmark_lowercases_lots():
     assert cfg.opt_level_of_theory == ["mpwb1k-d3bj_def2-tzvpd"]
     assert cfg.reference_geometry_level_of_theory == "ccsd(t)_aug-cc-pvtz"
     assert cfg.be_basis == "def2-tzvpd"
+
+
+def test_safe_config_dump_strips_credentials():
+    """Workflow configs written to disk for reproducibility must not
+    contain plaintext credentials."""
+    cfg = SamplingConfig(
+        workflow="sampling",
+        molecule="CO",
+        sampling_level_of_theory={"method": "hf3c"},
+        refinement_level_of_theory={"method": "b3lyp", "basis": "def2-tzvp"},
+        server={
+            "address": "http://example:7777",
+            "username": "joe",
+            "password": "top-secret-bytes",
+            "verify": False,
+        },
+    )
+    text = safe_config_dump(cfg)
+    # Credentials stripped
+    assert "joe" not in text
+    assert "top-secret-bytes" not in text
+    # Other server fields preserved
+    assert "http://example:7777" in text
+    # Other config fields preserved
+    assert "CO" in text
 
 
 def test_geom_benchmark_lowercases_reference_method_and_basis():

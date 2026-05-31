@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "beep"
 version = "0.12.0"
-description = "A binding energy evaluation platform and database for molecules on interstellar ice-grain mantels"
+description = "A binding energy evaluation platform and database for molecules on interstellar ice-grain mantles"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 authors = [
@@ -13,6 +13,32 @@ authors = [
     {name = "Giulia M. Bovolenta"},
 ]
 requires-python = ">=3.10"
+keywords = [
+    "binding-energy",
+    "quantum-chemistry",
+    "qcfractal",
+    "astrochemistry",
+    "ice-grain",
+    "amorphous-solid-water",
+    "asw",
+    "DFT",
+    "ZPVE",
+    "BSSE",
+    "computational-chemistry",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
 dependencies = [
     "matplotlib",
     "scipy",
@@ -21,6 +47,13 @@ dependencies = [
     "qcelemental",
     "networkx",
 ]
+
+[project.urls]
+Homepage = "https://github.com/QCMM/beep"
+Documentation = "https://beep.readthedocs.io"
+Repository = "https://github.com/QCMM/beep"
+Issues = "https://github.com/QCMM/beep/issues"
+Changelog = "https://github.com/QCMM/beep/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 pre_exp = ["molsym"]

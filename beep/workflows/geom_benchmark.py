@@ -13,6 +13,7 @@ from pathlib import Path
 from qcelemental.models.molecule import Molecule
 
 from ..models.geom_benchmark import GeomBenchmarkConfig
+from ..models.base import safe_config_dump
 from ..core.logging_utils import (
     padded_log, log_dataframe_averages, log_progress, dict_to_log, beep_banner,
 )
@@ -484,7 +485,7 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
 
     # Save a copy of the input config
     config_path = res_folder / f"geom_benchmark_{smol_name}.json"
-    config_path.write_text(json.dumps(config.dict(), indent=4, default=str))
+    config_path.write_text(safe_config_dump(config))
 
     logger.info(welcome_msg)
 
