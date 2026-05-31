@@ -52,6 +52,30 @@ class GeomBenchmarkConfig(BaseModel):
     tag_dft_geometry: Optional[str] = Field(None, description="Queue tag for DFT geometry tasks")
     use_initial_reference_geometry: bool = Field(False, description="Use initial (unoptimized) reference geometry")
     bsse_test: Optional[BSSETestConfig] = Field(None, description="Optional BSSE/dispersion test on a single functional")
+    trajectory_analysis: bool = Field(
+        True,
+        description=(
+            "If True (default), evaluate each DFT functional via SP+gradient "
+            "at every geometry along the reference optimization trajectory "
+            "and report RMSD of the per-component force (meV/Å) vs the "
+            "reference. Combined with the equilibrium-geometry RMSD via a "
+            "z-score-weighted score (see ``score_weights``). Absolute "
+            "energies are not used here — use the energy_benchmark workflow "
+            "for relative-energy comparison. Set to False to keep the "
+            "legacy eq-geometry-only behaviour."
+        ),
+    )
+    score_weights: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "rmsd_eq": 1.0,
+            "rmsd_force": 1.0,
+        },
+        description=(
+            "Weights for the combined z-score ranking when "
+            "trajectory_analysis is enabled. Keys: rmsd_eq, rmsd_force. "
+            "Default: equal weighting."
+        ),
+    )
 
     @field_validator("reference_geometry_level_of_theory")
     @classmethod

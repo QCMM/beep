@@ -27,8 +27,11 @@ from qcportal.record_models import RecordStatusEnum, PriorityEnum
 from qcportal.singlepoint.record_models import QCSpecification, SinglepointDriver
 from qcportal.optimization.record_models import OptimizationSpecification
 from qcportal.optimization.dataset_models import OptimizationDataset
-from qcportal.singlepoint.dataset_models import SinglepointDataset
+from qcportal.singlepoint.dataset_models import (
+    SinglepointDataset, SinglepointDatasetNewEntry,
+)
 from qcportal.reaction.dataset_models import ReactionDataset
+import numpy as np
 from qcportal.reaction.record_models import ReactionSpecification, ReactionKeywords
 from qcelemental.models.molecule import Molecule
 from pydantic import ValidationError
@@ -1278,3 +1281,124 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
     return therm["ZPE_vib"].data, True
 
 
+# ---------------------------------------------------------------------------
+# Trajectory-benchmark singlepoint helpers (geom_benchmark trajectory mode)
+# ---------------------------------------------------------------------------
+
+def get_or_create_singlepoint_dataset(
+    client: PortalClient, name: str,
+) -> SinglepointDataset:
+    """Get-or-create a SinglepointDataset by name."""
+    return get_or_create_collection(
+        client, name, collection_type=SinglepointDataset,
+    )
+
+
+def add_gradient_spec(
+    ds_sp: SinglepointDataset,
+    spec_name: str,
+    method: str,
+    basis: Optional[str],
+    program: str = "psi4",
+    keywords: Optional[dict] = None,
+    description: str = "",
+) -> str:
+    """Add an SP + gradient ``QCSpecification`` to a ``SinglepointDataset``.
+
+    Idempotent: ``add_specification`` silently reports already-existing
+    specs. Returns the lowercased spec name actually registered.
+    """
+    qc_spec = QCSpecification(
+        program=program,
+        driver=SinglepointDriver.gradient,
+        method=method,
+        basis=basis,
+        keywords=keywords or {},
+    )
+    name = spec_name.lower()
+    ds_sp.add_specification(
+        name=name, specification=qc_spec, description=description,
+    )
+    return name
+
+
+def add_singlepoint_entries(
+    ds_sp: SinglepointDataset,
+    entries: List[Tuple[str, Molecule]],
+) -> Any:
+    """Bulk-add ``(entry_name, Molecule)`` pairs to a SinglepointDataset.
+
+    Faster than calling ``add_entry`` in a loop because the server is hit
+    once per batch.
+    """
+    new_entries = [
+        SinglepointDatasetNewEntry(name=name, molecule=mol)
+        for name, mol in entries
+    ]
+    return ds_sp.add_entries(new_entries)
+
+
+def submit_singlepoints_in_dataset(
+    ds_sp: SinglepointDataset,
+    spec_names: List[str],
+    tag: str,
+    subset=None,
+) -> Any:
+    """Submit SP computations from a SinglepointDataset for the given specs."""
+    entry_names = list(subset) if subset else None
+    return ds_sp.submit(
+        entry_names=entry_names,
+        specification_names=spec_names,
+        compute_tag=tag,
+    )
+
+
+def fetch_sp_energy_gradient(
+    ds_sp: SinglepointDataset, entry_name: str, spec_name: str,
+) -> Tuple[Optional[float], Optional[np.ndarray]]:
+    """Fetch ``(energy_hartree, gradient_hartree_per_bohr)`` from a record.
+
+    Gradient is reshaped from the flat list qcportal returns to
+    ``(n_atoms, 3)``. Returns ``(None, None)`` if the record is missing,
+    errored, or incomplete.
+    """
+    record = ds_sp.get_record(entry_name, spec_name.lower())
+    if record is None or not is_complete(record.status):
+        return None, None
+    props = record.properties or {}
+    energy = props.get("return_energy")
+    grad = props.get("return_gradient")
+    if grad is not None:
+        grad = np.asarray(grad, dtype=float).reshape(-1, 3)
+    return energy, grad
+
+
+def get_optimization_trajectory(
+    odset: OptimizationDataset, entry_name: str, opt_lot: str,
+) -> List[dict]:
+    """Pull every step of a completed optimization as a list of dicts.
+
+    Each dict has keys ``molecule`` (qcelemental Molecule),
+    ``energy_hartree`` (float or None) and ``gradient_hartree_per_bohr``
+    (np.ndarray of shape ``(n_atoms, 3)`` or None). Returns ``[]`` if
+    the opt is missing, errored, or has an empty trajectory.
+
+    Used by ``geom_benchmark`` trajectory analysis to obtain the shared
+    set of geometries (and reference E + ∇E) for cross-functional
+    comparison.
+    """
+    record = odset.get_record(entry_name, opt_lot.lower())
+    if record is None or not is_complete(record.status):
+        return []
+    steps = []
+    for sp in record.trajectory or []:
+        props = sp.properties or {}
+        grad = props.get("return_gradient")
+        if grad is not None:
+            grad = np.asarray(grad, dtype=float).reshape(-1, 3)
+        steps.append({
+            "molecule": sp.molecule,
+            "energy_hartree": props.get("return_energy"),
+            "gradient_hartree_per_bohr": grad,
+        })
+    return steps

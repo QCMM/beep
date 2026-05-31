@@ -5,6 +5,50 @@ All notable changes to BEEP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.13.0.dev
+
+### Added
+
+- **Trajectory analysis in `geom_benchmark`** (default-on). For each
+  DFT functional, BEEP now submits SP + gradient calculations at every
+  geometry along the reference optimization trajectory and reports the
+  per-Cartesian-component **RMSD of the force** (meV/Å) vs the
+  reference. Combined with the existing equilibrium-geometry RMSD via
+  a z-score-weighted ranking (weights configurable via
+  `score_weights`). Same per-group table layout as the existing
+  `BENCHMARK RESULTS` section; appears immediately below it in the
+  workflow log. Inspired by the MLP test-set validation in Bovolenta
+  et al. 2025 (A&A, in press; arXiv 2508.14219), Appendix C.2 /
+  Fig C.1 / Table C.1. Set `trajectory_analysis: false` in the
+  workflow config to keep the legacy eq-geometry-only behaviour.
+
+  *Why force RMSD and not energy MAE/RMSE.* Absolute total energies
+  carry method-specific offsets (correlation, basis, BSSE) that
+  dominate any cross-method comparison and aren't relevant to
+  geometry quality. Gradient deviations reflect PES shape, which is
+  what geometry optimization actually cares about. For relative-energy
+  comparison use the `energy_benchmark` workflow. RMSD (rather than
+  MAE) is used to penalise occasional large failures — a single bad
+  gradient step is exactly the failure mode that derails a real
+  geometry optimization.
+
+- **`combined_zscore_ranking` is weight-driven.** The metrics combined
+  are taken from `weights.keys()`, so the same function serves the
+  2-metric geom-benchmark case (`rmsd_eq` + `rmsd_force`) and any
+  future N-metric variant without modification.
+
+### Changed
+
+- `geom_benchmark` now performs additional SP + gradient submissions
+  per functional × reference-trajectory step when
+  `trajectory_analysis` is enabled (the new default). Existing 0.12.x
+  configs that don't set the field will pick up this behaviour
+  automatically; opt out with `trajectory_analysis: false`.
+
+- `GeomBenchmarkConfig.score_weights` now defaults to
+  `{"rmsd_eq": 1.0, "rmsd_force": 1.0}` (equal weighting of the two
+  metrics that survive the geom-benchmark physical filter).
+
 ## [0.12.0] — 2026-05-30
 
 The first BEEP release in the qcportal 0.63+ era. The QCFractal stack

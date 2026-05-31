@@ -22,6 +22,7 @@ from ..core.dft_functionals import (
 )
 from ..core.plotting_utils import rmsd_histograms
 from ..core.benchmark_utils import create_benchmark_dataset_dict, compute_rmsd
+from ..core.trajectory_workflow import run_trajectory_analysis
 from ..adapters import qcfractal_adapter as qcf
 from ..adapters.qcfractal_adapter import FractalClient, is_complete, is_incomplete, is_error, status_label
 
@@ -796,6 +797,22 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     folder_path_plots.mkdir(parents=True, exist_ok=True)
 
     rmsd_histograms(rmsd_df, smol_name, str(folder_path_plots))
+
+    # Trajectory analysis: SP+gradient at every reference-trajectory geometry,
+    # MAE/RMSE of E and forces vs reference, combined z-score ranking.
+    # Runs AFTER BENCHMARK RESULTS so the eq-RMSD per-group output is the
+    # first benchmark summary the user sees; the trajectory benchmark
+    # appears immediately below in the same per-group style.
+    if config.trajectory_analysis:
+        run_trajectory_analysis(
+            config=config, client=client, odset_dict=odset_dict,
+            geom_ref_opt_lot=geom_ref_opt_lot,
+            all_dft_functionals=all_dft_functionals,
+            dft_geom_functionals=dft_geom_functionals,
+            dft_program=dft_program, dft_keyword=dft_keyword,
+            dft_tag=dft_tag, rmsd_df=rmsd_df,
+            res_folder=res_folder, logger=logger,
+        )
 
     padded_log(
         logger,
