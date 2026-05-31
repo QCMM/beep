@@ -4,8 +4,8 @@ Getting Started
 Prerequisites
 -------------
 
-- Python 3.9 or later
-- A running `QCFractal <https://docs.qcarchive.molssi.org>`_ (v0.15) server with compute workers (required for running computations; not needed for data extraction or analysis)
+- Python 3.10 or later
+- A running `QCFractal <https://docs.qcarchive.molssi.org>`_ (v0.63 or later) server with compute workers (required for running computations; not needed for data extraction or analysis)
 
 Installation
 ------------

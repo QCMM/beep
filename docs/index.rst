@@ -17,7 +17,7 @@ The platform automates the complete computational pipeline — from structure
 sampling on a set of amorphized water clusters, through geometry optimization
 at DFT level, to BSSE-corrected binding energy computation with ZPVE
 corrections — and stores all results in a `QCFractal
-<https://docs.qcarchive.molssi.org>`_ (v0.15) database for reproducible
+<https://docs.qcarchive.molssi.org>`_ (v0.63 or later) database for reproducible
 querying.
 
 For a detailed description of the methodology and results, see:
