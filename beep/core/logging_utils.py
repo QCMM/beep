@@ -588,6 +588,15 @@ def log_trajectory_metrics_per_group(
         )
 
 
+# Per-metric display metadata used by log_trajectory_ranking_table.
+# Maps metric column name → (short header, long description with units).
+# Add entries here when a new ranking metric is introduced.
+_RANKING_METRIC_META = {
+    "rmsd_eq":    ("RMSD_eq", "equilibrium-geometry deviation, Å"),
+    "rmsd_force": ("RMSD_F",  "per-Cartesian-component force RMSE, meV/Å"),
+}
+
+
 def log_trajectory_ranking_table(
     logger: logging.Logger,
     ranking_df: pd.DataFrame,
@@ -598,53 +607,71 @@ def log_trajectory_ranking_table(
     Explains the score formula in the log itself so anyone reading the
     log can audit the ranking without having to dig into the source.
 
+    Generic over any number of metrics — the columns displayed are
+    derived from ``score_weights.keys()`` so the same helper serves the
+    geom-trajectory case (2 metrics) and the nm-sampling case (1 metric).
+
     Parameters
     ----------
     logger : logging.Logger
         Active BEEP logger.
     ranking_df : pd.DataFrame
         Output of ``combined_zscore_ranking``; rows are functionals
-        (lowercase), columns include raw metrics + z-scores +
-        ``combined_score``.
+        (lowercase), columns include the raw metrics, their z-scores
+        (``z_<metric>``), and ``combined_score``.
     score_weights : dict, optional
-        ``{rmsd_eq, rmsd_force}`` weights to display in the methodology
-        block. Defaults to equal weights when omitted.
+        ``{metric_name → weight}``. Determines which columns are
+        displayed and the methodology block. Defaults to equal weights
+        on (``rmsd_eq``, ``rmsd_force``).
     """
     if ranking_df is None or ranking_df.empty:
         logger.warning(
             "\n  Combined ranking unavailable "
-            "(no functionals with complete data on both metrics).\n"
+            "(no functionals with complete data).\n"
         )
         return
-    methods = list(ranking_df.index)
-    width = max(36, max(len(m) for m in methods) + 2)
-    cols = [
-        "rmsd_eq", "rmsd_force",
-        "z_rmsd_eq", "z_rmsd_force", "combined_score",
-    ]
-    headers = [
-        "RMSD_eq", "RMSD_F",
-        "z(RMSD_eq)", "z(RMSD_F)", "Score",
-    ]
 
     w = score_weights or {"rmsd_eq": 1.0, "rmsd_force": 1.0}
+    metric_names = list(w.keys())
+    raw_headers = [_RANKING_METRIC_META.get(m, (m, m))[0] for m in metric_names]
+    cols = list(metric_names) + [f"z_{m}" for m in metric_names] + ["combined_score"]
+    headers = (
+        raw_headers
+        + [f"z({h})" for h in raw_headers]
+        + ["Score"]
+    )
+
+    methods = list(ranking_df.index)
+    width = max(36, max(len(m) for m in methods) + 2)
+
     logger.info("")
     logger.info("  Methodology")
-    logger.info("    Two metrics — RMSD_eq (equilibrium-geometry deviation,")
-    logger.info("    Å) and RMSD_F (per-Cartesian-component force deviation")
-    logger.info("    along the reference trajectory, meV/Å) — have different")
-    logger.info("    units. To combine them we convert each to a z-score")
-    logger.info("    across the benchmarked functionals:")
+    if len(metric_names) == 1:
+        m = metric_names[0]
+        h, desc = _RANKING_METRIC_META.get(m, (m, m))
+        logger.info(f"    One metric — {h} ({desc}) — converted to a")
+        logger.info("    z-score across the benchmarked functionals:")
+    else:
+        descs = ", ".join(
+            f"{_RANKING_METRIC_META.get(m, (m, m))[0]} ({_RANKING_METRIC_META.get(m, (m, m))[1]})"
+            for m in metric_names
+        )
+        logger.info(
+            f"    {len(metric_names)} metrics — {descs} — have different"
+        )
+        logger.info("    units. To combine them we convert each to a z-score")
+        logger.info("    across the benchmarked functionals:")
     logger.info("        z_m = (value_m - mean) / std         (population std, ddof=0)")
     logger.info("    The combined score is a weighted sum of the z-scores:")
-    logger.info("        score = w_R · z(RMSD_eq) + w_F · z(RMSD_F)")
-    logger.info(
-        f"    Current weights: w_R = {w.get('rmsd_eq', 1.0)}, "
-        f"w_F = {w.get('rmsd_force', 1.0)}"
+    formula = " + ".join(f"w_{h} · z({h})" for h in raw_headers)
+    logger.info(f"        score = {formula}")
+    weights_line = ", ".join(
+        f"w_{h} = {w[m]}" for m, h in zip(metric_names, raw_headers)
     )
+    logger.info(f"    Current weights: {weights_line}")
     logger.info("    (override via 'score_weights' in the workflow config.)")
-    logger.info("    Z-scores are dimensionless: this puts the two metrics")
-    logger.info("    on a common scale without arbitrary unit conversions.")
+    logger.info("    Z-scores are dimensionless: this puts the metrics on a")
+    logger.info("    common scale without arbitrary unit conversions.")
     logger.info("    Lower combined score = better.")
     logger.info("")
     logger.info("    Absolute energies are not part of the score — they're")

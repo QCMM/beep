@@ -1445,6 +1445,74 @@ def fetch_sp_energy_gradient(
     return energy, grad
 
 
+def fetch_normal_modes(
+    client: PortalClient, mol, hessian_lot: str,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[Molecule]]:
+    """Fetch the complete Hessian record for ``mol`` at ``hessian_lot`` and
+    run vibrational analysis. Returns ``(frequencies_cm, modes_cart, mol_obj)``
+    where modes are Cartesian, un-mass-weighted, and TR-projected.
+
+    Mirrors the Hessian-record query block in :func:`get_zpve_mol` but
+    returns the raw normal-mode data (frequencies + Cartesian eigenvectors)
+    instead of the ZPE summary.
+
+    Parameters
+    ----------
+    client : PortalClient
+    mol : int
+        Molecule ID on the server.
+    hessian_lot : str
+        Method + basis as ``method_basis`` (e.g. ``"hf_def2-svp"``).
+
+    Returns
+    -------
+    frequencies_cm : (n_vib,) complex ndarray, or None if no record
+    modes_cart : (n_vib, n_atoms, 3) ndarray, or None if no record
+    mol_obj : qcelemental Molecule (the one attached to the record), or None
+    """
+    from ..core.normal_mode_sampling import extract_normal_modes_from_hessian_record
+
+    logger = logging.getLogger("beep")
+    lot_parts = hessian_lot.split("_", 1)
+    method = lot_parts[0]
+    basis = lot_parts[1] if len(lot_parts) == 2 else None
+
+    results = list(client.query_singlepoints(
+        driver=SinglepointDriver.hessian,
+        molecule_id=mol,
+        method=method,
+        basis=basis,
+        status=RecordStatusEnum.complete,
+    ))
+    # Defensive (see get_zpve_mol for backstory): drop records with None
+    # properties — accessing return_result on those crashes.
+    results = [r for r in results if r.properties is not None]
+    if not results:
+        logger.info(
+            f"No complete hessian record at {method}/{basis} for molecule {mol}."
+        )
+        return None, None, None
+    if len(results) > 1:
+        logger.warning(
+            f"Found {len(results)} complete hessian records for molecule {mol} "
+            f"at {method}/{basis}; using the first."
+        )
+    record = results[0]
+    n_coords = 3 * len(record.molecule.symbols)
+    hess = np.asarray(record.return_result, dtype=float).reshape(n_coords, n_coords)
+
+    # Energy is optional — _vibanal_wfn uses it only for the thermo summary
+    qcvars = record.dict().get("extras", {}).get("qcvars", {})
+    energy = qcvars.get("CURRENT ENERGY")
+    if energy is None:
+        energy = (record.properties or {}).get("current energy") or 0.0
+
+    freqs_cm, modes_cart = extract_normal_modes_from_hessian_record(
+        hess=hess, molecule=record.molecule, energy=energy,
+    )
+    return freqs_cm, modes_cart, record.molecule
+
+
 def get_optimization_trajectory(
     odset: OptimizationDataset, entry_name: str, opt_lot: str,
 ) -> List[dict]:

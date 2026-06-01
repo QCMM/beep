@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`nm_sampling` workflow** — per-functional force-RMSE benchmark on
+  normal-mode-displaced geometries. For each binding site, BEEP
+  computes a cheap Hessian (default `hf/def2-svp`, configurable),
+  diagonalises it via Psi4/qcelemental, classifies every vibrational
+  mode as **intermolecular / bending / stretching** by
+  fragment-centre-of-mass projection, picks the lowest-frequency modes
+  in each band up to per-band caps (defaults `3 / 2 / 1`), and
+  generates ± displaced geometries at per-band RMS Cartesian
+  amplitudes (defaults `0.08 / 0.05 / 0.03 Å`). At every displacement
+  it submits a CCSD(T)/aug-cc-pvtz reference gradient plus a DFT
+  gradient per functional in the geom_benchmark pool, then reports
+  **per-Cartesian-component force RMSE** vs CCSD(T) grouped by
+  functional category. Same per-group log layout as the
+  `geom_benchmark` trajectory output. Invoke via `beep --config
+  nm_sampling.json`; `beep --schema nm_sampling` for the full config.
+
+  *Why force RMSE on displacements and not just along the trajectory.*
+  Trajectory sampling probes a one-dimensional path; normal-mode
+  displacements span the soft, chemically-relevant degrees of freedom
+  off equilibrium. R2SCAN-3c wins on the H2/W1 sanity benchmark at
+  18.5 meV/Å; HF-3c last at 805 meV/Å — both consistent with
+  expectation. Single-metric ranking (no z-score machinery) — the
+  per-group summary picks winners by raw RMSE.
+
 - **Trajectory analysis in `geom_benchmark`** (default-on). For each
   DFT functional, BEEP now submits SP + gradient calculations at every
   geometry along the reference optimization trajectory and reports the

@@ -58,5 +58,8 @@ def test_main_valid_dispatch(mock_connect, monkeypatch, tmp_path):
 
 
 def test_workflow_models_keys():
-    expected = {"sampling", "be_hess", "extract", "pre_exp", "geom_benchmark", "energy_benchmark"}
+    expected = {
+        "sampling", "be_hess", "extract", "pre_exp",
+        "geom_benchmark", "energy_benchmark", "nm_sampling",
+    }
     assert set(WORKFLOW_MODELS.keys()) == expected
