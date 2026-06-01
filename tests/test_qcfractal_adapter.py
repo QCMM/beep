@@ -536,7 +536,10 @@ def test_compute_be_dft_energies_splits_dispersion(mock_submit):
 
 @patch("beep.adapters.qcfractal_adapter.submit_energies")
 def test_compute_be_dft_energies_integrated_for_non_dispersion(mock_submit):
-    """HF-3c has no dispersion suffix → single integrated spec per stoich."""
+    """HF-3c has no dispersion suffix → single integrated spec per stoich.
+    HF-3c is a -3c composite (gCP built into the SCF), so the ``bsse``
+    stoich is intentionally skipped — counterpoise on top would
+    double-correct."""
     from beep.adapters.qcfractal_adapter import compute_be_dft_energies, STOICH_TYPES
 
     mock_submit.return_value = _fake_submit_result()
@@ -548,7 +551,12 @@ def test_compute_be_dft_energies_integrated_for_non_dispersion(mock_submit):
         program="psi4", logger=logger,
     )
 
-    assert mock_submit.call_count == len(STOICH_TYPES)
+    # All stoichs except ``bsse`` get submitted for -3c methods.
+    expected_stoichs = [s for s in STOICH_TYPES if s != "bsse"]
+    assert mock_submit.call_count == len(expected_stoichs)
+    called_stoichs = [call.kwargs["stoich"] for call in mock_submit.call_args_list]
+    assert "bsse" not in called_stoichs
+    assert sorted(called_stoichs) == sorted(expected_stoichs)
     for call in mock_submit.call_args_list:
         assert call.kwargs["method"] == "hf3c"
         assert call.kwargs["basis"] == "minix"
@@ -623,19 +631,19 @@ def test_fetch_reaction_values_d4_separated_pair(mock_ds_name):
 @patch("beep.adapters.qcfractal_adapter._stoich_dataset_name",
        return_value="be_H2O_W5_01_bsse")
 def test_fetch_reaction_values_skips_integrated_spec(mock_ds_name, caplog):
-    """Integrated specs (dispersion suffix before underscore) are skipped with a warning."""
+    """Integrated specs (dispersion suffix before underscore) are filtered out
+    in favour of the canonical separated bare-DFT + bare-dispersion pair.
+    A single summary warning reports the skip count."""
     from beep.adapters.qcfractal_adapter import fetch_reaction_values
 
     records = {
         "pbe_def2-tzvp":           {"entry1": -1.0},
         "pbe-d3bj":                {"entry1": -0.02},
-        "pbe-d3bj_def2-tzvp":      {"entry1": -99.0},   # integrated — should be skipped
+        "pbe-d3bj_def2-tzvp":      {"entry1": -99.0},   # integrated — skipped
     }
     mock_client = MagicMock()
     mock_client.get_dataset.return_value = _fake_reaction_dataset(records)
 
-    # The "beep" logger may have propagate disabled from prior tests — force
-    # propagation so caplog can see the warning.
     import logging
     beep_logger = logging.getLogger("beep")
     prev_propagate = beep_logger.propagate
@@ -646,8 +654,18 @@ def test_fetch_reaction_values_skips_integrated_spec(mock_ds_name, caplog):
     finally:
         beep_logger.propagate = prev_propagate
 
-    assert any("integrated dispersion spec 'pbe-d3bj_def2-tzvp'" in r.message
-               for r in caplog.records)
+    # Composite column came from the separated pair, not the integrated value
+    import qcelemental as qcel
+    conv = qcel.constants.hartree2kcalmol
+    assert "pbe-d3bj/def2-tzvp" in df.columns
+    assert df.loc["entry1", "pbe-d3bj/def2-tzvp"] == pytest.approx(
+        (-1.0 - 0.02) * conv
+    )
+    # Summary warning reports the skip
+    assert any(
+        "Skipped 1 integrated-dispersion spec" in r.message
+        for r in caplog.records
+    )
 
     # Composite column comes from the separated pair, not the skipped integrated value
     import qcelemental as qcel

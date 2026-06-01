@@ -499,6 +499,54 @@ def submit_hessians(client: PortalClient, program: str, method: str,
     )
 
 
+def submit_gcp_corrections(client: PortalClient, mol_ids: list, tag: str):
+    """Submit gCP corrections at dft/def2-tzvp via the mctc-gcp program.
+
+    The gCP correction depends on the basis set and SCF type only, not on
+    the specific DFT functional, so one record per (molecule, basis) is
+    enough — the result is reused across every gcp-compatible functional
+    at extract time. We currently only target ``dft/def2-tzvp``; expand
+    here if BEEP adopts additional basis sets in the gCP-parametrised
+    range.
+    """
+    return client.add_singlepoints(
+        molecules=mol_ids,
+        program="mctc-gcp",
+        driver="energy",
+        method="dft/def2-tzvp",
+        basis=None,
+        keywords={},
+        compute_tag=tag,
+    )
+
+
+def fetch_gcp_corrections(
+    client: PortalClient, mol_ids: List[int],
+) -> Dict[int, float]:
+    """Fetch gCP correction energies (hartree) for the given molecule IDs.
+
+    Pairs with ``submit_gcp_corrections``. Returns ``{mol_id → gcp_energy}``
+    for records that are complete; molecules with missing/incomplete
+    records are silently omitted (caller should treat them as missing).
+    """
+    results = client.query_singlepoints(
+        program="mctc-gcp",
+        method="dft/def2-tzvp",
+        molecule_id=mol_ids,
+    )
+    out: Dict[int, float] = {}
+    for r in results:
+        if not is_complete(r.status):
+            continue
+        # mctc-gcp publishes the correction as ``return_result`` (plus a few
+        # human-readable aliases like ``"gcp correction energy"``); the
+        # ``return_energy`` key Psi4/QC backends use does not exist here.
+        e = r.return_result
+        if e is not None:
+            out[r.molecule_id] = float(e)
+    return out
+
+
 def add_reaction(client: PortalClient, rdset_base_name: str,
                  name: str, stoichiometry: dict) -> None:
     """Add reaction entries across stoichiometry-specific datasets.
@@ -788,12 +836,10 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
 
     spec_names = [spec_name] if spec_name else ds.specification_names
     data = {}
+    skipped_integrated: List[str] = []
     for sname in spec_names:
         if "_" in sname and _has_dispersion_suffix(sname.split("_", 1)[0]):
-            logger.warning(
-                f"Skipping integrated dispersion spec '{sname}' in {ds_name} "
-                f"— BEEP expects the separated pair (bare DFT + bare dispersion)."
-            )
+            skipped_integrated.append(sname)
             continue
 
         col_label = sname.replace("_", "/")
@@ -808,6 +854,13 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
                 )
         data[col_label] = energies
 
+    if skipped_integrated:
+        logger.warning(
+            f"  Skipped {len(skipped_integrated)} integrated-dispersion spec(s) "
+            f"in {ds_name} (BEEP expects separated bare-DFT + bare-dispersion). "
+            f"Re-submit via compute_be_dft_energies to surface these data."
+        )
+
     df = pd.DataFrame(data)
 
     # Sum bare-DFT + bare-dispersion into composite columns. A bare-dispersion
@@ -817,6 +870,7 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
         c for c in df.columns
         if "/" not in c and any(c.endswith(suf) for suf in DISPERSION_SUFFIXES)
     ]
+    bare_dft_cols_consumed = set()
     for disp_col in disp_cols:
         for suffix in DISPERSION_SUFFIXES:
             if disp_col.endswith(suffix):
@@ -827,6 +881,15 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
             basis_part = dft_col.split("/", 1)[1]
             composite_col = f"{disp_col}/{basis_part}"
             df[composite_col] = df[dft_col] + df[disp_col]
+            bare_dft_cols_consumed.add(dft_col)
+
+    # The bare-DFT and bare-dispersion columns are submission/summing
+    # artifacts; user-facing output (log tables, saved JSON) should only
+    # carry the composite or integrated columns. Drop them now so every
+    # downstream caller sees a clean DataFrame.
+    cols_to_drop = list(bare_dft_cols_consumed) + disp_cols
+    if cols_to_drop:
+        df = df.drop(columns=cols_to_drop, errors="ignore")
 
     return df
 
@@ -1024,6 +1087,10 @@ def compute_be_dft_energies(
     all_submitted = 0
     all_existing = 0
 
+    # Local import to avoid a circular module-load dependency between
+    # adapters and core/dft_functionals.
+    from ..core.dft_functionals import is_3c_method
+
     for i, lot in enumerate(all_dft):
         method, basis = lot.split("_")
         bare, disp_method, disp_program = _split_dispersion(method)
@@ -1031,8 +1098,13 @@ def compute_be_dft_energies(
 
         lot_submitted = 0
         lot_existing = 0
+        # -3c composites already include gCP in the SCF; computing the BSSE
+        # counterpoise stoich on top would double-correct.
+        skip_stoichs = {"bsse"} if is_3c_method(method) else set()
 
         for stoich in STOICH_TYPES:
+            if stoich in skip_stoichs:
+                continue
             if disp_method is None:
                 # No dispersion suffix — single integrated spec
                 result = submit_energies(

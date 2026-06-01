@@ -403,6 +403,90 @@ def _strip_group_prefix(name: str) -> str:
     return name
 
 
+def log_energy_mae_per_group(
+    logger: logging.Logger,
+    df_ae: pd.DataFrame,
+    dft_func_dict: dict,
+) -> None:
+    """Per-category MAE breakdown for the energy_benchmark output.
+
+    Mirrors ``log_trajectory_metrics_per_group``: one table per
+    functional category (GGA, Meta-GGA, Hybrid, Meta-Hybrid, LRC,
+    Non-local, …) listing the methods present in ``df_ae`` whose
+    column name matches a member of that category, sorted ascending by
+    MAE, with ``*`` next to the winner. A summary table at the bottom
+    lists the per-group winner.
+
+    Functionals may belong to **multiple** categories (e.g. ``B97M-V``
+    is both Meta-GGA and Non-local); those columns appear in every
+    matching category table.
+
+    Categories with no surviving columns (because every functional in
+    that list was filtered out by the integrated-dispersion convention)
+    are silently skipped.
+
+    Parameters
+    ----------
+    logger : logging.Logger
+        Active BEEP logger.
+    df_ae : pd.DataFrame
+        Absolute-error DataFrame (entries × method/basis columns), as
+        produced by ``get_errors_dataframe``.
+    dft_func_dict : dict
+        ``{group_display_name → [functional_name, ...]}`` mapping. The
+        functional names are matched case-insensitively against the
+        bare-method portion of each column (``col.rsplit("/", 1)[0]``).
+    """
+    if df_ae.empty:
+        logger.warning("\n  No MAE data to display.\n")
+        return
+
+    # MAE per column = mean of |signed error|. Despite the "_ae" suffix in
+    # the caller's variable name, the DataFrame from get_errors_dataframe is
+    # signed (E_dft − E_ref); take abs() before averaging — same convention
+    # as the legacy ``log_energy_mae``.
+    mae = df_ae.abs().mean(axis=0)
+    name_width = 30
+    summary = {}   # group_display -> (winner, winner_mae)
+
+    for group, funcs in dft_func_dict.items():
+        funcs_lower = {f.lower() for f in funcs}
+        in_group_cols = [
+            c for c in df_ae.columns
+            if c.rsplit("/", 1)[0] in funcs_lower
+        ]
+        if not in_group_cols:
+            continue
+
+        group_maes = mae[in_group_cols].sort_values()
+        winner = str(group_maes.idxmin())
+        winner_mae = float(group_maes.iloc[0])
+        summary[group] = (winner, winner_mae)
+
+        logger.info(f"\nFunctional Group: {group}")
+        header = f"{'Level of Theory':<{name_width}} | MAE"
+        logger.info(header)
+        logger.info("-" * max(len(header), name_width + 14))
+        for col, val in group_maes.items():
+            mark = "*" if col == winner else " "
+            logger.info(f"{col:<{name_width}} | {val:.6f} {mark}")
+
+    if not summary:
+        return
+
+    logger.info("\nSummary of best functional per group (lowest MAE):")
+    summary_header = (
+        f"{'Functional Group':<{name_width}} | "
+        f"{'Level of Theory':<{name_width}} | {'MAE':<12}"
+    )
+    logger.info(summary_header)
+    logger.info("-" * len(summary_header))
+    for group, (winner, val) in summary.items():
+        logger.info(
+            f"{group:<{name_width}} | {winner:<{name_width}} | {val:.6f}"
+        )
+
+
 def log_trajectory_metrics_per_group(
     logger: logging.Logger,
     traj_metrics: dict,

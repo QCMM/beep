@@ -28,6 +28,22 @@ class EnergyBenchmarkConfig(BaseModel):
     tag_cbs: str = Field(..., description="Queue tag for CBS extrapolation tasks")
     use_initial_reference_geometry: bool = Field(False, description="Use initial (unoptimized) reference geometry")
     custom_dft_functionals: List[str] = Field([], description="Additional DFT functionals to include in the benchmark (e.g. ['RPBE-D4', 'BLYP-D4'])")
+    gcp_correction: bool = Field(
+        False,
+        description=(
+            "If True, submit a standalone gCP (Kruse & Grimme 2012) "
+            "correction at dft/def2-tzvp for every unique molecule used in "
+            "the binding-energy stoichiometries. The workflow combines it "
+            "post-hoc with the bare DFT energies at extract time to "
+            "produce a gCP-corrected BE column. Applied only when "
+            "be_basis == def2-tzvp and only to functionals listed in "
+            "core.dft_functionals.gcp_compatible_functionals() — -3c "
+            "composites (gCP already baked in), double hybrids (gCP not "
+            "parametrized), and HF-D3BJ (separate gCP parameter set) are "
+            "skipped. For any other be_basis the workflow logs a warning "
+            "and silently falls back to the no-gCP path."
+        ),
+    )
 
     _lower_opt_lot = field_validator("opt_level_of_theory")(lowercase_list)
     _lower_ref_lot = field_validator("reference_geometry_level_of_theory")(lowercase_str)
