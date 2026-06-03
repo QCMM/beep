@@ -151,6 +151,27 @@ class NmSamplingConfig(BaseModel):
         description="Multiplier on the band amplitude for the extra-amplitude entries",
     )
 
+    # --- Run-mode controls ---
+    pre_run: bool = Field(
+        False,
+        description=(
+            "If true, run only the Hessian + normal-mode + classification "
+            "stages and exit before submitting any gradient SPs. The .molden "
+            "files and per-system mode JSONs are written so the user can "
+            "visually inspect the modes before committing the gradient budget. "
+            "Re-run with pre_run=false to continue (Hessians dedup, no recompute)."
+        ),
+    )
+    allow_imaginary_modes: bool = Field(
+        False,
+        description=(
+            "By default the workflow aborts if any system has an imaginary "
+            "frequency with magnitude above freq_max_imag_cm (saddle "
+            "geometry — displacements there would be meaningless). Set to "
+            "true to proceed anyway (e.g. for transition-state probing)."
+        ),
+    )
+
     # --- Lowercase validators (qcportal stores spec names lowercase) ---
     _lower_geom_opt = field_validator("geometry_opt_lot")(lowercase_str)
     _lower_hess_lot = field_validator("hessian_lot")(lowercase_str)

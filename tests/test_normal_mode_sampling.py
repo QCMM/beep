@@ -1,4 +1,5 @@
 """Tests for beep/core/normal_mode_sampling.py."""
+import json
 import numpy as np
 import pytest
 
@@ -7,6 +8,8 @@ from beep.core.normal_mode_sampling import (
     select_modes,
     displace_along_mode,
     extract_normal_modes_from_hessian_record,
+    write_molden,
+    write_modes_json,
     _BOHR_TO_A,
 )
 
@@ -15,59 +18,110 @@ from beep.core.normal_mode_sampling import (
 # classify_mode
 # ---------------------------------------------------------------------------
 
-def _ten_atom_masses(n_ads=2):
-    """Cluster of 8 oxygens + adsorbate of `n_ads` hydrogens (rough proxy)."""
-    return np.array([16.0] * 8 + [1.0] * n_ads)
+def _ten_atom_setup(n_ads=2):
+    """Cluster of 8 oxygens (in a cube) + adsorbate of `n_ads` hydrogens.
+
+    Returns (masses, positions). Adsorbate hydrogens sit on a small bond
+    along the x-axis at +/- 0.5 Å around (4, 0, 0), well separated from
+    the cluster — a rough proxy for a small molecule on a water cluster.
+    """
+    masses = np.array([16.0] * 8 + [1.0] * n_ads)
+    # 8-atom cubic cluster of oxygens at the unit-cube corners.
+    grid = np.array([[x, y, z]
+                     for x in (-1.0, +1.0)
+                     for y in (-1.0, +1.0)
+                     for z in (-1.0, +1.0)])
+    # 2-atom adsorbate H–H along x at (4, 0, 0).
+    ads = np.array([[3.5, 0.0, 0.0], [4.5, 0.0, 0.0]])[:n_ads]
+    positions = np.vstack([grid, ads])
+    return masses, positions
 
 
 def test_classify_intermolecular_pure_com_translation():
     """Adsorbate translates uniformly +z, cluster stationary → intermolecular."""
-    masses = _ten_atom_masses(n_ads=2)
+    masses, positions = _ten_atom_setup(n_ads=2)
     mode = np.zeros((10, 3))
     mode[8:10, 2] = 1.0  # both adsorbate atoms move +z
-    assert classify_mode(mode, masses, n_adsorbate_atoms=2,
+    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
                           frequency_cm=200.0) == "intermolecular"
 
 
-def test_classify_stretching_intramolecular_bond_oscillation():
-    """Adsorbate H–H bond stretch, cluster stationary, high-freq → stretching."""
-    masses = _ten_atom_masses(n_ads=2)
+def test_classify_intermolecular_libration():
+    """Adsorbate rotates about its own COM (libration), cluster stationary.
+
+    This is the failure mode of the COM-displacement-only classifier:
+    the fragment COM does not move, but every atom in the fragment does.
+    A rigid-body classifier captures the rotational KE and labels this
+    intermolecular.
+    """
+    masses, positions = _ten_atom_setup(n_ads=2)
+    # Adsorbate at (3.5, 0, 0) and (4.5, 0, 0): COM at (4, 0, 0).
+    # Rotation about z (perpendicular to the bond) → atom 8 moves +y,
+    # atom 9 moves -y. Net COM displacement = 0; angular momentum
+    # about the z-axis is non-zero.
     mode = np.zeros((10, 3))
-    mode[8, 0] = +1.0   # H₁ moves +x
-    mode[9, 0] = -1.0   # H₂ moves −x  (net COM motion ~ 0)
-    assert classify_mode(mode, masses, n_adsorbate_atoms=2,
+    mode[8, 1] = +1.0
+    mode[9, 1] = -1.0
+    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
+                          frequency_cm=120.0) == "intermolecular"
+
+
+def test_classify_stretching_intramolecular_bond_oscillation():
+    """Adsorbate H–H bond stretch, cluster stationary, high-freq → stretching.
+
+    The bond axis is along x, both H atoms move in ±x — pure stretch with
+    no COM translation and no angular momentum (radial vs ρ — cross is 0).
+    """
+    masses, positions = _ten_atom_setup(n_ads=2)
+    mode = np.zeros((10, 3))
+    mode[8, 0] = +1.0   # H₁ moves +x (along bond, outward)
+    mode[9, 0] = -1.0   # H₂ moves −x  (outward) → no COM motion, no rotation
+    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
                           frequency_cm=4000.0) == "stretching"
 
 
 def test_classify_bending_intramolecular_low_freq():
-    """Same antisymmetric motion at low frequency → bending (intramolecular)."""
-    masses = _ten_atom_masses(n_ads=2)
+    """Stretch-like antisymmetric motion at low frequency → bending."""
+    masses, positions = _ten_atom_setup(n_ads=2)
+    # Same as the stretch test but at low frequency: both atoms move
+    # ±x along the bond axis (no rotation since v is parallel to ρ).
     mode = np.zeros((10, 3))
-    mode[8, 1] = +1.0
-    mode[9, 1] = -1.0
-    assert classify_mode(mode, masses, n_adsorbate_atoms=2,
+    mode[8, 0] = +1.0
+    mode[9, 0] = -1.0
+    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
                           frequency_cm=800.0) == "bending"
 
 
 def test_classify_degenerate_n_ads_falls_back_to_freq():
     """If n_adsorbate_atoms is 0 or full system, f_inter is zero, so
     only frequency drives the classification."""
-    masses = _ten_atom_masses(n_ads=2)
+    masses, positions = _ten_atom_setup(n_ads=2)
     mode = np.ones((10, 3))
     # n_ads=0 → degenerate, falls through to frequency cut
-    assert classify_mode(mode, masses, n_adsorbate_atoms=0,
+    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=0,
                           frequency_cm=500.0) == "bending"
-    assert classify_mode(mode, masses, n_adsorbate_atoms=0,
+    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=0,
                           frequency_cm=3000.0) == "stretching"
 
 
 def test_classify_zero_mode_returns_bending_low_freq():
     """A zero mode (e.g. spurious near-TR remnant) shouldn't blow up."""
-    masses = _ten_atom_masses(n_ads=2)
+    masses, positions = _ten_atom_setup(n_ads=2)
     mode = np.zeros((10, 3))
     # zero kinetic → f_inter forced to 0 → falls through to frequency
-    assert classify_mode(mode, masses, n_adsorbate_atoms=2,
+    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
                           frequency_cm=100.0) == "bending"
+
+
+def test_classify_single_atom_adsorbate_handled():
+    """One-atom adsorbate (e.g. He on water) has zero inertia tensor —
+    rigid-body kinetic must still evaluate without raising."""
+    masses, positions = _ten_atom_setup(n_ads=1)
+    mode = np.zeros((9, 3))
+    mode[8, 2] = 1.0  # the lone adsorbate atom moves +z
+    # Pure intermolecular translation of the monatomic adsorbate.
+    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=1,
+                          frequency_cm=80.0) == "intermolecular"
 
 
 # ---------------------------------------------------------------------------
@@ -253,3 +307,67 @@ def test_extract_normal_modes_returns_aligned_arrays():
     freqs, modes = extract_normal_modes_from_hessian_record(hess, mol, energy=0.0)
     assert freqs.shape[0] == modes.shape[0]
     assert modes.shape[1:] == (2, 3)
+
+
+# ---------------------------------------------------------------------------
+# write_molden / write_modes_json
+# ---------------------------------------------------------------------------
+
+def _two_mode_writer_fixture():
+    """Minimal 3-atom + 2-mode payload for the writer tests."""
+    symbols = ["H", "O", "H"]
+    geom_bohr = np.array([[-1.5, 0.0, 0.0], [0.0, 0.0, 0.0], [+1.5, 0.0, 0.0]])
+    freqs = np.array([1234.5 + 0j, 0 + 80j], dtype=complex)  # one real, one imag
+    modes = np.array([
+        [[0.1, 0.0, 0.0], [0.0, 0.0, 0.0], [-0.1, 0.0, 0.0]],   # symm stretch
+        [[0.0, 0.2, 0.0], [0.0, 0.0, 0.0], [0.0, -0.2, 0.0]],   # bend
+    ])
+    return symbols, geom_bohr, freqs, modes
+
+
+def test_write_molden_emits_required_sections(tmp_path):
+    symbols, geom, freqs, modes = _two_mode_writer_fixture()
+    out = tmp_path / "test.molden"
+    write_molden(out, symbols, geom, freqs, modes, title="unit test")
+    text = out.read_text()
+    # Required Molden sections
+    for section in ("[Molden Format]", "[Title]", "[Atoms] AU",
+                    "[FREQ]", "[FR-COORD]", "[FR-NORM-COORD]"):
+        assert section in text, f"missing section {section}"
+    # Imaginary frequency rendered as negative (Molden convention)
+    assert "-80.0000" in text, "imaginary mode not flagged with negative sign"
+    # Real frequency rendered with its value
+    assert "1234.5000" in text
+    # Both vibrations listed
+    assert "vibration 1" in text and "vibration 2" in text
+
+
+def test_write_modes_json_matches_reference_shape(tmp_path):
+    symbols, geom, freqs, modes = _two_mode_writer_fixture()
+    classes = ["stretching", "intermolecular"]
+    out = tmp_path / "modes.json"
+    write_modes_json(
+        out, symbols, geom, freqs, modes,
+        classes=classes, n_adsorbate_atoms=1,
+        level_of_theory="hf_def2-svp",
+    )
+    payload = json.loads(out.read_text())
+    # Keys mirror the validation file shape
+    for k in ("level_of_theory", "symbols", "geometry_A",
+              "adsorbate_atom_index", "modes"):
+        assert k in payload
+    assert payload["level_of_theory"] == "hf_def2-svp"
+    assert payload["symbols"] == ["H", "O", "H"]
+    # Geometry converted Bohr → Å
+    assert payload["geometry_A"][0][0] == pytest.approx(-1.5 * _BOHR_TO_A)
+    # Adsorbate convention: last n atoms
+    assert payload["adsorbate_atom_index"] == [2]
+    # Mode entries carry freq + disp + class + imaginary flag
+    assert len(payload["modes"]) == 2
+    assert payload["modes"][0]["class"] == "stretching"
+    assert payload["modes"][0]["is_imaginary"] is False
+    assert payload["modes"][1]["class"] == "intermolecular"
+    assert payload["modes"][1]["is_imaginary"] is True
+    assert payload["modes"][1]["freq_cm"] == pytest.approx(80.0)
+    # Displacement matrix shape
+    assert np.asarray(payload["modes"][0]["disp"]).shape == (3, 3)

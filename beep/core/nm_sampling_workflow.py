@@ -37,6 +37,7 @@ from ..adapters.qcfractal_adapter import is_complete, is_incomplete, is_error
 from .logging_utils import padded_log, log_trajectory_metrics_per_group
 from .normal_mode_sampling import (
     classify_mode, select_modes, displace_along_mode,
+    write_molden, write_modes_json,
 )
 from .trajectory_metrics import per_step_deltas, summarize_method_metrics
 
@@ -153,11 +154,13 @@ def collect_system_normal_modes(
             continue
 
         masses = np.asarray(mol_from_record.masses)
+        positions = np.asarray(mol_from_record.geometry).reshape(-1, 3)
         classes = []
         for i, freq in enumerate(freqs_cm):
             cls = classify_mode(
                 mode_cart=modes_cart[i],
                 masses=masses,
+                positions=positions,
                 n_adsorbate_atoms=n_adsorbate_atoms,
                 frequency_cm=float(np.real(freq)),
                 inter_threshold=inter_threshold,
@@ -536,6 +539,93 @@ def run_nm_sampling(
     if not mode_data:
         logger.warning("\n  No usable normal-mode data — aborting.\n")
         return None, {}
+
+    # 3a. Persist visualisation artifacts (always — written BEFORE the
+    # imaginary-mode check so the user can open the .molden file to see
+    # which modes are imaginary and decide whether to re-optimise).
+    molden_dir = res_folder / "molden"
+    modes_json_dir = res_folder / "json_data"
+    molden_dir.mkdir(parents=True, exist_ok=True)
+    modes_json_dir.mkdir(parents=True, exist_ok=True)
+    for sysname, data in mode_data.items():
+        mol = data["mol"]
+        positions_bohr = np.asarray(mol.geometry).reshape(-1, 3)
+        write_molden(
+            molden_dir / f"{sysname}.molden",
+            symbols=list(mol.symbols),
+            geometry_bohr=positions_bohr,
+            frequencies_cm=data["frequencies_cm"],
+            modes_cart=data["modes_cart"],
+            title=f"BEEP nm_sampling — {sysname} ({config.hessian_lot})",
+        )
+        write_modes_json(
+            modes_json_dir / f"normal_modes_{sysname}.json",
+            symbols=list(mol.symbols),
+            geometry_bohr=positions_bohr,
+            frequencies_cm=data["frequencies_cm"],
+            modes_cart=data["modes_cart"],
+            classes=data["classes"],
+            n_adsorbate_atoms=n_adsorbate_atoms,
+            level_of_theory=config.hessian_lot,
+        )
+    logger.info(
+        f"\n  Normal-mode visualisations written to:\n"
+        f"    {molden_dir}/   (one .molden per system)\n"
+        f"    {modes_json_dir}/  (normal_modes_<system>.json)\n"
+    )
+
+    # 3b. Imaginary-mode sanity check. A genuine imaginary mode (|imag| above
+    # the noise threshold) means the geometry is a saddle, not a minimum —
+    # displacements around it would be meaningless. Abort unless the user
+    # explicitly opted in.
+    imag_offenders = {}
+    for sysname, data in mode_data.items():
+        freqs = data["frequencies_cm"]
+        n_imag = int(np.sum(np.abs(np.imag(freqs)) > config.freq_max_imag_cm))
+        if n_imag > 0:
+            imag_offenders[sysname] = n_imag
+    if imag_offenders:
+        msg_lines = [
+            f"  {s}: {n} imaginary mode(s) with |imag| > "
+            f"{config.freq_max_imag_cm} cm⁻¹"
+            for s, n in imag_offenders.items()
+        ]
+        if config.allow_imaginary_modes:
+            logger.warning(
+                "\n  WARNING: imaginary frequencies detected — proceeding "
+                "because allow_imaginary_modes=true:\n  " + "\n  ".join(msg_lines)
+                + "\n"
+            )
+        else:
+            logger.error(
+                "\n  ABORT: imaginary frequencies detected at the equilibrium "
+                "geometry — the system is a saddle, not a minimum:\n  "
+                + "\n  ".join(msg_lines)
+                + f"\n  Open {molden_dir}/<system>.molden to see which "
+                "modes are imaginary."
+                + "\n  Re-optimise the geometry before nm_sampling, or set "
+                "allow_imaginary_modes=true to override.\n"
+            )
+            raise RuntimeError(
+                f"nm_sampling aborted: imaginary modes in "
+                f"{list(imag_offenders)}"
+            )
+
+    # 3c. Pre-run exit. The user just wants to inspect the modes before
+    # committing the CCSD(T) gradient budget; nothing past this point gets
+    # submitted. Re-running with pre_run=false picks up where this left off
+    # (Hessians dedup, no recompute).
+    if config.pre_run:
+        padded_log(
+            logger,
+            "Pre-run complete: modes computed, no gradient SPs submitted",
+            padding_char=gear,
+        )
+        logger.info(
+            f"\n  Inspect the modes in {molden_dir}/ before re-running with "
+            "pre_run=false.\n"
+        )
+        return mode_data, {}
 
     # 4. Select picks + generate displaced molecules
     padded_log(logger, "Displacement generation")
