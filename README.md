@@ -105,6 +105,8 @@ pip install .[test]
 pytest
 ```
 
+Have fun BEEPing!
+
 ### Copyright
 
 Copyright (c) 2022, Stefan Vogt-Geisse, Giulia M. Bovolenta
