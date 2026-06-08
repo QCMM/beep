@@ -3,7 +3,8 @@
 # BEEP — Binding Energy Evaluation Platform
 
 BEEP is a binding energy evaluation platform and database for molecules on interstellar ice-grain mantles.
-It automates the full computational pipeline — from structure sampling through geometry optimization, binding energy computation, and data extraction — using a [QCFractal](https://github.com/MolSSI/QCFractal) (v0.63+) server as the computation backend.
+It automates the full computational pipeline, from structure sampling through geometry optimization, binding energy computation, and data extraction. It is build 
+using a [QCFractal](https://github.com/MolSSI/QCFractal) (v0.63+) server as the computation backend.
 
 ## Installation
 
