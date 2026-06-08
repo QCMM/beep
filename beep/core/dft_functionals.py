@@ -84,8 +84,6 @@ def hybrid_gga():
         'PBE0-NL',
         'B3PW91-NL',
         'REVPBE0-NL',
-        'PBEH3C',
-        'B97-D',
         'HF-D3BJ',
         # D4
         'B3LYP-D4',
@@ -212,3 +210,73 @@ def geom_sqm_mb():
         "R2SCAN-3c_def2-mTZVPP",
         "WB97X-3c_vDZP",
     ]
+
+
+def non_local():
+    """Functionals with non-local (NL / VV10) dispersion treatment.
+
+    Cross-cuts the other categories: every entry here also lives in one
+    of ``gga`` / ``meta_gga`` / ``hybrid_gga`` / ``meta_hybrid_gga`` /
+    ``lrc``. The per-group log helpers walk every group dict, so a
+    functional with NL dispersion appears both in its structural class
+    table and in the Non-local table.
+    """
+    return [
+        # VV10 (atom-pairwise integrand on the density)
+        'B97M-V',         # also meta_gga
+        'WB97M-V',        # also meta_hybrid_gga
+        'WB97X-V',        # also lrc
+        'LC-VV10',        # also lrc
+        # -NL post-hoc non-local
+        'B3LYP-NL',       # also hybrid_gga
+        'PBE0-NL',        # also hybrid_gga
+        'B3PW91-NL',      # also hybrid_gga
+        'REVPBE0-NL',     # also hybrid_gga
+    ]
+
+
+# ---------------------------------------------------------------------------
+# gCP applicability
+#
+# The geometric counterpoise correction (Kruse & Grimme, JCP 136, 154101
+# (2012)) is parametrized for specific (SCF-type, basis) combinations only.
+# For BEEP's energy_benchmark workflow we restrict gCP to the single
+# (DFT, def2-tzvp) target, which keeps the workflow neat and lean and
+# covers the production use case.
+# ---------------------------------------------------------------------------
+
+_THREE_C_METHODS = {
+    "HF3C", "HF-3C",
+    "PBEH3C", "PBEH-3C",
+    "B97-3C", "B973C",
+    "R2SCAN-3C", "R2SCAN3C",
+    "WB97X-3C", "WB97X3C",
+}
+
+
+def is_3c_method(name: str) -> bool:
+    """True if ``name`` is a -3c composite (gCP already baked in).
+
+    Used to skip BSSE/CP-fragment submissions for these methods —
+    counterpoise on top of an already-gCP-corrected SCF double-corrects.
+    """
+    if not name:
+        return False
+    return name.upper() in _THREE_C_METHODS
+
+
+def gcp_compatible_functionals():
+    """Functionals that get an explicit gCP correction when the user
+    enables ``gcp_correction`` in the energy_benchmark workflow.
+
+    Concatenation of the standard semi-local lists, excluding:
+      - -3c composites (gCP is already part of the method)
+      - Double hybrids (gCP is not parametrized for the MP2-correlated
+        regime; published parameters fit semi-local functionals only)
+      - HF-D3BJ (gCP for HF needs the ``hf/def2-tzvp`` parameter set, a
+        separate code path we don't support — bare HF + dispersion is
+        a niche entry rather than a production binding-energy method)
+    """
+    excluded = {"HF-D3BJ"}
+    pool = [*gga(), *meta_gga(), *hybrid_gga(), *meta_hybrid_gga(), *lrc()]
+    return [m for m in pool if m.upper() not in excluded and not is_3c_method(m)]

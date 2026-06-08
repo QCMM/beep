@@ -14,9 +14,13 @@ from ..models.energy_benchmark import EnergyBenchmarkConfig
 from ..models.base import safe_config_dump
 from ..core.logging_utils import (
     padded_log, log_formatted_list, log_progress, log_energy_mae, beep_banner,
+    log_energy_mae_per_group,
 )
 from ..core.stoichiometry import be_stoichiometry
-from ..core.dft_functionals import gga, meta_gga, hybrid_gga, lrc, meta_hybrid_gga
+from ..core.dft_functionals import (
+    gga, meta_gga, hybrid_gga, lrc, meta_hybrid_gga, non_local,
+    is_3c_method, gcp_compatible_functionals,
+)
 from ..core.plotting_utils import (
     plot_violins, plot_density_panels, plot_mean_errors, plot_ie_vs_de,
 )
@@ -359,43 +363,6 @@ def _fetch_be_molecules(odset, bench_struct, lot_geom):
     return smol_mol, surf_mol, struc_mol
 
 
-def compute_be_dft_energies_eb(client, rdset_base_name, all_dft, tag,
-                                basis="def2-tzvpd", program="psi4"):
-    logger = logging.getLogger("beep")
-    logger.info(f"Computing energies for the following stoichiometries: {' '.join(qcf.STOICH_TYPES)} (bsse = be)")
-    log_formatted_list(logger, all_dft, "Sending DFT energy computations for the following functionals:")
-
-    total_submitted = 0
-    total_existing = 0
-    for i, func in enumerate(all_dft):
-        func_submitted = 0
-        func_existing = 0
-        for stoich in qcf.STOICH_TYPES:
-            result = qcf.submit_energies(
-                client, rdset_base_name,
-                method=func, basis=basis, program=program,
-                stoich=stoich, tag=tag,
-            )
-            func_submitted += result.n_inserted
-            func_existing += result.n_existing
-        total_submitted += func_submitted
-        total_existing += func_existing
-        logger.info(f"\n{func}: Existing {func_existing}  Submitted {func_submitted}")
-        log_progress(logger, i, len(all_dft))
-
-    logger.info(f"Submitted a total of {total_submitted} DFT computations. {total_existing} are already computed")
-
-    # Collect record IDs for monitoring
-    record_ids = []
-    for stoich in qcf.STOICH_TYPES:
-        ds_name = f"{rdset_base_name}_{stoich}"
-        ds = client.get_dataset("reaction", ds_name)
-        for _, _, record in ds.iterate_records():
-            if record is not None:
-                record_ids.append(record.id)
-    return record_ids
-
-
 def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
 
@@ -497,17 +464,61 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
         "Hybrid GGA": hybrid_gga(),
         "Long range corrected": lrc(),
         "Meta Hybrid GGA": meta_hybrid_gga(),
+        # Cross-cutting category: every entry overlaps one of the above.
+        "Non-local (NL / VV10)": non_local(),
     }
 
     if config.custom_dft_functionals:
         dft_func["Custom"] = config.custom_dft_functionals
 
     for name, dft_f_list in dft_func.items():
-        padded_log(logger, f"Sending computations for {name} functionals with a {config.be_basis} basis")
-        dft_ids = compute_be_dft_energies_eb(
-            client, rdset_base, dft_f_list, basis=config.be_basis, program="psi4", tag=config.tag_be,
+        padded_log(
+            logger,
+            f"Sending computations for {name} functionals with a {config.be_basis} basis",
+        )
+        # Build the LOT strings expected by the shared submission helper
+        # (canonical "<method>_<basis>" form), then route through
+        # qcf.compute_be_dft_energies — the same separated-pair submission
+        # path be_hess uses (bare DFT + bare dispersion specs that
+        # fetch_reaction_values recombines into composite columns).
+        dft_lots = [f"{func}_{config.be_basis}" for func in dft_f_list]
+        dft_ids = qcf.compute_be_dft_energies(
+            client, rdset_base, dft_lots,
+            tag=config.tag_be, program="psi4", logger=logger,
+            keyword=None,
         )
         qcf.check_jobs_status(client, dft_ids, logger)
+
+    # Optional gCP correction (Kruse & Grimme 2012) — standalone mctc-gcp SP
+    # per unique molecule. Combined post-hoc with bare DFT energies at extract
+    # time. Only meaningful for be_basis = def2-tzvp (the single basis we
+    # support for gCP in this workflow). For any other basis we warn and
+    # silently fall back to the no-gCP path.
+    if config.gcp_correction:
+        if config.be_basis != "def2-tzvp":
+            logger.warning(
+                f"\n  gcp_correction enabled but be_basis = {config.be_basis} — "
+                "mctc-gcp is only parametrized for def2-tzvp in this workflow. "
+                "Falling back to the no-gCP path."
+            )
+        else:
+            padded_log(logger, "Submitting gCP corrections (mctc-gcp / dft/def2-tzvp)")
+            ds_nocp = client.get_dataset("reaction", f"{rdset_base}_be_nocp")
+            unique_mol_ids = set()
+            for entry in ds_nocp.iterate_entries():
+                for s in entry.stoichiometries:
+                    unique_mol_ids.add(s.molecule.id)
+            unique_mol_ids = list(unique_mol_ids)
+            logger.info(
+                f"  Submitting gCP for {len(unique_mol_ids)} unique molecules"
+            )
+            meta, gcp_record_ids = qcf.submit_gcp_corrections(
+                client, unique_mol_ids, tag=config.tag_be,
+            )
+            logger.info(
+                f"  Existing: {meta.n_existing}  Submitted: {meta.n_inserted}"
+            )
+            qcf.check_jobs_status(client, gcp_record_ids, logger)
 
     padded_log(logger, "Retriving energies from ReactionDataset")
     df_be = qcf.fetch_reaction_values(client, rdset_base, stoich="bsse").dropna(axis=1)
@@ -566,12 +577,105 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
         logger.warning(f"Plotting failed: {e}. Data files are saved, plots can be regenerated.")
 
     padded_log(logger, "BINDING ENERGY BENCHMARK RESULTS", padding_char=gear)
-    padded_log(logger, "BINDING ENERGY MAE")
-    log_energy_mae(logger, df_be_ae)
-    padded_log(logger, "INTERACTION ENERGY MAE")
-    log_energy_mae(logger, df_ie_ae)
-    padded_log(logger, "DEFORMATION ENERGY MAE")
-    log_energy_mae(logger, df_de_ae)
+    padded_log(logger, "BINDING ENERGY MAE (BSSE / Boys-Bernardi)")
+    log_energy_mae_per_group(logger, df_be_ae, dft_func)
+    logger.info("")
+    logger.info("  Note — Interaction-energy (IE) and deformation-energy (DE)")
+    logger.info("         breakdowns are not shown in this summary. Per-method")
+    logger.info("         values and errors vs the CCSD(T)/CBS reference are")
+    logger.info("         available in:")
+    logger.info("")
+    logger.info("           IE :  json_data/IE_DFT.json")
+    logger.info("                 json_data/IE_AE_DFT.json   (absolute error)")
+    logger.info("                 json_data/IE_RE_DFT.json   (relative error)")
+    logger.info("")
+    logger.info("           DE :  json_data/DE_DFT.json")
+    logger.info("                 json_data/DE_AE_DFT.json   (absolute error)")
+    logger.info("                 json_data/DE_RE_DFT.json   (relative error)")
+    logger.info("")
+
+    # Optional gCP-corrected BE block — runs only when gcp_correction was
+    # actually applied (toggle on AND basis matched). Combines the bare
+    # no-CP DFT binding energies with the standalone gCP correction term
+    # for each entry (Δgcp = gcp(complex) − gcp(A) − gcp(B)), restricted
+    # to the gcp-compatible functional pool.
+    if config.gcp_correction and config.be_basis == "def2-tzvp":
+        padded_log(logger, "gCP-CORRECTED BINDING ENERGY", padding_char=gear)
+
+        # Walk the be_nocp dataset to get the (entry → stoichiometry) map
+        # and collect every unique molecule id.
+        ds_nocp = client.get_dataset("reaction", f"{rdset_base}_be_nocp")
+        entry_stoichs: Dict[str, List[Tuple[float, int]]] = {}
+        unique_mol_ids = set()
+        for entry in ds_nocp.iterate_entries():
+            entry_stoichs[entry.name] = [
+                (s.coefficient, s.molecule.id) for s in entry.stoichiometries
+            ]
+            for s in entry.stoichiometries:
+                unique_mol_ids.add(s.molecule.id)
+
+        gcp_map = qcf.fetch_gcp_corrections(client, list(unique_mol_ids))
+        logger.info(
+            f"  Fetched gCP corrections for {len(gcp_map)}/{len(unique_mol_ids)} "
+            f"molecules."
+        )
+
+        # Hartree → kcal/mol, matching what fetch_reaction_values returns
+        hartree_to_kcal = qcel.constants.conversion_factor("hartree", "kcal/mol")
+        delta_gcp_kcal = {}
+        for entry, stoichs in entry_stoichs.items():
+            try:
+                delta_h = sum(coef * gcp_map[mid] for coef, mid in stoichs)
+            except KeyError:
+                continue  # incomplete gCP coverage for this entry — skip
+            delta_gcp_kcal[entry] = delta_h * hartree_to_kcal
+
+        # Restrict to gcp-compatible methods (case-insensitive method match)
+        compat_lower = {m.lower() for m in gcp_compatible_functionals()}
+        df_be_nocp = qcf.fetch_reaction_values(
+            client, rdset_base, stoich="be_nocp",
+        ).dropna(axis=1)
+
+        # df_be_nocp column convention: "<method>/<basis>" (slash separator
+        # comes from fetch_reaction_values' label-formatting).
+        gcp_cols = [
+            col for col in df_be_nocp.columns
+            if col.rsplit("/", 1)[0] in compat_lower
+        ]
+
+        if not gcp_cols or not delta_gcp_kcal:
+            logger.warning(
+                "  No gCP-corrected columns to report "
+                "(missing matches between method list and reaction columns)."
+            )
+        else:
+            df_be_gcp = df_be_nocp[gcp_cols].copy()
+            for entry in df_be_gcp.index:
+                if entry in delta_gcp_kcal:
+                    df_be_gcp.loc[entry] = (
+                        df_be_gcp.loc[entry] + delta_gcp_kcal[entry]
+                    )
+
+            # Persist alongside the existing BE_DFT.json
+            df_be_gcp.to_json(folder_path_json / "BE_gcp_DFT.json", orient="index")
+            logger.info(
+                f"  Saved gCP-corrected BE in BE_gcp_DFT.json "
+                f"({len(gcp_cols)} methods × {len(df_be_gcp.index)} entries) "
+                f"{bcheck}"
+            )
+
+            df_be_gcp_ae, df_be_gcp_re = get_errors_dataframe(
+                df_be_gcp, ref_df["BE"].to_dict(),
+            )
+            df_be_gcp_ae.to_json(
+                folder_path_json / "BE_gcp_AE_DFT.json", orient="index",
+            )
+            df_be_gcp_re.to_json(
+                folder_path_json / "BE_gcp_RE_DFT.json", orient="index",
+            )
+
+            padded_log(logger, "gCP-CORRECTED BINDING ENERGY MAE")
+            log_energy_mae_per_group(logger, df_be_gcp_ae, dft_func)
 
     logger.removeHandler(file_handler)
     file_handler.close()

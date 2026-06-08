@@ -7,7 +7,8 @@ Usage:
     beep --schema sampling
 
 The JSON file must contain a "workflow" key that selects which workflow to run.
-Valid workflow values: sampling, be_hess, extract, pre_exp, geom_benchmark, energy_benchmark
+Valid workflow values: sampling, be_hess, extract, pre_exp, geom_benchmark,
+energy_benchmark, nm_sampling
 """
 import argparse
 import json
@@ -22,6 +23,7 @@ from .models import (
     PreExpConfig,
     GeomBenchmarkConfig,
     EnergyBenchmarkConfig,
+    NmSamplingConfig,
 )
 from .adapters.qcfractal_adapter import connect
 
@@ -32,6 +34,7 @@ WORKFLOW_MODELS = {
     "pre_exp": PreExpConfig,
     "geom_benchmark": GeomBenchmarkConfig,
     "energy_benchmark": EnergyBenchmarkConfig,
+    "nm_sampling": NmSamplingConfig,
 }
 
 
@@ -154,6 +157,8 @@ def main():
         from .workflows.geom_benchmark import run
     elif workflow == "energy_benchmark":
         from .workflows.energy_benchmark import run
+    elif workflow == "nm_sampling":
+        from .workflows.nm_sampling import run
 
     run(config, client)
 

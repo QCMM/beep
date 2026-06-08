@@ -391,3 +391,299 @@ def write_energy_log(df: pd.DataFrame, mol: str, existing_content: str = "", com
     content += f"{'   '.join(std_values):<50}"
     content += "\n"
     return content
+
+
+def _strip_group_prefix(name: str) -> str:
+    """Drop the 'geom_' / 'energy_' style prefix from functional-group names
+    so that they match the display style used by ``log_dataframe_averages``
+    (e.g. ``geom_hmgga_dz`` → ``hmgga_dz``)."""
+    for prefix in ("geom_", "energy_"):
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
+
+
+def log_energy_mae_per_group(
+    logger: logging.Logger,
+    df_ae: pd.DataFrame,
+    dft_func_dict: dict,
+) -> None:
+    """Per-category MAE breakdown for the energy_benchmark output.
+
+    Mirrors ``log_trajectory_metrics_per_group``: one table per
+    functional category (GGA, Meta-GGA, Hybrid, Meta-Hybrid, LRC,
+    Non-local, …) listing the methods present in ``df_ae`` whose
+    column name matches a member of that category, sorted ascending by
+    MAE, with ``*`` next to the winner. A summary table at the bottom
+    lists the per-group winner.
+
+    Functionals may belong to **multiple** categories (e.g. ``B97M-V``
+    is both Meta-GGA and Non-local); those columns appear in every
+    matching category table.
+
+    Categories with no surviving columns (because every functional in
+    that list was filtered out by the integrated-dispersion convention)
+    are silently skipped.
+
+    Parameters
+    ----------
+    logger : logging.Logger
+        Active BEEP logger.
+    df_ae : pd.DataFrame
+        Absolute-error DataFrame (entries × method/basis columns), as
+        produced by ``get_errors_dataframe``.
+    dft_func_dict : dict
+        ``{group_display_name → [functional_name, ...]}`` mapping. The
+        functional names are matched case-insensitively against the
+        bare-method portion of each column (``col.rsplit("/", 1)[0]``).
+    """
+    if df_ae.empty:
+        logger.warning("\n  No MAE data to display.\n")
+        return
+
+    # MAE per column = mean of |signed error|. Despite the "_ae" suffix in
+    # the caller's variable name, the DataFrame from get_errors_dataframe is
+    # signed (E_dft − E_ref); take abs() before averaging — same convention
+    # as the legacy ``log_energy_mae``.
+    mae = df_ae.abs().mean(axis=0)
+    name_width = 30
+    summary = {}   # group_display -> (winner, winner_mae)
+
+    for group, funcs in dft_func_dict.items():
+        funcs_lower = {f.lower() for f in funcs}
+        in_group_cols = [
+            c for c in df_ae.columns
+            if c.rsplit("/", 1)[0] in funcs_lower
+        ]
+        if not in_group_cols:
+            continue
+
+        group_maes = mae[in_group_cols].sort_values()
+        winner = str(group_maes.idxmin())
+        winner_mae = float(group_maes.iloc[0])
+        summary[group] = (winner, winner_mae)
+
+        logger.info(f"\nFunctional Group: {group}")
+        header = f"{'Level of Theory':<{name_width}} | MAE"
+        logger.info(header)
+        logger.info("-" * max(len(header), name_width + 14))
+        for col, val in group_maes.items():
+            mark = "*" if col == winner else " "
+            logger.info(f"{col:<{name_width}} | {val:.6f} {mark}")
+
+    if not summary:
+        return
+
+    logger.info("\nSummary of best functional per group (lowest MAE):")
+    summary_header = (
+        f"{'Functional Group':<{name_width}} | "
+        f"{'Level of Theory':<{name_width}} | {'MAE':<12}"
+    )
+    logger.info(summary_header)
+    logger.info("-" * len(summary_header))
+    for group, (winner, val) in summary.items():
+        logger.info(
+            f"{group:<{name_width}} | {winner:<{name_width}} | {val:.6f}"
+        )
+
+
+def log_trajectory_metrics_per_group(
+    logger: logging.Logger,
+    traj_metrics: dict,
+    dft_geom_functionals: dict,
+    ranking_df: pd.DataFrame = None,
+) -> None:
+    """Per-group trajectory force-RMSD table, BENCHMARK RESULTS style.
+
+    For each functional group, prints the per-Cartesian-component force
+    RMSD (meV/Å) vs reference. The row with the best (lowest) combined
+    score in the group is marked with ``*``; falls back to best
+    ``rmsd_force`` when no ``ranking_df`` is supplied. A summary table
+    lists the per-group winner at the bottom.
+
+    Energy is not displayed — absolute energies aren't meaningful for
+    geometry benchmarking (use the energy_benchmark workflow for
+    relative-energy comparison).
+
+    Parameters
+    ----------
+    logger : logging.Logger
+        Active BEEP logger.
+    traj_metrics : dict
+        ``{lowercase_functional → {rmsd_energy, rmsd_force, ...}}``.
+    dft_geom_functionals : dict
+        ``{group_name → [mixed_case_functional, ...]}`` mapping. The
+        group display name has any ``geom_`` / ``energy_`` prefix
+        stripped to match ``log_dataframe_averages``.
+    ranking_df : pd.DataFrame, optional
+        Output of ``combined_zscore_ranking``; if provided, the
+        per-group winner is chosen by ``combined_score``.
+    """
+    if not traj_metrics:
+        logger.warning("\n  No trajectory metrics to display.\n")
+        return
+
+    name_width = 30
+    metric_header = "RMSD_F (meV/Å)"
+    summary = {}   # display_group -> (winner_mixed_case, best_metric_value)
+
+    for group, funcs in dft_geom_functionals.items():
+        group_display = _strip_group_prefix(group)
+        in_group = [f for f in funcs if f.lower() in traj_metrics]
+        if not in_group:
+            continue
+
+        if ranking_df is not None:
+            ranked = [f for f in in_group if f.lower() in ranking_df.index]
+            if ranked:
+                lower_to_orig = {f.lower(): f for f in ranked}
+                best_lc = ranking_df.loc[
+                    list(lower_to_orig), "combined_score"
+                ].idxmin()
+                best_func = lower_to_orig[best_lc]
+                summary[group_display] = (
+                    best_func, ranking_df.at[best_lc, "combined_score"],
+                )
+            else:
+                best_func = None
+        else:
+            best_func = min(
+                in_group, key=lambda f: traj_metrics[f.lower()]["rmsd_force"],
+            )
+            summary[group_display] = (
+                best_func, traj_metrics[best_func.lower()]["rmsd_force"],
+            )
+
+        logger.info(f"\nFunctional Group: {group_display}")
+        header = f"{'Level of Theory':<{name_width}} | {metric_header}"
+        logger.info(header)
+        logger.info("-" * max(len(header), name_width + 18))
+        for func in in_group:
+            v = traj_metrics[func.lower()]["rmsd_force"]
+            mark = "*" if func == best_func else " "
+            logger.info(f"{func:<{name_width}} | {v:<14.4f} {mark}")
+
+    if not summary:
+        return
+    if ranking_df is not None:
+        title = "Summary of best functional per group (by combined score):"
+        score_header = "Combined Score"
+        fmt = "{:<+14.4f}"
+    else:
+        title = "Summary of best functional per group (by RMSD_F):"
+        score_header = "RMSD_F (meV/Å)"
+        fmt = "{:<14.4f}"
+
+    logger.info(f"\n{title}")
+    summary_header = (
+        f"{'Functional Group':<{name_width}} | "
+        f"{'Level of Theory':<{name_width}} | {score_header:<14}"
+    )
+    logger.info(summary_header)
+    logger.info("-" * len(summary_header))
+    for group, (winner, score) in summary.items():
+        logger.info(
+            f"{group:<{name_width}} | {winner:<{name_width}} | "
+            + fmt.format(score)
+        )
+
+
+# Per-metric display metadata used by log_trajectory_ranking_table.
+# Maps metric column name → (short header, long description with units).
+# Add entries here when a new ranking metric is introduced.
+_RANKING_METRIC_META = {
+    "rmsd_eq":    ("RMSD_eq", "equilibrium-geometry deviation, Å"),
+    "rmsd_force": ("RMSD_F",  "per-Cartesian-component force RMSE, meV/Å"),
+}
+
+
+def log_trajectory_ranking_table(
+    logger: logging.Logger,
+    ranking_df: pd.DataFrame,
+    score_weights: dict = None,
+) -> None:
+    """Combined z-score-weighted ranking with an inline methodology block.
+
+    Explains the score formula in the log itself so anyone reading the
+    log can audit the ranking without having to dig into the source.
+
+    Generic over any number of metrics — the columns displayed are
+    derived from ``score_weights.keys()`` so the same helper serves the
+    geom-trajectory case (2 metrics) and the nm-sampling case (1 metric).
+
+    Parameters
+    ----------
+    logger : logging.Logger
+        Active BEEP logger.
+    ranking_df : pd.DataFrame
+        Output of ``combined_zscore_ranking``; rows are functionals
+        (lowercase), columns include the raw metrics, their z-scores
+        (``z_<metric>``), and ``combined_score``.
+    score_weights : dict, optional
+        ``{metric_name → weight}``. Determines which columns are
+        displayed and the methodology block. Defaults to equal weights
+        on (``rmsd_eq``, ``rmsd_force``).
+    """
+    if ranking_df is None or ranking_df.empty:
+        logger.warning(
+            "\n  Combined ranking unavailable "
+            "(no functionals with complete data).\n"
+        )
+        return
+
+    w = score_weights or {"rmsd_eq": 1.0, "rmsd_force": 1.0}
+    metric_names = list(w.keys())
+    raw_headers = [_RANKING_METRIC_META.get(m, (m, m))[0] for m in metric_names]
+    cols = list(metric_names) + [f"z_{m}" for m in metric_names] + ["combined_score"]
+    headers = (
+        raw_headers
+        + [f"z({h})" for h in raw_headers]
+        + ["Score"]
+    )
+
+    methods = list(ranking_df.index)
+    width = max(36, max(len(m) for m in methods) + 2)
+
+    logger.info("")
+    logger.info("  Methodology")
+    if len(metric_names) == 1:
+        m = metric_names[0]
+        h, desc = _RANKING_METRIC_META.get(m, (m, m))
+        logger.info(f"    One metric — {h} ({desc}) — converted to a")
+        logger.info("    z-score across the benchmarked functionals:")
+    else:
+        descs = ", ".join(
+            f"{_RANKING_METRIC_META.get(m, (m, m))[0]} ({_RANKING_METRIC_META.get(m, (m, m))[1]})"
+            for m in metric_names
+        )
+        logger.info(
+            f"    {len(metric_names)} metrics — {descs} — have different"
+        )
+        logger.info("    units. To combine them we convert each to a z-score")
+        logger.info("    across the benchmarked functionals:")
+    logger.info("        z_m = (value_m - mean) / std         (population std, ddof=0)")
+    logger.info("    The combined score is a weighted sum of the z-scores:")
+    formula = " + ".join(f"w_{h} · z({h})" for h in raw_headers)
+    logger.info(f"        score = {formula}")
+    weights_line = ", ".join(
+        f"w_{h} = {w[m]}" for m, h in zip(metric_names, raw_headers)
+    )
+    logger.info(f"    Current weights: {weights_line}")
+    logger.info("    (override via 'score_weights' in the workflow config.)")
+    logger.info("    Z-scores are dimensionless: this puts the metrics on a")
+    logger.info("    common scale without arbitrary unit conversions.")
+    logger.info("    Lower combined score = better.")
+    logger.info("")
+    logger.info("    Absolute energies are not part of the score — they're")
+    logger.info("    dominated by total-energy-scale differences (correlation,")
+    logger.info("    basis, BSSE) rather than PES quality. Use the")
+    logger.info("    energy_benchmark workflow for relative-energy comparison.")
+    logger.info("")
+    header = f"  {'Functional':<{width}s}" + "".join(f"{h:<14s}" for h in headers)
+    logger.info(header)
+    logger.info("  " + "-" * (len(header) - 2))
+    for m in methods:
+        line = f"  {m:<{width}s}"
+        for col in cols:
+            line += f"{ranking_df.at[m, col]:<+14.4f}"
+        logger.info(line)

@@ -5,6 +5,84 @@ All notable changes to BEEP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.13.0.dev
+
+### Added
+
+- **`nm_sampling` workflow** — per-functional force-RMSE benchmark on
+  normal-mode-displaced geometries. For each binding site, BEEP
+  computes a cheap Hessian (default `hf/def2-svp`, configurable),
+  diagonalises it via Psi4/qcelemental, classifies every vibrational
+  mode as **intermolecular / bending / stretching** by
+  fragment-centre-of-mass projection, picks the lowest-frequency modes
+  in each band up to per-band caps (defaults `3 / 2 / 1`), and
+  generates ± displaced geometries at per-band RMS Cartesian
+  amplitudes (defaults `0.08 / 0.05 / 0.03 Å`). At every displacement
+  it submits a CCSD(T)/aug-cc-pvtz reference gradient plus a DFT
+  gradient per functional in the geom_benchmark pool, then reports
+  **per-Cartesian-component force RMSE** vs CCSD(T) grouped by
+  functional category. Same per-group log layout as the
+  `geom_benchmark` trajectory output. Invoke via `beep --config
+  nm_sampling.json`; `beep --schema nm_sampling` for the full config.
+
+  *Why force RMSE on displacements and not just along the trajectory.*
+  Trajectory sampling probes a one-dimensional path; normal-mode
+  displacements span the soft, chemically-relevant degrees of freedom
+  off equilibrium. R2SCAN-3c wins on the H2/W1 sanity benchmark at
+  18.5 meV/Å; HF-3c last at 805 meV/Å — both consistent with
+  expectation. Single-metric ranking (no z-score machinery) — the
+  per-group summary picks winners by raw RMSE.
+
+- **Trajectory analysis in `geom_benchmark`** (default-on). For each
+  DFT functional, BEEP now submits SP + gradient calculations at every
+  geometry along the reference optimization trajectory and reports the
+  per-Cartesian-component **RMSD of the force** (meV/Å) vs the
+  reference. Combined with the existing equilibrium-geometry RMSD via
+  a z-score-weighted ranking (weights configurable via
+  `score_weights`). Same per-group table layout as the existing
+  `BENCHMARK RESULTS` section; appears immediately below it in the
+  workflow log. Inspired by the MLP test-set validation in Bovolenta
+  et al. 2025 (A&A, in press; arXiv 2508.14219), Appendix C.2 /
+  Fig C.1 / Table C.1. Set `trajectory_analysis: false` in the
+  workflow config to keep the legacy eq-geometry-only behaviour.
+
+  *Why force RMSD and not energy MAE/RMSE.* Absolute total energies
+  carry method-specific offsets (correlation, basis, BSSE) that
+  dominate any cross-method comparison and aren't relevant to
+  geometry quality. Gradient deviations reflect PES shape, which is
+  what geometry optimization actually cares about. For relative-energy
+  comparison use the `energy_benchmark` workflow. RMSD (rather than
+  MAE) is used to penalise occasional large failures — a single bad
+  gradient step is exactly the failure mode that derails a real
+  geometry optimization.
+
+- **`combined_zscore_ranking` is weight-driven.** The metrics combined
+  are taken from `weights.keys()`, so the same function serves the
+  2-metric geom-benchmark case (`rmsd_eq` + `rmsd_force`) and any
+  future N-metric variant without modification.
+
+### Changed
+
+- `geom_benchmark` now performs additional SP + gradient submissions
+  per functional × reference-trajectory step when
+  `trajectory_analysis` is enabled (the new default). Existing 0.12.x
+  configs that don't set the field will pick up this behaviour
+  automatically; opt out with `trajectory_analysis: false`.
+
+- `GeomBenchmarkConfig.score_weights` now defaults to
+  `{"rmsd_eq": 1.0, "rmsd_force": 1.0}` (equal weighting of the two
+  metrics that survive the geom-benchmark physical filter).
+
+### Fixed
+
+- `be_hess`: bypass Psi4's default ADIIS warmup by setting
+  `scf_initial_accelerator: NONE` in the SCF keywords. On Psi4 1.10
+  the ADIIS path triggered intermittent SCF convergence failures on a
+  fraction of BE records. Verified on H2O / B3LYP / def2-SVP that pure
+  DIIS reaches the same converged energy (Δ < 1e-13 Ha) without the
+  ADIIS markers in the Psi4 output. No effect on already-submitted
+  records — only new submissions pick up the override.
+
 ## [0.12.0] — 2026-05-30
 
 The first BEEP release in the qcportal 0.63+ era. The QCFractal stack

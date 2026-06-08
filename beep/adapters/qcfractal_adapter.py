@@ -27,8 +27,11 @@ from qcportal.record_models import RecordStatusEnum, PriorityEnum
 from qcportal.singlepoint.record_models import QCSpecification, SinglepointDriver
 from qcportal.optimization.record_models import OptimizationSpecification
 from qcportal.optimization.dataset_models import OptimizationDataset
-from qcportal.singlepoint.dataset_models import SinglepointDataset
+from qcportal.singlepoint.dataset_models import (
+    SinglepointDataset, SinglepointDatasetNewEntry,
+)
 from qcportal.reaction.dataset_models import ReactionDataset
+import numpy as np
 from qcportal.reaction.record_models import ReactionSpecification, ReactionKeywords
 from qcelemental.models.molecule import Molecule
 from pydantic import ValidationError
@@ -496,6 +499,54 @@ def submit_hessians(client: PortalClient, program: str, method: str,
     )
 
 
+def submit_gcp_corrections(client: PortalClient, mol_ids: list, tag: str):
+    """Submit gCP corrections at dft/def2-tzvp via the mctc-gcp program.
+
+    The gCP correction depends on the basis set and SCF type only, not on
+    the specific DFT functional, so one record per (molecule, basis) is
+    enough — the result is reused across every gcp-compatible functional
+    at extract time. We currently only target ``dft/def2-tzvp``; expand
+    here if BEEP adopts additional basis sets in the gCP-parametrised
+    range.
+    """
+    return client.add_singlepoints(
+        molecules=mol_ids,
+        program="mctc-gcp",
+        driver="energy",
+        method="dft/def2-tzvp",
+        basis=None,
+        keywords={},
+        compute_tag=tag,
+    )
+
+
+def fetch_gcp_corrections(
+    client: PortalClient, mol_ids: List[int],
+) -> Dict[int, float]:
+    """Fetch gCP correction energies (hartree) for the given molecule IDs.
+
+    Pairs with ``submit_gcp_corrections``. Returns ``{mol_id → gcp_energy}``
+    for records that are complete; molecules with missing/incomplete
+    records are silently omitted (caller should treat them as missing).
+    """
+    results = client.query_singlepoints(
+        program="mctc-gcp",
+        method="dft/def2-tzvp",
+        molecule_id=mol_ids,
+    )
+    out: Dict[int, float] = {}
+    for r in results:
+        if not is_complete(r.status):
+            continue
+        # mctc-gcp publishes the correction as ``return_result`` (plus a few
+        # human-readable aliases like ``"gcp correction energy"``); the
+        # ``return_energy`` key Psi4/QC backends use does not exist here.
+        e = r.return_result
+        if e is not None:
+            out[r.molecule_id] = float(e)
+    return out
+
+
 def add_reaction(client: PortalClient, rdset_base_name: str,
                  name: str, stoichiometry: dict) -> None:
     """Add reaction entries across stoichiometry-specific datasets.
@@ -785,12 +836,10 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
 
     spec_names = [spec_name] if spec_name else ds.specification_names
     data = {}
+    skipped_integrated: List[str] = []
     for sname in spec_names:
         if "_" in sname and _has_dispersion_suffix(sname.split("_", 1)[0]):
-            logger.warning(
-                f"Skipping integrated dispersion spec '{sname}' in {ds_name} "
-                f"— BEEP expects the separated pair (bare DFT + bare dispersion)."
-            )
+            skipped_integrated.append(sname)
             continue
 
         col_label = sname.replace("_", "/")
@@ -805,6 +854,13 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
                 )
         data[col_label] = energies
 
+    if skipped_integrated:
+        logger.warning(
+            f"  Skipped {len(skipped_integrated)} integrated-dispersion spec(s) "
+            f"in {ds_name} (BEEP expects separated bare-DFT + bare-dispersion). "
+            f"Re-submit via compute_be_dft_energies to surface these data."
+        )
+
     df = pd.DataFrame(data)
 
     # Sum bare-DFT + bare-dispersion into composite columns. A bare-dispersion
@@ -814,6 +870,7 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
         c for c in df.columns
         if "/" not in c and any(c.endswith(suf) for suf in DISPERSION_SUFFIXES)
     ]
+    bare_dft_cols_consumed = set()
     for disp_col in disp_cols:
         for suffix in DISPERSION_SUFFIXES:
             if disp_col.endswith(suffix):
@@ -824,6 +881,15 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
             basis_part = dft_col.split("/", 1)[1]
             composite_col = f"{disp_col}/{basis_part}"
             df[composite_col] = df[dft_col] + df[disp_col]
+            bare_dft_cols_consumed.add(dft_col)
+
+    # The bare-DFT and bare-dispersion columns are submission/summing
+    # artifacts; user-facing output (log tables, saved JSON) should only
+    # carry the composite or integrated columns. Drop them now so every
+    # downstream caller sees a clean DataFrame.
+    cols_to_drop = list(bare_dft_cols_consumed) + disp_cols
+    if cols_to_drop:
+        df = df.drop(columns=cols_to_drop, errors="ignore")
 
     return df
 
@@ -1021,6 +1087,10 @@ def compute_be_dft_energies(
     all_submitted = 0
     all_existing = 0
 
+    # Local import to avoid a circular module-load dependency between
+    # adapters and core/dft_functionals.
+    from ..core.dft_functionals import is_3c_method
+
     for i, lot in enumerate(all_dft):
         method, basis = lot.split("_")
         bare, disp_method, disp_program = _split_dispersion(method)
@@ -1028,8 +1098,13 @@ def compute_be_dft_energies(
 
         lot_submitted = 0
         lot_existing = 0
+        # -3c composites already include gCP in the SCF; computing the BSSE
+        # counterpoise stoich on top would double-correct.
+        skip_stoichs = {"bsse"} if is_3c_method(method) else set()
 
         for stoich in STOICH_TYPES:
+            if stoich in skip_stoichs:
+                continue
             if disp_method is None:
                 # No dispersion suffix — single integrated spec
                 result = submit_energies(
@@ -1278,3 +1353,192 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
     return therm["ZPE_vib"].data, True
 
 
+# ---------------------------------------------------------------------------
+# Trajectory-benchmark singlepoint helpers (geom_benchmark trajectory mode)
+# ---------------------------------------------------------------------------
+
+def get_or_create_singlepoint_dataset(
+    client: PortalClient, name: str,
+) -> SinglepointDataset:
+    """Get-or-create a SinglepointDataset by name."""
+    return get_or_create_collection(
+        client, name, collection_type=SinglepointDataset,
+    )
+
+
+def add_gradient_spec(
+    ds_sp: SinglepointDataset,
+    spec_name: str,
+    method: str,
+    basis: Optional[str],
+    program: str = "psi4",
+    keywords: Optional[dict] = None,
+    description: str = "",
+) -> str:
+    """Add an SP + gradient ``QCSpecification`` to a ``SinglepointDataset``.
+
+    Idempotent: ``add_specification`` silently reports already-existing
+    specs. Returns the lowercased spec name actually registered.
+    """
+    qc_spec = QCSpecification(
+        program=program,
+        driver=SinglepointDriver.gradient,
+        method=method,
+        basis=basis,
+        keywords=keywords or {},
+    )
+    name = spec_name.lower()
+    ds_sp.add_specification(
+        name=name, specification=qc_spec, description=description,
+    )
+    return name
+
+
+def add_singlepoint_entries(
+    ds_sp: SinglepointDataset,
+    entries: List[Tuple[str, Molecule]],
+) -> Any:
+    """Bulk-add ``(entry_name, Molecule)`` pairs to a SinglepointDataset.
+
+    Faster than calling ``add_entry`` in a loop because the server is hit
+    once per batch.
+    """
+    new_entries = [
+        SinglepointDatasetNewEntry(name=name, molecule=mol)
+        for name, mol in entries
+    ]
+    return ds_sp.add_entries(new_entries)
+
+
+def submit_singlepoints_in_dataset(
+    ds_sp: SinglepointDataset,
+    spec_names: List[str],
+    tag: str,
+    subset=None,
+) -> Any:
+    """Submit SP computations from a SinglepointDataset for the given specs."""
+    entry_names = list(subset) if subset else None
+    return ds_sp.submit(
+        entry_names=entry_names,
+        specification_names=spec_names,
+        compute_tag=tag,
+    )
+
+
+def fetch_sp_energy_gradient(
+    ds_sp: SinglepointDataset, entry_name: str, spec_name: str,
+) -> Tuple[Optional[float], Optional[np.ndarray]]:
+    """Fetch ``(energy_hartree, gradient_hartree_per_bohr)`` from a record.
+
+    Gradient is reshaped from the flat list qcportal returns to
+    ``(n_atoms, 3)``. Returns ``(None, None)`` if the record is missing,
+    errored, or incomplete.
+    """
+    record = ds_sp.get_record(entry_name, spec_name.lower())
+    if record is None or not is_complete(record.status):
+        return None, None
+    props = record.properties or {}
+    energy = props.get("return_energy")
+    grad = props.get("return_gradient")
+    if grad is not None:
+        grad = np.asarray(grad, dtype=float).reshape(-1, 3)
+    return energy, grad
+
+
+def fetch_normal_modes(
+    client: PortalClient, mol, hessian_lot: str,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[Molecule]]:
+    """Fetch the complete Hessian record for ``mol`` at ``hessian_lot`` and
+    run vibrational analysis. Returns ``(frequencies_cm, modes_cart, mol_obj)``
+    where modes are Cartesian, un-mass-weighted, and TR-projected.
+
+    Mirrors the Hessian-record query block in :func:`get_zpve_mol` but
+    returns the raw normal-mode data (frequencies + Cartesian eigenvectors)
+    instead of the ZPE summary.
+
+    Parameters
+    ----------
+    client : PortalClient
+    mol : int
+        Molecule ID on the server.
+    hessian_lot : str
+        Method + basis as ``method_basis`` (e.g. ``"hf_def2-svp"``).
+
+    Returns
+    -------
+    frequencies_cm : (n_vib,) complex ndarray, or None if no record
+    modes_cart : (n_vib, n_atoms, 3) ndarray, or None if no record
+    mol_obj : qcelemental Molecule (the one attached to the record), or None
+    """
+    from ..core.normal_mode_sampling import extract_normal_modes_from_hessian_record
+
+    logger = logging.getLogger("beep")
+    lot_parts = hessian_lot.split("_", 1)
+    method = lot_parts[0]
+    basis = lot_parts[1] if len(lot_parts) == 2 else None
+
+    results = list(client.query_singlepoints(
+        driver=SinglepointDriver.hessian,
+        molecule_id=mol,
+        method=method,
+        basis=basis,
+        status=RecordStatusEnum.complete,
+    ))
+    # Defensive (see get_zpve_mol for backstory): drop records with None
+    # properties — accessing return_result on those crashes.
+    results = [r for r in results if r.properties is not None]
+    if not results:
+        logger.info(
+            f"No complete hessian record at {method}/{basis} for molecule {mol}."
+        )
+        return None, None, None
+    if len(results) > 1:
+        logger.warning(
+            f"Found {len(results)} complete hessian records for molecule {mol} "
+            f"at {method}/{basis}; using the first."
+        )
+    record = results[0]
+    n_coords = 3 * len(record.molecule.symbols)
+    hess = np.asarray(record.return_result, dtype=float).reshape(n_coords, n_coords)
+
+    # Energy is optional — _vibanal_wfn uses it only for the thermo summary
+    qcvars = record.dict().get("extras", {}).get("qcvars", {})
+    energy = qcvars.get("CURRENT ENERGY")
+    if energy is None:
+        energy = (record.properties or {}).get("current energy") or 0.0
+
+    freqs_cm, modes_cart = extract_normal_modes_from_hessian_record(
+        hess=hess, molecule=record.molecule, energy=energy,
+    )
+    return freqs_cm, modes_cart, record.molecule
+
+
+def get_optimization_trajectory(
+    odset: OptimizationDataset, entry_name: str, opt_lot: str,
+) -> List[dict]:
+    """Pull every step of a completed optimization as a list of dicts.
+
+    Each dict has keys ``molecule`` (qcelemental Molecule),
+    ``energy_hartree`` (float or None) and ``gradient_hartree_per_bohr``
+    (np.ndarray of shape ``(n_atoms, 3)`` or None). Returns ``[]`` if
+    the opt is missing, errored, or has an empty trajectory.
+
+    Used by ``geom_benchmark`` trajectory analysis to obtain the shared
+    set of geometries (and reference E + ∇E) for cross-functional
+    comparison.
+    """
+    record = odset.get_record(entry_name, opt_lot.lower())
+    if record is None or not is_complete(record.status):
+        return []
+    steps = []
+    for sp in record.trajectory or []:
+        props = sp.properties or {}
+        grad = props.get("return_gradient")
+        if grad is not None:
+            grad = np.asarray(grad, dtype=float).reshape(-1, 3)
+        steps.append({
+            "molecule": sp.molecule,
+            "energy_hartree": props.get("return_energy"),
+            "gradient_hartree_per_bohr": grad,
+        })
+    return steps

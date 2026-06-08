@@ -162,11 +162,19 @@ def _harmonic_analysis(hess, geom, mass, project_trans=True, project_rot=True):
     # Characteristic vibrational temperature
     theta_vib = np.abs(omega.real) * 100.0 * _C * _H / _KB  # [K]
 
+    # Cartesian un-mass-weighted eigenvectors, reshaped so a mode is a
+    # (n_atoms, 3) array. ``modes_cart[i]`` is the Cartesian displacement
+    # pattern of mode i (units: Å·amu^(-1/2), but only the direction is
+    # used downstream — the displacement-amplitude module normalises to a
+    # target RMS Cartesian length in Å before applying).
+    modes_cart = wL.T.reshape(ndof, nat, 3)
+
     vibinfo = {
         "omega": Datum("omega", "cm^-1", omega),
         "mu": Datum("mu", "u", mu),
         "TRV": SimpleNamespace(data=trv),
         "theta_vib": Datum("theta_vib", "K", theta_vib),
+        "modes_cart": SimpleNamespace(data=modes_cart),
     }
     return vibinfo
 

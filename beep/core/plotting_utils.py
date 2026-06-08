@@ -326,3 +326,82 @@ def zpve_plot(x: np.ndarray, y: np.ndarray, fit_params: List[float]) -> plt.Figu
 
     return fig
 
+
+def trajectory_error_histograms(
+    raw_deltas, mol_name, plot_path, ranking_df=None,
+):
+    """Per-component force-error distributions per DFT functional.
+
+    One single-panel histogram per functional (force errors in meV/Å vs
+    the reference at the same geometry), plus a summary violin plot
+    across all functionals. Energy is not shown — absolute energies
+    aren't part of the geom_benchmark trajectory score (see the
+    workflow methodology block in the log).
+
+    Parameters
+    ----------
+    raw_deltas : dict
+        ``{functional → {"delta_force_meV_per_A": ndarray, ...}}`` with
+        flat arrays concatenated across all systems & steps.
+        ``delta_e_per_atom_meV``, if present, is ignored.
+    mol_name : str
+        Target adsorbate name (for filenames).
+    plot_path : str
+        Output directory; created by caller.
+    ranking_df : pd.DataFrame, optional
+        If provided, functionals are sorted by ``combined_score`` in
+        the summary plot (best at top of violins).
+    """
+    if not raw_deltas:
+        return
+
+    methods = list(raw_deltas.keys())
+    if ranking_df is not None:
+        ranked_methods = [m for m in ranking_df.index if m in raw_deltas]
+        methods = ranked_methods + [m for m in methods if m not in ranked_methods]
+
+    # --- Per-functional force-error histograms ---
+    for m in methods:
+        df = raw_deltas[m]["delta_force_meV_per_A"]
+        rmsd_f = float(np.sqrt(np.mean(df ** 2)))
+
+        fig, ax_f = plt.subplots(figsize=(6, 4))
+        ax_f.hist(df, bins=80, color="#7d7d7d", edgecolor="#333333",
+                  linewidth=0.3)
+        ax_f.axvline(0.0, color="black", linewidth=0.8, linestyle="--")
+        ax_f.set_xlabel(r"$F_{\mathrm{DFT}} - F_{\mathrm{ref}}$  /  meV·$\AA^{-1}$")
+        ax_f.set_ylabel("count")
+        ax_f.text(0.97, 0.95, f"RMSD: {rmsd_f:.2f} meV/Å",
+                  transform=ax_f.transAxes, ha="right", va="top",
+                  fontsize=10)
+
+        fig.suptitle(f"{mol_name} — {m}")
+        plt.tight_layout()
+        safe_name = m.replace("/", "_").replace(" ", "_")
+        plt.savefig(f"{plot_path}/traj_errors_{safe_name}.svg")
+        plt.close(fig)
+
+    # --- Summary: violins across all functionals, force only ---
+    fig, ax_f = plt.subplots(figsize=(max(8, len(methods) * 0.6), 5))
+
+    f_data = [raw_deltas[m]["delta_force_meV_per_A"] for m in methods]
+    parts_f = ax_f.violinplot(f_data, showmeans=True, showmedians=False)
+    for pc in parts_f["bodies"]:
+        pc.set_facecolor("#7d7d7d")
+        pc.set_alpha(0.7)
+    ax_f.set_xticks(range(1, len(methods) + 1))
+    ax_f.set_xticklabels(methods, rotation=90, fontsize=8)
+    ax_f.axhline(0.0, color="black", linewidth=0.6, linestyle="--")
+    ax_f.set_ylabel(r"$F_{\mathrm{DFT}} - F_{\mathrm{ref}}$  /  meV·$\AA^{-1}$")
+    if ranking_df is not None:
+        ax_f.set_title(
+            "Trajectory force errors per Cartesian component "
+            "(sorted by combined score)"
+        )
+    else:
+        ax_f.set_title("Trajectory force errors per Cartesian component")
+
+    plt.tight_layout()
+    plt.savefig(f"{plot_path}/traj_error_violins_{mol_name}.svg")
+    plt.close(fig)
+
