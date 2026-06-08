@@ -160,9 +160,9 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
             client, rdset_name, opt_lot, smol_mol, cluster_mol, ds_opt, opt_stru, logger
         )
 
-        keyword = None
+        keyword = {"scf_initial_accelerator": "NONE"}
         if mult != 1:
-            keyword = {"reference": "uks"}
+            keyword["reference"] = "uks"
 
         padded_log(logger, f"Sending computations for {rdset_name}", padding_char="*", total_length=60)
         job_ids = qcf.compute_be_dft_energies(

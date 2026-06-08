@@ -73,6 +73,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `{"rmsd_eq": 1.0, "rmsd_force": 1.0}` (equal weighting of the two
   metrics that survive the geom-benchmark physical filter).
 
+### Fixed
+
+- `be_hess`: bypass Psi4's default ADIIS warmup by setting
+  `scf_initial_accelerator: NONE` in the SCF keywords. On Psi4 1.10
+  the ADIIS path triggered intermittent SCF convergence failures on a
+  fraction of BE records. Verified on H2O / B3LYP / def2-SVP that pure
+  DIIS reaches the same converged energy (Δ < 1e-13 Ha) without the
+  ADIIS markers in the Psi4 output. No effect on already-submitted
+  records — only new submissions pick up the override.
+
 ## [0.12.0] — 2026-05-30
 
 The first BEEP release in the qcportal 0.63+ era. The QCFractal stack
