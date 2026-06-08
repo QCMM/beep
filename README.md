@@ -11,8 +11,8 @@ BEEP requires Python 3.10+ and the QCFractal v0.63+ stack. The supported install
 path is to clone a `qcfractal-0.64` conda environment and pip-install BEEP on top:
 
 ```bash
-conda create --clone qcfractal-0.64 -p /path/to/envs/beep-0.12
-/path/to/envs/beep-0.12/bin/pip install .
+conda create --clone qcfractal-0.64 -p /path/to/envs/beep-0.13
+/path/to/envs/beep-0.13/bin/pip install .
 ```
 
 Pure `pip install .` also works in any environment that already has the
@@ -61,8 +61,9 @@ This is the easiest way to create a new configuration file — start from the sc
 | `be_hess` | Submit binding energy and Hessian computations for optimized structures |
 | `extract` | Extract binding energies, apply ZPVE corrections, and generate summary tables and plots |
 | `pre_exp` | Compute pre-exponential factors from vibrational analysis over a temperature range |
-| `geom_benchmark` | Benchmark DFT geometry optimizations against high-level reference geometries |
-| `energy_benchmark` | Benchmark DFT binding energies against high-level reference values (CBS extrapolation) |
+| `geom_benchmark` | Benchmark DFT geometry optimizations and per-component force RMSD along the reference trajectory against high-level reference data |
+| `energy_benchmark` | Benchmark DFT binding energies against high-level reference values (CBS extrapolation), with optional gCP correction |
+| `nm_sampling` | Benchmark DFT gradients on ± normal-mode displacements against a high-level (CCSD(T)) reference, with per-band force-RMSE ranking |
 
 Each workflow has a corresponding example configuration in the [`examples/`](examples/) directory:
 
