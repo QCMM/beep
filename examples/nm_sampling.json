@@ -1,0 +1,37 @@
+{
+    "workflow": "nm_sampling",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "molecule": null,
+    "benchmark_structures": [],
+    "small_molecule_collection": "Small_molecules",
+    "surface_model_collection": null,
+    "geometry_opt_lot": null,
+    "hessian_lot": "hf_def2-svp",
+    "hessian_program": "psi4",
+    "hessian_keywords": null,
+    "tag_hessian": null,
+    "reference_grad_lot": "ccsd(t)_aug-cc-pvtz",
+    "reference_grad_program": "psi4",
+    "reference_grad_keywords": {"scf_type": "df", "cc_type": "df", "freeze_core": "true"},
+    "tag_reference_grad": null,
+    "dft_program": "psi4",
+    "dft_keyword": null,
+    "tag_dft_grad": null,
+    "bands": {
+        "intermolecular": {"cap": 3, "amplitude_A": 0.08},
+        "bending":        {"cap": 2, "amplitude_A": 0.05},
+        "stretching":     {"cap": 1, "amplitude_A": 0.03}
+    },
+    "inter_threshold": 0.5,
+    "bend_max_cm": 1500.0,
+    "freq_max_imag_cm": 50.0,
+    "extra_amplitudes_lowest_count": 1,
+    "extra_amplitude_factor": 2.0,
+    "pre_run": false,
+    "allow_imaginary_modes": false
+}
