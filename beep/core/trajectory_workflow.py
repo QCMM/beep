@@ -394,8 +394,27 @@ def run_trajectory_analysis(
         ranking_df.to_json(
             str(folder_path_json / "results_trajectory_ranking.json"),
         )
+
+    # Persist raw per-functional force/energy delta arrays for downstream
+    # histogram / distribution analysis. Each functional contributes two
+    # flat arrays — `<functional>__force` (meV/Å, per Cartesian component)
+    # and `<functional>__energy` (meV/atom). Load with
+    # ``data = np.load(path)``; iterate with ``data.files``.
+    if raw_deltas:
+        npz_payload = {}
+        for functional, d in raw_deltas.items():
+            npz_payload[f"{functional}__force"] = np.asarray(
+                d["delta_force_meV_per_A"]
+            )
+            npz_payload[f"{functional}__energy"] = np.asarray(
+                d["delta_e_per_atom_meV"]
+            )
+        np.savez_compressed(
+            folder_path_json / "raw_deltas_trajectory.npz", **npz_payload,
+        )
+
     logger.info(
-        f"\n  Trajectory metrics + ranking written to "
+        f"\n  Trajectory metrics + ranking + raw deltas written to "
         f"{folder_path_json}/\n"
     )
 

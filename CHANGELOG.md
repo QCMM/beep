@@ -5,6 +5,31 @@ All notable changes to BEEP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.14.0.dev
+
+### Added
+
+- **Raw force-delta arrays persisted to disk** for both `nm_sampling` and
+  `geom_benchmark` trajectory analysis. The per-functional flat arrays of
+  per-Cartesian-component force deltas (and per-atom energy deltas) are
+  now saved alongside the metrics JSON as a single NumPy `.npz` file,
+  loadable with `np.load(path)` → `{functional_name → array}`. Lets
+  users plot their own per-functional histograms of `(F_DFT - F_ref)`
+  without re-running the workflow.
+
+- **Refinement summary table in `sampling` workflow.** After refinement
+  polling finishes, the workflow now logs a per-cluster breakdown of
+  COMPLETE / ERROR / TOTAL refinement opts in the same layout as the
+  sampling summary.
+
+### Changed
+
+- **`sampling` workflow log order.** The `SAMPLING SUMMARY` table (binding
+  sites per cluster) now appears immediately after the sampling loop
+  finishes and *before* the refinement-polling block, instead of after.
+  Makes the sampling vs refinement stages distinguishable in the log;
+  pairs with the new refinement summary table at the very end.
+
 ## [0.13.0] — 2026-06-08
 
 ### Added

@@ -694,6 +694,9 @@ def run_nm_sampling(
     logger.info("         available in:")
     logger.info("")
     logger.info("           json_data/results_nm_sampling.json   (per-method metrics)")
+    logger.info("           json_data/raw_deltas_nm_sampling.npz  (per-method flat")
+    logger.info("                                                  arrays of force")
+    logger.info("                                                  + energy deltas)")
     logger.info("")
 
     # Persist JSON
@@ -703,8 +706,24 @@ def run_nm_sampling(
     (folder_path_json / "results_nm_sampling.json").write_text(
         json.dumps(metrics_json, indent=4, default=str)
     )
+
+    # Persist raw per-functional force/energy delta arrays for downstream
+    # histogram / distribution analysis. Each functional contributes two
+    # flat arrays — `<functional>__force` (meV/Å, per Cartesian component)
+    # and `<functional>__energy` (meV/atom). Load with
+    # ``data = np.load(path)``; iterate with ``data.files``.
+    deltas_path = folder_path_json / "raw_deltas_nm_sampling.npz"
+    npz_payload = {}
+    for functional, d in raw_deltas.items():
+        npz_payload[f"{functional}__force"] = np.asarray(
+            d["delta_force_meV_per_A"]
+        )
+        npz_payload[f"{functional}__energy"] = np.asarray(
+            d["delta_e_per_atom_meV"]
+        )
+    np.savez_compressed(deltas_path, **npz_payload)
     logger.info(
-        f"\n  NM-sampling metrics written to {folder_path_json}/\n"
+        f"\n  NM-sampling metrics + raw deltas written to {folder_path_json}/\n"
     )
 
     return metrics, raw_deltas

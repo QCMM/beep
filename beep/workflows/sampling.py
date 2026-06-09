@@ -440,26 +440,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
             logger.info(f"\n  Target of {config.total_binding_sites} binding sites reached. Stopping early.")
             break
 
-    # --- Wait for refinement optimizations to finish ---
-    REFINEMENT_POLL_FREQUENCY = 120
-    REFINEMENT_MAX_WAIT = 7 * 24 * 3600  # one week
-    logger.info(f"\n{'=' * 80}")
-    logger.info(f"  Waiting for refinement optimizations to complete ({ropt_lot})")
-    logger.info(f"{'=' * 80}\n")
-    for w, ds_ref in refinement_dsets:
-        entries = list(ds_ref.entry_names)
-        pids = qcf.get_job_ids(ds_ref, entries, ropt_lot)
-        if not pids:
-            logger.info(f"  {w}: no refinement records to wait on.")
-            continue
-        logger.info(f"  {w}: waiting on {len(pids)} refinement opt(s).")
-        qcf.wait_for_completion(
-            client, pids, REFINEMENT_POLL_FREQUENCY, logger,
-            max_wait=REFINEMENT_MAX_WAIT,
-        )
-        logger.info(f"  {w}: refinement complete. {bcheck}")
-
-    # --- Final summary ---
+    # --- Sampling summary (binding sites found per cluster) ---
     logger.info(f"\n\n{'=' * 80}")
     logger.info(f"  SAMPLING SUMMARY FOR {smol_name}")
     logger.info(f"{'=' * 80}")
@@ -469,6 +450,49 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         logger.info(f"  {w:<15} {n:>15}")
     logger.info(f"  {'-'*15} {'-'*15}")
     logger.info(f"  {'TOTAL':<15} {count:>15}")
+    logger.info(f"{'=' * 80}\n")
+
+    # --- Wait for refinement optimizations to finish ---
+    REFINEMENT_POLL_FREQUENCY = 120
+    REFINEMENT_MAX_WAIT = 7 * 24 * 3600  # one week
+    logger.info(f"\n{'=' * 80}")
+    logger.info(f"  Waiting for refinement optimizations to complete ({ropt_lot})")
+    logger.info(f"{'=' * 80}\n")
+    refinement_status = []  # [(cluster, n_complete, n_error, n_total)]
+    for w, ds_ref in refinement_dsets:
+        entries = list(ds_ref.entry_names)
+        pids = qcf.get_job_ids(ds_ref, entries, ropt_lot)
+        if not pids:
+            logger.info(f"  {w}: no refinement records to wait on.")
+            refinement_status.append((w, 0, 0, 0))
+            continue
+        logger.info(f"  {w}: waiting on {len(pids)} refinement opt(s).")
+        qcf.wait_for_completion(
+            client, pids, REFINEMENT_POLL_FREQUENCY, logger,
+            max_wait=REFINEMENT_MAX_WAIT,
+        )
+        _, counts = qcf.check_for_completion(client, pids)
+        n_complete = counts.get("COMPLETE", 0)
+        n_error = counts.get("ERROR", 0)
+        refinement_status.append((w, n_complete, n_error, len(pids)))
+        logger.info(f"  {w}: refinement complete. {bcheck}")
+
+    # --- Refinement summary (terminal status per cluster) ---
+    logger.info(f"\n\n{'=' * 80}")
+    logger.info(f"  REFINEMENT SUMMARY FOR {smol_name}")
+    logger.info(f"{'=' * 80}")
+    logger.info(
+        f"  {'Cluster':<15} {'Complete':>10} {'Error':>10} {'Total':>10}"
+    )
+    logger.info(f"  {'-'*15} {'-'*10} {'-'*10} {'-'*10}")
+    tot_c = tot_e = tot_n = 0
+    for w, c, e, n in refinement_status:
+        logger.info(f"  {w:<15} {c:>10} {e:>10} {n:>10}")
+        tot_c += c; tot_e += e; tot_n += n
+    logger.info(f"  {'-'*15} {'-'*10} {'-'*10} {'-'*10}")
+    logger.info(
+        f"  {'TOTAL':<15} {tot_c:>10} {tot_e:>10} {tot_n:>10}"
+    )
     logger.info(f"{'=' * 80}\n")
 
     logger.removeHandler(file_handler)
