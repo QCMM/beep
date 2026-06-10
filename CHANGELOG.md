@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Reverted unconditional SCF-accelerator override in `be_hess`.**
+  0.13.0 unconditionally injected `scf_initial_accelerator: NONE` into
+  the BE single-point keywords to bypass Psi4's default ADIIS warmup.
+  That changed the QCSpecification hash and broke `find_existing` cache
+  hits against records on the server that were submitted without the
+  keyword. 0.14.0 reverts to the pre-fix behaviour: no
+  scf_initial_accelerator override is sent, Psi4's default SCF
+  acceleration is used, and existing records continue to match. Users
+  who hit ADIIS-induced SCF convergence failures should handle them
+  per-record (e.g. reset the failed records) rather than via a
+  workflow-wide keyword.
+
 - **`sampling` workflow log order.** The `SAMPLING SUMMARY` table (binding
   sites per cluster) now appears immediately after the sampling loop
   finishes and *before* the refinement-polling block, instead of after.
