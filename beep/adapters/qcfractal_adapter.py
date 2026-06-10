@@ -156,13 +156,18 @@ def get_or_create_opt_dataset(client: PortalClient, name: str):
 
 def create_reaction_dataset(client: PortalClient, name: str,
                             program: str = "psi4"):
-    """Delete existing and create a fresh ReactionDataset."""
+    """Return an existing ReactionDataset by ``name`` or create a fresh one.
+
+    Idempotent: when the dataset already exists on the server it is returned
+    unchanged. Previously this helper deleted and recreated the dataset on
+    every call, which wiped any specs and entries registered by earlier
+    runs. qcportal 0.63+ makes spec / entry registration idempotent at the
+    dataset level, so wiping is no longer needed.
+    """
     try:
-        ds = client.get_dataset("reaction", name)
-        client.delete_dataset(ds.id, delete_records=False)
+        return client.get_dataset("reaction", name)
     except (KeyError, PortalRequestError):
-        pass
-    return client.add_dataset("reaction", name)
+        return client.add_dataset("reaction", name)
 
 
 def delete_collection(client: PortalClient, collection_type: str,
@@ -971,15 +976,16 @@ def create_or_load_reaction_dataset(
 
     Returns the base dataset name (without stoich suffix).
     """
-    # Create (or recreate) one dataset per stoich type
+    # Get-or-create one dataset per stoich type. Existing datasets are left
+    # in place: qcportal 0.63+ ``add_specification`` and ``add_entry`` are
+    # idempotent, so a second be_hess run at a different LOT now layers its
+    # specs on top of the existing dataset instead of wiping it.
     for stoich_type in STOICH_TYPES:
         ds_name = _stoich_dataset_name(rdset_name, stoich_type)
         try:
-            ds = client.get_dataset("reaction", ds_name)
-            client.delete_dataset(ds.id, delete_records=False)
+            client.get_dataset("reaction", ds_name)
         except (KeyError, PortalRequestError):
-            pass
-        client.add_dataset("reaction", ds_name)
+            client.add_dataset("reaction", ds_name)
 
     n_entries = 0
     padded_log(

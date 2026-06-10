@@ -22,6 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   COMPLETE / ERROR / TOTAL refinement opts in the same layout as the
   sampling summary.
 
+### Fixed
+
+- **`be_hess` and `energy_benchmark` no longer wipe existing reaction
+  datasets on every run.** `create_or_load_reaction_dataset` and
+  `create_reaction_dataset` were unconditionally deleting and
+  recreating each per-stoichiometry ReactionDataset (`_bsse`,
+  `_be_nocp`, `_ie`, `_de`) on every workflow launch, which wiped
+  every spec/entry registration the dataset had accumulated from
+  previous runs at other LOTs. Underlying singlepoint records
+  survived (`delete_records=False`) but were left orphaned. Both
+  helpers are now true get-or-create: the dataset is returned
+  unchanged if it exists, only created when missing. qcportal 0.63+
+  `add_specification` and `add_entry` are already idempotent on the
+  dataset, so a second `be_hess`/`energy_benchmark` run at a new LOT
+  now layers its specs on top of the existing dataset instead of
+  destroying prior LOT data.
+
 ### Changed
 
 - **Reverted unconditional SCF-accelerator override in `be_hess`.**
