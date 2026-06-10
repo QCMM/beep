@@ -44,6 +44,14 @@ class EnergyBenchmarkConfig(BaseModel):
             "and silently falls back to the no-gCP path."
         ),
     )
+    generate_plots: bool = Field(
+        False,
+        description=(
+            "If True, produce BE violin, density panel, mean-error and "
+            "IE-vs-DE plots as SVG under data/plots/. Off by default — "
+            "JSON results (BE/IE/DE + AE/RE variants) are always written."
+        ),
+    )
 
     _lower_opt_lot = field_validator("opt_level_of_theory")(lowercase_list)
     _lower_ref_lot = field_validator("reference_geometry_level_of_theory")(lowercase_str)

@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Makes the sampling vs refinement stages distinguishable in the log;
   pairs with the new refinement summary table at the very end.
 
+- **Plot generation now opt-in across all workflows.** `geom_benchmark`
+  and `energy_benchmark` (alongside `extract`, which was already opt-in)
+  now expose a `generate_plots: bool` config field defaulting to
+  `False`. JSON results are always written; SVG plots only when the
+  flag is set. Set `"generate_plots": true` in the workflow JSON to
+  restore the previous always-plot behavior.
+
 - **Uniform output directory layout across every workflow.** All
   workflows now write to `<cwd>/<molecule>/` with a single shape:
   ```

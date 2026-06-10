@@ -795,10 +795,10 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     rmsd_df.to_json(str(folder_path_json / "results_geom_benchmark.json"))
     logger.info(f"\nDataFrame successfully saved to {folder_path_json}/results_geom_benchmark.json\n")
 
-    folder_path_plots = data_folder / "plots"
-    folder_path_plots.mkdir(parents=True, exist_ok=True)
-
-    rmsd_histograms(rmsd_df, smol_name, str(folder_path_plots))
+    if config.generate_plots:
+        folder_path_plots = data_folder / "plots"
+        folder_path_plots.mkdir(parents=True, exist_ok=True)
+        rmsd_histograms(rmsd_df, smol_name, str(folder_path_plots))
 
     # Trajectory analysis: SP+gradient at every reference-trajectory geometry,
     # MAE/RMSE of E and forces vs reference, combined z-score ranking.

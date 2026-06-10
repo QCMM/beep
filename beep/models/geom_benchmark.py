@@ -76,6 +76,15 @@ class GeomBenchmarkConfig(BaseModel):
             "Default: equal weighting."
         ),
     )
+    generate_plots: bool = Field(
+        False,
+        description=(
+            "If True, also produce eq-RMSD histograms and (when "
+            "trajectory_analysis is enabled) trajectory force-error "
+            "histograms + violin plot as SVG under data/plots/. Off by "
+            "default — JSON results are always written."
+        ),
+    )
 
     @field_validator("reference_geometry_level_of_theory")
     @classmethod

@@ -418,7 +418,7 @@ def run_trajectory_analysis(
         f"{res_folder}/\n"
     )
 
-    if raw_deltas:
+    if raw_deltas and getattr(config, "generate_plots", False):
         folder_path_plots = res_folder / "plots"
         folder_path_plots.mkdir(parents=True, exist_ok=True)
         try:

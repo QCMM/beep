@@ -556,27 +556,28 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     df_de_re.to_json(folder_path_json / "DE_RE_DFT.json", orient="index")
     logger.info(f"Saved DE relative error  dataframe in DE_AE_DFT.json. {bcheck}\n")
 
-    padded_log(logger, "Generating BE benchmark plots")
+    if config.generate_plots:
+        padded_log(logger, "Generating BE benchmark plots")
 
-    folder_path_plots = data_folder / "plots"
-    folder_path_plots.mkdir(parents=True, exist_ok=True)
+        folder_path_plots = data_folder / "plots"
+        folder_path_plots.mkdir(parents=True, exist_ok=True)
 
-    df_be_plt = pd.read_json(folder_path_json / "BE_DFT.json", orient="index")
-    df_be_ae_plt = pd.read_json(folder_path_json / "BE_AE_DFT.json", orient="index")
-    df_de_re_plt = pd.read_json(folder_path_json / "DE_RE_DFT.json", orient="index")
-    df_ie_re_plt = pd.read_json(folder_path_json / "IE_RE_DFT.json", orient="index")
+        df_be_plt = pd.read_json(folder_path_json / "BE_DFT.json", orient="index")
+        df_be_ae_plt = pd.read_json(folder_path_json / "BE_AE_DFT.json", orient="index")
+        df_de_re_plt = pd.read_json(folder_path_json / "DE_RE_DFT.json", orient="index")
+        df_ie_re_plt = pd.read_json(folder_path_json / "IE_RE_DFT.json", orient="index")
 
-    try:
-        plot_violins(df_be_plt, bchmk_structs, smol_name, folder_path_plots, ref_df)
-        padded_log(logger, "Generating violin plots")
-        plot_density_panels(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-        padded_log(logger, "Generating density plots")
-        plot_mean_errors(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-        padded_log(logger, "Generating MAE plots")
-        plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
-        padded_log(logger, "Generating IE vs DE plots")
-    except Exception as e:
-        logger.warning(f"Plotting failed: {e}. Data files are saved, plots can be regenerated.")
+        try:
+            plot_violins(df_be_plt, bchmk_structs, smol_name, folder_path_plots, ref_df)
+            padded_log(logger, "Generating violin plots")
+            plot_density_panels(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+            padded_log(logger, "Generating density plots")
+            plot_mean_errors(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+            padded_log(logger, "Generating MAE plots")
+            plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+            padded_log(logger, "Generating IE vs DE plots")
+        except Exception as e:
+            logger.warning(f"Plotting failed: {e}. Data files are saved, plots can be regenerated.")
 
     padded_log(logger, "BINDING ENERGY BENCHMARK RESULTS", padding_char=gear)
     padded_log(logger, "BINDING ENERGY MAE (BSSE / Boys-Bernardi)")
