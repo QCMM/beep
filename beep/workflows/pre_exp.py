@@ -65,7 +65,7 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
     data_folder.mkdir(exist_ok=True)
 
     # File logging inside the output folder
-    log_file = res_folder / "log"
+    log_file = res_folder / f"pre_exp_{folder_label}.log"
     file_handler = logging.FileHandler(str(log_file), mode='w')
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     main_logger.addHandler(file_handler)

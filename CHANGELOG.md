@@ -70,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   workflows now write to `<cwd>/<molecule>/` with a single shape:
   ```
   <molecule>/
-  ├── log                               (workflow log, no extension)
+  ├── <workflow>_<molecule>.log         (workflow log)
   ├── <workflow>_<molecule>.json        (copy of input config)
   └── data/                             (only if the workflow produces outputs)
       ├── <misc files>                  (CSV / NPZ / xyz / molden / dat)

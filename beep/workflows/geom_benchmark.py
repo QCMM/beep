@@ -481,7 +481,7 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     data_folder.mkdir(exist_ok=True)
 
     # File logging inside the output folder
-    log_file = res_folder / "log"
+    log_file = res_folder / f"geom_benchmark_{smol_name}.log"
     file_handler = logging.FileHandler(str(log_file), mode='w')
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(file_handler)

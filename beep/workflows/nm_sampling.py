@@ -49,7 +49,7 @@ def run(config: NmSamplingConfig, client: FractalClient) -> None:
     data_folder = res_folder / "data"
     data_folder.mkdir(exist_ok=True)
 
-    log_file = res_folder / "log"
+    log_file = res_folder / f"nm_sampling_{smol_name}.log"
     file_handler = logging.FileHandler(str(log_file), mode="w")
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(file_handler)
