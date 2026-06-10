@@ -368,12 +368,14 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     smol_name = config.molecule
 
-    # Create output folder: <molecule>/energy_benchmark/
-    res_folder = Path.cwd() / smol_name / "energy_benchmark"
+    # Create output folder: <cwd>/<molecule>/
+    res_folder = Path.cwd() / smol_name
     res_folder.mkdir(parents=True, exist_ok=True)
+    data_folder = res_folder / "data"
+    data_folder.mkdir(exist_ok=True)
 
     # File logging inside the output folder
-    log_file = res_folder / f"beep_energy_benchmark_{smol_name}.log"
+    log_file = res_folder / "log"
     file_handler = logging.FileHandler(str(log_file), mode='w')
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(file_handler)
@@ -445,7 +447,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     cc_kw = get_cc_keywords(mol_mult)
 
     compute_all_cbs(cbs_col, cbs_list, mol_mult, tag=config.tag_cbs,
-                    cc_keywords=cc_kw, res_folder=res_folder)
+                    cc_keywords=cc_kw, res_folder=data_folder)
     check_dataset_status(cbs_col, cbs_list)
 
     ref_df = get_reference_be_result(bchmk_structs, cbs_col, cbs_list)
@@ -529,7 +531,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())
     df_de_ae, df_de_re = get_errors_dataframe(df_de, ref_df["DE"].to_dict())
 
-    folder_path_json = res_folder / "json_data"
+    folder_path_json = data_folder / "json"
     folder_path_json.mkdir(parents=True, exist_ok=True)
 
     padded_log(logger, "Saving BE data in json files")
@@ -556,7 +558,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     padded_log(logger, "Generating BE benchmark plots")
 
-    folder_path_plots = res_folder / "plots"
+    folder_path_plots = data_folder / "plots"
     folder_path_plots.mkdir(parents=True, exist_ok=True)
 
     df_be_plt = pd.read_json(folder_path_json / "BE_DFT.json", orient="index")

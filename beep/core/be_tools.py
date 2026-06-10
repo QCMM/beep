@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -116,7 +117,7 @@ def gauss_fitting(nbins: int, data: np.ndarray, p0: List[float], logger: logging
 
 
 def apply_lin_models(df_be, df_be_zpve, meth_fit_dict, be_methods, basis, mol, be_range,
-                     generate_plots=False):
+                     generate_plots=False, plots_dir=None):
     """Apply the mean linear ZPVE correction model to binding energies.
 
     Uses a single linear model fitted on the mean BE across all methods
@@ -149,9 +150,12 @@ def apply_lin_models(df_be, df_be_zpve, meth_fit_dict, be_methods, basis, mol, b
         common_indices = df_be.index.intersection(df_be_zpve.index)
         x = df_be.loc[common_indices, "Mean_Eb_all_dft"].to_numpy(dtype=float)
         y = df_be_zpve.loc[common_indices, "Mean_Eb_all_dft"].to_numpy(dtype=float)
-        logger.info(f"Creating mean BE vs BE + \u0394ZPVE plot saving as {mol}/zpve_{mol}_Mean.svg")
+        out_dir = Path(plots_dir) if plots_dir is not None else Path(str(mol))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"zpve_{mol}_Mean.svg"
+        logger.info(f"Creating mean BE vs BE + \u0394ZPVE plot saving as {out_path}")
         fig = zpve_plot(x, y, [m, n, R2])
-        fig.savefig(f"{mol}/zpve_{mol}_Mean.svg")
+        fig.savefig(str(out_path))
         plt.close(fig)
 
     lin_zpve_df = lin_zpve_df[

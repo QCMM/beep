@@ -303,12 +303,14 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
     smol_name = config.molecule
 
-    # Create output folder: <molecule>/sampling/
-    res_folder = Path.cwd() / smol_name / "sampling"
+    # Create output folder: <cwd>/<molecule>/
+    res_folder = Path.cwd() / smol_name
     res_folder.mkdir(parents=True, exist_ok=True)
+    data_folder = res_folder / "data"
+    data_folder.mkdir(exist_ok=True)
 
     # File logging inside the output folder
-    log_file = res_folder / f"beep_sampling_{smol_name}.log"
+    log_file = res_folder / "log"
     file_handler = logging.FileHandler(str(log_file), mode='w')
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(file_handler)
@@ -416,7 +418,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         logger.info(f"  Refinement dataset:  {ref_opt_dset_name}")
         logger.info(f"{'=' * 80}\n")
 
-        debug_path = res_folder / "site_finder" / (str(smol_name) + "_w") / w
+        debug_path = data_folder / "site_finder" / (str(smol_name) + "_w") / w
         if not debug_path.exists() and config.store_initial_structures:
             debug_path.parent.mkdir(parents=True, exist_ok=True)
         args_dict["debug_path"] = debug_path

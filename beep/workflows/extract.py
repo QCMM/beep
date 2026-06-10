@@ -271,9 +271,11 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
 
         res_folder = Path.cwd() / str(mol)
         res_folder.mkdir(exist_ok=True)
+        data_folder = res_folder / "data"
+        data_folder.mkdir(exist_ok=True)
 
         # File logging inside the output folder
-        log_file = res_folder / f"beep_extract_{mol}.log"
+        log_file = res_folder / "log"
         file_handler = logging.FileHandler(str(log_file), mode='w')
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(file_handler)
@@ -315,7 +317,7 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
             logger, res_be_no_zpve,
             f"\nBinding energies without ZPVE correction for {mol}\n",
         )
-        res_be_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
+        res_be_no_zpve.to_csv(f"{data_folder}/be_no_zpve_{mol}.csv")
 
         if config.no_zpve:
             logger.info("Skipping ZPVE correction and model fitting due to no_zpve flag.")
@@ -328,7 +330,7 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
             logger, df_no_zpve,
             f"\nBinding energies without ZPVE correction for {mol}\n",
         )
-        df_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
+        df_no_zpve.to_csv(f"{data_folder}/be_no_zpve_{mol}.csv")
 
         try:
             opt_parts = config.opt_method.split("_", 1)
@@ -363,6 +365,7 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
                 df_no_zpve, df_zpve, fit_data_dict,
                 config.be_methods, config.basis, mol, tuple(config.be_range),
                 generate_plots=config.generate_plots,
+                plots_dir=data_folder / "plots",
             )
 
             df_zpve_lin.drop(imag_todelete, inplace=True, errors='ignore')
@@ -388,9 +391,9 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
             final_result_lz = write_energy_log(res_be_lin_zpve, mol, final_result_lz, "(Linear model ZPVE):")
 
             padded_log(logger, "Saving all dataframes to CSV", padding_char=gear)
-            res_be_no_zpve.to_csv(f"{res_folder}/be_no_zpve_{mol}.csv")
-            res_be_zpve.to_csv(f"{res_folder}/be_zpve_{mol}.csv")
-            res_be_lin_zpve.to_csv(f"{res_folder}/be_lin_zpve_{mol}.csv")
+            res_be_no_zpve.to_csv(f"{data_folder}/be_no_zpve_{mol}.csv")
+            res_be_zpve.to_csv(f"{data_folder}/be_zpve_{mol}.csv")
+            res_be_lin_zpve.to_csv(f"{data_folder}/be_lin_zpve_{mol}.csv")
 
         except (IndexError, KeyError, ValueError, TypeError) as e:
             logger.warning(f"ZPVE correction failed for {mol}: {e}. Saving no-ZPVE results only.")

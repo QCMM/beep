@@ -543,15 +543,14 @@ def run_nm_sampling(
     # 3a. Persist visualisation artifacts (always — written BEFORE the
     # imaginary-mode check so the user can open the .molden file to see
     # which modes are imaginary and decide whether to re-optimise).
-    molden_dir = res_folder / "molden"
-    modes_json_dir = res_folder / "json_data"
-    molden_dir.mkdir(parents=True, exist_ok=True)
+    modes_json_dir = res_folder / "json"
+    res_folder.mkdir(parents=True, exist_ok=True)
     modes_json_dir.mkdir(parents=True, exist_ok=True)
     for sysname, data in mode_data.items():
         mol = data["mol"]
         positions_bohr = np.asarray(mol.geometry).reshape(-1, 3)
         write_molden(
-            molden_dir / f"{sysname}.molden",
+            res_folder / f"normal_modes_{sysname}.molden",
             symbols=list(mol.symbols),
             geometry_bohr=positions_bohr,
             frequencies_cm=data["frequencies_cm"],
@@ -570,8 +569,8 @@ def run_nm_sampling(
         )
     logger.info(
         f"\n  Normal-mode visualisations written to:\n"
-        f"    {molden_dir}/   (one .molden per system)\n"
-        f"    {modes_json_dir}/  (normal_modes_<system>.json)\n"
+        f"    {res_folder}/normal_modes_<system>.molden\n"
+        f"    {modes_json_dir}/normal_modes_<system>.json\n"
     )
 
     # 3b. Imaginary-mode sanity check. A genuine imaginary mode (|imag| above
@@ -693,14 +692,14 @@ def run_nm_sampling(
     logger.info("         Per-method raw values and displacement metadata are")
     logger.info("         available in:")
     logger.info("")
-    logger.info("           json_data/results_nm_sampling.json   (per-method metrics)")
-    logger.info("           json_data/raw_deltas_nm_sampling.npz  (per-method flat")
+    logger.info("           data/json/results_nm_sampling.json   (per-method metrics)")
+    logger.info("           data/raw_deltas_nm_sampling.npz       (per-method flat")
     logger.info("                                                  arrays of force")
     logger.info("                                                  + energy deltas)")
     logger.info("")
 
     # Persist JSON
-    folder_path_json = res_folder / "json_data"
+    folder_path_json = res_folder / "json"
     folder_path_json.mkdir(parents=True, exist_ok=True)
     metrics_json = {m: {k: v for k, v in d.items()} for m, d in metrics.items()}
     (folder_path_json / "results_nm_sampling.json").write_text(
@@ -712,7 +711,7 @@ def run_nm_sampling(
     # flat arrays — `<functional>__force` (meV/Å, per Cartesian component)
     # and `<functional>__energy` (meV/atom). Load with
     # ``data = np.load(path)``; iterate with ``data.files``.
-    deltas_path = folder_path_json / "raw_deltas_nm_sampling.npz"
+    deltas_path = res_folder / "raw_deltas_nm_sampling.npz"
     npz_payload = {}
     for functional, d in raw_deltas.items():
         npz_payload[f"{functional}__force"] = np.asarray(
@@ -723,7 +722,7 @@ def run_nm_sampling(
         )
     np.savez_compressed(deltas_path, **npz_payload)
     logger.info(
-        f"\n  NM-sampling metrics + raw deltas written to {folder_path_json}/\n"
+        f"\n  NM-sampling metrics + raw deltas written to {res_folder}/\n"
     )
 
     return metrics, raw_deltas

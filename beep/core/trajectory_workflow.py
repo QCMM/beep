@@ -381,7 +381,7 @@ def run_trajectory_analysis(
         logger, ranking_df, score_weights=config.score_weights,
     )
 
-    folder_path_json = res_folder / "json_data"
+    folder_path_json = res_folder / "json"
     folder_path_json.mkdir(parents=True, exist_ok=True)
     metrics_json = {
         m: {k: v for k, v in d.items()}
@@ -410,12 +410,12 @@ def run_trajectory_analysis(
                 d["delta_e_per_atom_meV"]
             )
         np.savez_compressed(
-            folder_path_json / "raw_deltas_trajectory.npz", **npz_payload,
+            res_folder / "raw_deltas_trajectory.npz", **npz_payload,
         )
 
     logger.info(
         f"\n  Trajectory metrics + ranking + raw deltas written to "
-        f"{folder_path_json}/\n"
+        f"{res_folder}/\n"
     )
 
     if raw_deltas:
@@ -434,7 +434,7 @@ def run_trajectory_analysis(
         except Exception as exc:
             logger.warning(
                 f"  Histogram plotting failed: {exc} — "
-                f"metrics are still available in json_data/"
+                f"metrics are still available in json/"
             )
 
     return ranking_df, raw_deltas

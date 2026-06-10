@@ -44,10 +44,12 @@ def run(config: NmSamplingConfig, client: FractalClient) -> None:
 
     smol_name = config.molecule
 
-    res_folder = Path.cwd() / smol_name / "nm_sampling"
+    res_folder = Path.cwd() / smol_name
     res_folder.mkdir(parents=True, exist_ok=True)
+    data_folder = res_folder / "data"
+    data_folder.mkdir(exist_ok=True)
 
-    log_file = res_folder / f"beep_nm_sampling_{smol_name}.log"
+    log_file = res_folder / "log"
     file_handler = logging.FileHandler(str(log_file), mode="w")
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(file_handler)
@@ -108,7 +110,7 @@ def run(config: NmSamplingConfig, client: FractalClient) -> None:
         all_dft_functionals=all_dft_functionals,
         dft_geom_functionals=dft_geom_functionals,
         n_adsorbate_atoms=n_adsorbate_atoms,
-        res_folder=res_folder, logger=logger,
+        res_folder=data_folder, logger=logger,
     )
 
     padded_log(

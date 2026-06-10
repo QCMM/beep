@@ -30,6 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Makes the sampling vs refinement stages distinguishable in the log;
   pairs with the new refinement summary table at the very end.
 
+- **Uniform output directory layout across every workflow.** All
+  workflows now write to `<cwd>/<molecule>/` with a single shape:
+  ```
+  <molecule>/
+  ├── log                               (workflow log, no extension)
+  ├── <workflow>_<molecule>.json        (copy of input config)
+  └── data/                             (only if the workflow produces outputs)
+      ├── <misc files>                  (CSV / NPZ / xyz / molden / dat)
+      ├── json/                         (all JSON outputs)
+      └── plots/                        (all SVG / PNG plots)
+  ```
+  Replaces the per-workflow `<molecule>/<workflow>/` nesting and the
+  ad-hoc layouts that previously varied between workflows. Downstream
+  consumers that hardcode the old paths (e.g. notebooks reading
+  `<molecule>/<workflow>/json_data/...`) need updating to the new
+  `<molecule>/data/json/...` form.
+
 ## [0.13.0] — 2026-06-08
 
 ### Added

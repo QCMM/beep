@@ -178,12 +178,12 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
 def run(config: BeHessConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
 
-    # Create output folder: <molecule>/be_hess/
-    res_folder = Path.cwd() / config.molecule / "be_hess"
+    # Create output folder: <cwd>/<molecule>/
+    res_folder = Path.cwd() / config.molecule
     res_folder.mkdir(parents=True, exist_ok=True)
 
     # File logging inside the output folder
-    log_file = res_folder / f"beep_be_hess_{config.molecule}.log"
+    log_file = res_folder / "log"
     file_handler = logging.FileHandler(str(log_file), mode='w')
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(file_handler)

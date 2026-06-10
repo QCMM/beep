@@ -59,11 +59,13 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
 
     # Use first molecule name for the output folder (or collection name if list)
     folder_label = mol[0] if isinstance(mol, list) else mol
-    res_folder = Path.cwd() / folder_label / "pre_exp"
+    res_folder = Path.cwd() / folder_label
     res_folder.mkdir(parents=True, exist_ok=True)
+    data_folder = res_folder / "data"
+    data_folder.mkdir(exist_ok=True)
 
     # File logging inside the output folder
-    log_file = res_folder / f"beep_pre_exp_{folder_label}.log"
+    log_file = res_folder / "log"
     file_handler = logging.FileHandler(str(log_file), mode='w')
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     main_logger.addHandler(file_handler)
@@ -100,7 +102,7 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
         table = pd.DataFrame({"T": T_list, "v": v})
 
         # Write per-molecule data file into the output folder
-        v_dat_file = res_folder / f"v_{molecule}.dat"
+        v_dat_file = data_folder / f"v_{molecule}.dat"
         v_dat_file.write_text(table.to_string(index=False))
         main_logger.info(f"Saved pre-exponential data to {v_dat_file}")
         main_logger.info("\n" + table.to_string(index=False))

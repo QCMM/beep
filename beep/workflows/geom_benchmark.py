@@ -474,12 +474,14 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
 
     smol_name = config.molecule
 
-    # Create output folder: <molecule>/geom_benchmark/
-    res_folder = Path.cwd() / smol_name / "geom_benchmark"
+    # Create output folder: <cwd>/<molecule>/
+    res_folder = Path.cwd() / smol_name
     res_folder.mkdir(parents=True, exist_ok=True)
+    data_folder = res_folder / "data"
+    data_folder.mkdir(exist_ok=True)
 
     # File logging inside the output folder
-    log_file = res_folder / f"beep_geom_benchmark_{smol_name}.log"
+    log_file = res_folder / "log"
     file_handler = logging.FileHandler(str(log_file), mode='w')
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(file_handler)
@@ -601,7 +603,7 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     logger.info(f"\nSend {ct}/{c} to the tag {dft_tag}\n")
 
     # Submit CP-corrected jobs (if configured) while QCFractal jobs run
-    cp_jobs = _submit_cp_jobs(config, client, bchmk_dset_names, smol_name, res_folder)
+    cp_jobs = _submit_cp_jobs(config, client, bchmk_dset_names, smol_name, data_folder)
 
     wait_for_completion(
         client, odset_dict, all_dft_functionals, dft_program,
@@ -787,13 +789,13 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     padded_log(logger, "BENCHMARK RESULTS")
     log_dataframe_averages(logger, rmsd_df)
 
-    folder_path_json = res_folder / "json_data"
+    folder_path_json = data_folder / "json"
     folder_path_json.mkdir(parents=True, exist_ok=True)
 
     rmsd_df.to_json(str(folder_path_json / "results_geom_benchmark.json"))
     logger.info(f"\nDataFrame successfully saved to {folder_path_json}/results_geom_benchmark.json\n")
 
-    folder_path_plots = res_folder / "plots"
+    folder_path_plots = data_folder / "plots"
     folder_path_plots.mkdir(parents=True, exist_ok=True)
 
     rmsd_histograms(rmsd_df, smol_name, str(folder_path_plots))
@@ -811,7 +813,7 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
             dft_geom_functionals=dft_geom_functionals,
             dft_program=dft_program, dft_keyword=dft_keyword,
             dft_tag=dft_tag, rmsd_df=rmsd_df,
-            res_folder=res_folder, logger=logger,
+            res_folder=data_folder, logger=logger,
         )
 
     padded_log(
