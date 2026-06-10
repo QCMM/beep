@@ -33,6 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`compute_hessian` reuses existing Hessian records regardless of
+  spec keywords.** The DB now holds a mix of migrated Hessians (stored
+  with empty `keywords={}`) and newly-submitted ones (stored with
+  `keywords={"function_kwargs": {"dertype": 1}}`), and
+  `add_singlepoints`' server-side `find_existing` matches strictly on
+  the keyword dict. Migrated records were therefore missed and
+  re-submitted. `compute_hessian` now does a keyword-agnostic
+  pre-query on `(molecule_id, method, basis, driver=hessian, status=complete)`
+  before calling `add_singlepoints`, treats every matching record as
+  reusable, and submits new Hessians only for the molecules without a
+  hit. Eliminates redundant — and individually expensive — Hessian
+  re-computes on migrated species. The 2022-era keyword on new
+  submissions is unchanged, so future-pure-v0.14 datasets keep the
+  full spec.
+
 - **`be_hess` and `energy_benchmark` no longer wipe existing reaction
   datasets on every run.** `create_or_load_reaction_dataset` and
   `create_reaction_dataset` were unconditionally deleting and

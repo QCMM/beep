@@ -1254,23 +1254,50 @@ def compute_hessian(
     logger.info(f"\nComputing Hessian at {method}/{basis} level of theory")
     logger.info(f"Using keywords: {kw}")
 
-    meta, record_ids = client.add_singlepoints(
-        molecules=u_mols,
-        program=program,
-        driver="hessian",
+    # Keyword-agnostic pre-query: match any complete Hessian at the same
+    # (mol, method, basis), regardless of the keyword dict that produced
+    # it. The DB currently holds a mix of migrated Hessians (stored with
+    # empty keywords={}) and newly-submitted ones (stored with the
+    # full kw above). add_singlepoints' server-side find_existing matches
+    # exactly on the keyword dict, so without this pre-query the migrated
+    # records would miss and trigger redundant Hessian re-computes —
+    # individually expensive and not what we want for already-done work.
+    existing = list(client.query_singlepoints(
+        driver=SinglepointDriver.hessian,
+        molecule_id=u_mols,
         method=method,
         basis=basis,
-        keywords=kw,
-        compute_tag=hess_tag,
-    )
+        status=RecordStatusEnum.complete,
+    ))
+    have = {r.molecule_id for r in existing if r.properties is not None}
+    to_submit = [m for m in u_mols if m not in have]
+    record_ids = [r.id for r in existing if r.molecule_id in have]
 
     logger.info(
-        f"\nExisting: {meta.n_existing} Submitted: {meta.n_inserted}"
+        f"\nReusing {len(have)} existing Hessian record(s); "
+        f"submitting {len(to_submit)} new."
     )
-    logger.info(
-        f"\nSubmitted a total of {meta.n_inserted} computations. "
-        f"{meta.n_existing} are already computed."
-    )
+
+    if to_submit:
+        meta, new_ids = client.add_singlepoints(
+            molecules=to_submit,
+            program=program,
+            driver="hessian",
+            method=method,
+            basis=basis,
+            keywords=kw,
+            compute_tag=hess_tag,
+        )
+        record_ids.extend(new_ids)
+        logger.info(
+            f"\nExisting: {meta.n_existing} Submitted: {meta.n_inserted}"
+        )
+        logger.info(
+            f"\nSubmitted a total of {meta.n_inserted} computations. "
+            f"{meta.n_existing} are already computed."
+        )
+    else:
+        logger.info("\nAll Hessians already complete; no new submissions.")
     return record_ids
 
 
