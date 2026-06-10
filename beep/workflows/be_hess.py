@@ -241,6 +241,7 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
         )
         padded_log(logger, f"Waiting for pass 1 BE computations")
         qcf.check_jobs_status(client, all_ids_1, logger, wait_interval=600)
+        qcf.report_errored_records(client, all_ids_1, logger, "BE pass 1")
 
         # Pass 2 — pick up entries that completed while we waited
         padded_log(logger, f"Checking refinement status (pass 2)")
@@ -256,6 +257,7 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
             )
             padded_log(logger, f"Waiting for pass 2 BE computations")
             qcf.check_jobs_status(client, all_ids_2, logger, wait_interval=600)
+            qcf.report_errored_records(client, all_ids_2, logger, "BE pass 2")
         else:
             logger.info("Pass 2: no newly completed entries found.")
 
@@ -282,6 +284,7 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
         padded_log(logger, f"Checking for completion of ALL Hessian computations")
         logger.info(f"The IDs for the Hessian computations are: {all_hess_ids}\n")
         qcf.check_jobs_status(client, all_hess_ids, logger, wait_interval=3600)
+        qcf.report_errored_records(client, all_hess_ids, logger, "Hessian")
 
     logger.info("\nThank you for using the binding energy and hessian compute suite!")
 

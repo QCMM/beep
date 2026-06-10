@@ -665,6 +665,41 @@ def wait_for_completion(client: PortalClient, pid_list: List[int],
         time.sleep(frequency)
 
 
+def report_errored_records(
+    client: PortalClient, record_ids: List[int], logger: logging.Logger,
+    section_name: str,
+) -> List[int]:
+    """List record IDs currently in ERROR state for easy restart.
+
+    Queries the server for every id in ``record_ids``, filters to those
+    whose status is ``RecordStatusEnum.error``, and logs them as a single
+    space-separated line so the user can copy-paste straight into a reset
+    command. No-op (with a brief success message) when no records are
+    errored. Returns the list of errored IDs.
+    """
+    if not record_ids:
+        return []
+    records = client.get_records(record_ids, missing_ok=True)
+    if not isinstance(records, list):
+        records = [records]
+    errored = [r.id for r in records if r is not None and is_error(r.status)]
+    if not errored:
+        logger.info(
+            f"  All {section_name} records reached terminal state without errors."
+        )
+        return []
+    logger.warning(
+        f"\n  {len(errored)} {section_name} record(s) ended in ERROR:"
+    )
+    logger.warning(f"  {' '.join(str(i) for i in errored)}")
+    logger.warning(
+        f"  Restart hint: reset these records on the server, then rerun "
+        f"the workflow; cached COMPLETE records are picked up via "
+        f"find_existing.\n"
+    )
+    return errored
+
+
 def check_jobs_status(client: PortalClient, job_ids: List[int],
                       logger: logging.Logger, wait_interval: int = 600,
                       print_job_ids: bool = False,

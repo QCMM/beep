@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   COMPLETE / ERROR / TOTAL refinement opts in the same layout as the
   sampling summary.
 
+- **Errored-record reporting at the end of each `be_hess` section.**
+  After each completion check (BE pass 1, BE pass 2, Hessian),
+  `be_hess` now logs the record IDs that ended in ERROR as a single
+  space-separated line, making them easy to copy-paste into a reset
+  command. No log noise when there are no errors. Driven by a new
+  `report_errored_records(client, ids, logger, section_name)` helper
+  in the adapter, reusable by any workflow that wants the same
+  end-of-section error summary.
+
 ### Fixed
 
 - **`be_hess` and `energy_benchmark` no longer wipe existing reaction
