@@ -527,6 +527,35 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     df_ie = qcf.fetch_reaction_values(client, rdset_base, stoich="ie").dropna(axis=1)
     df_de = qcf.fetch_reaction_values(client, rdset_base, stoich="de").dropna(axis=1)
 
+    # Optional functional averages: for each user-supplied group, compute
+    # the mean BE per binding site across the listed LOTs and append as a
+    # new ``DFT_Average_N`` column. Member names use the underscore form
+    # ('method_basis'); df_be columns use the slash form ('method/basis')
+    # via fetch_reaction_values' label convention — convert on lookup.
+    avg_groups = []   # list[(label, [matched_columns])]
+    if config.functional_averages:
+        for i, group in enumerate(config.functional_averages, start=1):
+            wanted = [m.replace("_", "/") for m in group]
+            present = [c for c in wanted if c in df_be.columns]
+            missing = [c for c in wanted if c not in df_be.columns]
+            if missing:
+                logger.warning(
+                    f"  functional_averages group {i}: {len(missing)} member(s) "
+                    f"not in benchmark set, dropped: {missing}"
+                )
+            if not present:
+                logger.warning(
+                    f"  functional_averages group {i}: no valid members, skipping."
+                )
+                continue
+            label = f"DFT_Average_{i}"
+            df_be[label] = df_be[present].mean(axis=1)
+            avg_groups.append((label, present))
+            logger.info(
+                f"  functional_averages group {i} → {label} "
+                f"(mean of {len(present)} functionals)"
+            )
+
     df_be_ae, df_be_re = get_errors_dataframe(df_be, ref_df["BE"].to_dict())
     df_ie_ae, df_ie_re = get_errors_dataframe(df_ie, ref_df["IE"].to_dict())
     df_de_ae, df_de_re = get_errors_dataframe(df_de, ref_df["DE"].to_dict())
@@ -581,7 +610,13 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     padded_log(logger, "BINDING ENERGY BENCHMARK RESULTS", padding_char=gear)
     padded_log(logger, "BINDING ENERGY MAE (BSSE / Boys-Bernardi)")
-    log_energy_mae_per_group(logger, df_be_ae, dft_func)
+    # If user supplied functional_averages groups, register them as their
+    # own per-group category so the averaged DFT_Average_N rows show up
+    # alongside the standard functional categories in the per-group log.
+    dft_func_with_avgs = dict(dft_func)
+    if avg_groups:
+        dft_func_with_avgs["Averages"] = [label for label, _ in avg_groups]
+    log_energy_mae_per_group(logger, df_be_ae, dft_func_with_avgs)
     logger.info("")
     logger.info("  Note — Interaction-energy (IE) and deformation-energy (DE)")
     logger.info("         breakdowns are not shown in this summary. Per-method")
@@ -678,7 +713,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
             )
 
             padded_log(logger, "gCP-CORRECTED BINDING ENERGY MAE")
-            log_energy_mae_per_group(logger, df_be_gcp_ae, dft_func)
+            log_energy_mae_per_group(logger, df_be_gcp_ae, dft_func_with_avgs)
 
     logger.removeHandler(file_handler)
     file_handler.close()

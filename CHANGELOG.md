@@ -22,6 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   COMPLETE / ERROR / TOTAL refinement opts in the same layout as the
   sampling summary.
 
+- **Functional averaging and over/under-bind tag in `energy_benchmark`.**
+  Two related additions to the BE per-group MAE table:
+
+  - New `functional_averages: List[List[str]]` config field. Each group
+    is a list of `method_basis` LOT strings. For every group, the
+    workflow computes the mean BE per binding site across the listed
+    functionals and reports it as one additional row labelled
+    `DFT_Average_<N>` under a dedicated "Averages" group in the per-group
+    output. Members not present in the benchmark set are dropped with a
+    warning. Empty default; configs without the field work unchanged.
+
+  - The per-group MAE table now carries a `Bias` column and a
+    human-readable tag indicating whether each functional (or DFT
+    average) over- or under-binds the reference. Sign convention:
+    negative bias → overbinds, positive bias → underbinds. Tag
+    thresholds (kcal/mol): `|bias| < 0.05` → balanced; `< 0.5` → mild
+    over/underbind; else → strong over/underbind. Surfaces in the
+    standard BE table and the gCP-corrected BE table when
+    `gcp_correction=true`.
+
 - **Errored-record reporting at the end of each `be_hess` section.**
   After each completion check (BE pass 1, BE pass 2, Hessian),
   `be_hess` now logs the record IDs that ended in ERROR as a single

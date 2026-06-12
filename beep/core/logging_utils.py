@@ -403,6 +403,27 @@ def _strip_group_prefix(name: str) -> str:
     return name
 
 
+def _bias_tag(bias: float) -> str:
+    """Human-readable annotation for a signed-mean-error (kcal/mol).
+
+    Sign convention: BE is negative (stabilisation), so a negative bias
+    means the DFT BE is more negative than the reference — DFT overbinds.
+    A positive bias means DFT underbinds.
+
+    Magnitude thresholds (kcal/mol):
+      |bias| < 0.05  → balanced
+      |bias| < 0.5   → mild over/underbind
+      otherwise      → strong over/underbind
+    """
+    mag = abs(bias)
+    direction = "underbind" if bias > 0 else "overbind"
+    if mag < 0.05:
+        return "balanced"
+    if mag < 0.5:
+        return f"mild {direction}"
+    return f"strong {direction}"
+
+
 def log_energy_mae_per_group(
     logger: logging.Logger,
     df_ae: pd.DataFrame,
@@ -444,8 +465,10 @@ def log_energy_mae_per_group(
     # MAE per column = mean of |signed error|. Despite the "_ae" suffix in
     # the caller's variable name, the DataFrame from get_errors_dataframe is
     # signed (E_dft − E_ref); take abs() before averaging — same convention
-    # as the legacy ``log_energy_mae``.
+    # as the legacy ``log_energy_mae``. The unsigned mean of the signed
+    # error is the per-functional bias (see _bias_tag below).
     mae = df_ae.abs().mean(axis=0)
+    bias = df_ae.mean(axis=0)
     name_width = 30
     summary = {}   # group_display -> (winner, winner_mae)
 
@@ -464,12 +487,19 @@ def log_energy_mae_per_group(
         summary[group] = (winner, winner_mae)
 
         logger.info(f"\nFunctional Group: {group}")
-        header = f"{'Level of Theory':<{name_width}} | MAE"
+        header = (
+            f"{'Level of Theory':<{name_width}} | "
+            f"{'MAE':<10} | {'Bias':<10} | Tag"
+        )
         logger.info(header)
-        logger.info("-" * max(len(header), name_width + 14))
+        logger.info("-" * max(len(header), name_width + 40))
         for col, val in group_maes.items():
             mark = "*" if col == winner else " "
-            logger.info(f"{col:<{name_width}} | {val:.6f} {mark}")
+            b = float(bias[col])
+            logger.info(
+                f"{col:<{name_width}} | {val:<10.6f} | {b:<+10.4f} | "
+                f"{_bias_tag(b)} {mark}"
+            )
 
     if not summary:
         return

@@ -52,6 +52,20 @@ class EnergyBenchmarkConfig(BaseModel):
             "JSON results (BE/IE/DE + AE/RE variants) are always written."
         ),
     )
+    functional_averages: List[List[str]] = Field(
+        default_factory=list,
+        description=(
+            "Optional list of functional groups to average. Each group is "
+            "a list of LOT strings ('method_basis'). For every group, "
+            "the workflow computes the mean BE per binding site across "
+            "the listed functionals and reports it as one extra row in "
+            "the BE per-group MAE table, labelled 'DFT_Average_N' "
+            "(1-indexed in config order). Members not present in the "
+            "benchmark set are dropped with a warning; groups that end "
+            "up empty are skipped. Empty default — configs without the "
+            "field work unchanged."
+        ),
+    )
 
     _lower_opt_lot = field_validator("opt_level_of_theory")(lowercase_list)
     _lower_ref_lot = field_validator("reference_geometry_level_of_theory")(lowercase_str)

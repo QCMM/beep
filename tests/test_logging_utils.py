@@ -15,6 +15,7 @@ from beep.core.logging_utils import (
     log_dataframe,
     log_dictionary,
     write_energy_log,
+    _bias_tag,
 )
 
 
@@ -197,3 +198,22 @@ def test_log_dictionary_default_title(caplog):
     with caplog.at_level(logging.INFO, logger="beep_log_test_logdict_default"):
         log_dictionary(logger, d)
     assert "Dictionary:" in caplog.text
+
+
+def test_bias_tag_balanced():
+    assert _bias_tag(0.0) == "balanced"
+    assert _bias_tag(0.04) == "balanced"
+    assert _bias_tag(-0.04) == "balanced"
+
+
+def test_bias_tag_mild_directions():
+    # Positive bias → BE less negative than ref → underbinds
+    assert _bias_tag(0.10) == "mild underbind"
+    # Negative bias → BE more negative than ref → overbinds
+    assert _bias_tag(-0.10) == "mild overbind"
+
+
+def test_bias_tag_strong_thresholds():
+    assert _bias_tag(0.5) == "strong underbind"
+    assert _bias_tag(-0.5) == "strong overbind"
+    assert _bias_tag(2.3) == "strong underbind"
