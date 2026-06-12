@@ -87,7 +87,7 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
         main_logger.info(f"Point group = {point_group}\nSymmetry number = {sym_num}")
 
         align_coors = align_to_z_axis(symbols, coordinates)
-        Ia, Ib, Ic = get_moments_of_inertia(symbols, coordinates)
+        Ia, Ib, Ic = get_moments_of_inertia(symbols, align_coors)
         main_logger.info(
             f"Principal moments of inertia for {molecule} (kg\u00b7m^(2)): "
             f"Ia={Ia:.3e}, Ib={Ib:.3e}, Ic={Ic:.3e}"

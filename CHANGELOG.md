@@ -33,6 +33,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Trajectory + SP gradient lookup falls back to `return_result`.**
+  `fetch_sp_energy_gradient` and `get_optimization_trajectory` in the
+  adapter previously read only `properties.return_gradient`. That field
+  is optional per the qcelemental spec: psi4 populates it, but molpro
+  (used for the F12 reference geometries in `geom_benchmark` /
+  `nm_sampling`) leaves it unset and instead writes the gradient to
+  `return_result` on gradient-driver records. The reader was silently
+  returning `None` for the gradient on those records, so the
+  trajectory force-RMSE / nm_sampling force-RMSE analyses on F12-stack
+  data were collapsing to no-data and producing silent zeros. Both
+  helpers now try `properties.return_gradient` first and fall back to
+  `return_result` when the spec driver is gradient.
+
+- **`pre_exp` moments of inertia now COM-shifted.**
+  `get_moments_of_inertia` in `core/pre_exponential.py` evaluated the
+  inertia tensor in the input frame without first translating to the
+  centre of mass, so any COM offset in the geometry inflated all three
+  eigenvalues via the parallel-axis theorem. Compounding this,
+  `workflows/pre_exp.py` was passing the raw, un-aligned coordinates
+  to `get_moments_of_inertia` while computing (and then discarding) the
+  output of `align_to_z_axis`. Drift observed: ~18% on H2O,
+  <1% on NH3/CH3OH/CH3CN where the optimiser happened to land near
+  origin, ~0 on linear molecules where `Ia=0` is preserved. Two
+  coordinated fixes:
+  1. `get_moments_of_inertia` now COM-shifts unconditionally before
+     building the tensor, so the function is correct regardless of
+     what the caller passes.
+  2. The `pre_exp` workflow now passes the aligned coordinates (the
+     output of `align_to_z_axis`) into `get_moments_of_inertia`, so
+     the principal-axis frame is used downstream rather than
+     computed-and-discarded.
+
 - **`compute_hessian` reuses existing Hessian records regardless of
   spec keywords.** The DB now holds a mix of migrated Hessians (stored
   with empty `keywords={}`) and newly-submitted ones (stored with

@@ -1501,6 +1501,12 @@ def fetch_sp_energy_gradient(
     Gradient is reshaped from the flat list qcportal returns to
     ``(n_atoms, 3)``. Returns ``(None, None)`` if the record is missing,
     errored, or incomplete.
+
+    Gradient lookup: qcelemental is permissive about where the gradient
+    lives — psi4 populates ``properties.return_gradient``; molpro and
+    other programs (e.g. via geomeTRIC) only set ``return_result`` on a
+    gradient-driver record. We try the properties slot first, then fall
+    back to ``return_result`` when the driver is gradient.
     """
     record = ds_sp.get_record(entry_name, spec_name.lower())
     if record is None or not is_complete(record.status):
@@ -1508,6 +1514,8 @@ def fetch_sp_energy_gradient(
     props = record.properties or {}
     energy = props.get("return_energy")
     grad = props.get("return_gradient")
+    if grad is None and str(record.specification.driver).endswith("gradient"):
+        grad = record.return_result
     if grad is not None:
         grad = np.asarray(grad, dtype=float).reshape(-1, 3)
     return energy, grad
@@ -1601,7 +1609,12 @@ def get_optimization_trajectory(
     steps = []
     for sp in record.trajectory or []:
         props = sp.properties or {}
+        # Gradient lookup falls back to return_result for programs (e.g.
+        # molpro via geomeTRIC) that don't populate properties.return_gradient.
+        # See fetch_sp_energy_gradient for the full rationale.
         grad = props.get("return_gradient")
+        if grad is None and str(sp.specification.driver).endswith("gradient"):
+            grad = sp.return_result
         if grad is not None:
             grad = np.asarray(grad, dtype=float).reshape(-1, 3)
         steps.append({
