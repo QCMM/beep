@@ -330,9 +330,22 @@ def fetch_atom_molecule(client: PortalClient, atoms_collection: str,
 
     Atoms (single-atom species) are stored in a dedicated SinglepointDataset
     rather than an OptimizationDataset since they cannot be optimized.
+
+    Raises KeyError when ``atom_name`` is not in ``atoms_collection``. Other
+    PortalRequestErrors (server / network / auth failures) propagate
+    unchanged — see ``fetch_opt_record`` for the rationale.
     """
     ds = client.get_dataset("singlepoint", atoms_collection)
-    entry = ds.get_entry(atom_name)
+    try:
+        entry = ds.get_entry(atom_name)
+    except PortalRequestError as e:
+        msg = str(e)
+        if "Missing" in msg and "entries" in msg:
+            raise KeyError(
+                f"Atom '{atom_name}' not found in singlepoint dataset "
+                f"'{atoms_collection}'"
+            ) from e
+        raise
     if entry is None:
         raise KeyError(
             f"Atom '{atom_name}' not found in singlepoint dataset "
@@ -354,9 +367,27 @@ def fetch_molecules(client: PortalClient, mol_ids) -> List[Molecule]:
 def fetch_opt_record(ds_opt, entry_name: str, opt_lot: str):
     """Get the optimization record for an entry.
 
-    Raises KeyError if the entry or record does not exist.
+    Raises KeyError when the entry doesn't exist in the dataset or when
+    the record for the requested specification is missing. Other
+    PortalRequestErrors (server/network/auth failures) propagate
+    unchanged — callers should treat them as transient errors, not as
+    "entry not found".
     """
-    record = ds_opt.get_record(entry_name, opt_lot)
+    try:
+        record = ds_opt.get_record(entry_name, opt_lot)
+    except PortalRequestError as e:
+        # qcportal returns HTTP 400 "Missing N entries: ..." when the
+        # entry name is not in the dataset. Translate that one specific
+        # case to KeyError so callers can distinguish "entry not in
+        # dataset" from "server / network failure". The string match
+        # is fragile to qcportal message changes; revisit if the wording
+        # shifts upstream.
+        msg = str(e)
+        if "Missing" in msg and "entries" in msg:
+            raise KeyError(
+                f"Entry '{entry_name}' not found in dataset"
+            ) from e
+        raise
     if record is None:
         raise KeyError(
             f"No record for entry '{entry_name}' with specification '{opt_lot}'"

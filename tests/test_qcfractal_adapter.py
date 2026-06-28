@@ -671,3 +671,84 @@ def test_fetch_reaction_values_skips_integrated_spec(mock_ds_name, caplog):
     import qcelemental as qcel
     expected = (-1.0 - 0.02) * qcel.constants.hartree2kcalmol
     assert df.loc["entry1", "pbe-d3bj/def2-tzvp"] == pytest.approx(expected)
+
+
+# ---------------------------------------------------------------------------
+# fetch_opt_record / fetch_atom_molecule — PortalRequestError translation
+# ---------------------------------------------------------------------------
+
+def test_fetch_opt_record_translates_missing_entry_to_keyerror():
+    """qcportal raises PortalRequestError('Missing N entries: ...') when an
+    entry name isn't in the dataset. The adapter must translate that one
+    specific case to KeyError so workflow code can route to the
+    atoms_collection fallback."""
+    from beep.adapters.qcfractal_adapter import fetch_opt_record, PortalRequestError
+
+    ds = MagicMock()
+    ds.get_record.side_effect = PortalRequestError(
+        "Request failed: Missing 1 entries: H_atom (HTTP status 400)",
+        status_code=400,
+        details={},
+    )
+    with pytest.raises(KeyError, match="not found in dataset"):
+        fetch_opt_record(ds, "H_atom", "hf3c_minix")
+
+
+def test_fetch_opt_record_propagates_other_portal_errors():
+    """Non-'Missing entries' PortalRequestErrors (server 500, network, auth)
+    must propagate unchanged so callers don't mistake transient failures
+    for missing entries."""
+    from beep.adapters.qcfractal_adapter import fetch_opt_record, PortalRequestError
+
+    ds = MagicMock()
+    ds.get_record.side_effect = PortalRequestError(
+        "Internal Server Error (HTTP status 500)",
+        status_code=500,
+        details={},
+    )
+    with pytest.raises(PortalRequestError):
+        fetch_opt_record(ds, "H2O", "hf3c_minix")
+
+
+def test_fetch_opt_record_raises_keyerror_when_record_none():
+    """Existing behaviour preserved: when ds.get_record returns None
+    (entry exists but spec record missing), still raise KeyError."""
+    from beep.adapters.qcfractal_adapter import fetch_opt_record
+
+    ds = MagicMock()
+    ds.get_record.return_value = None
+    with pytest.raises(KeyError, match="No record for entry"):
+        fetch_opt_record(ds, "H2O", "hf3c_minix")
+
+
+def test_fetch_atom_molecule_translates_missing_entry_to_keyerror():
+    """Mirror of fetch_opt_record for fetch_atom_molecule: PortalRequestError
+    on missing atom name must become KeyError so the workflow's outer
+    KeyError handler can surface the original 'not optimized' message."""
+    from beep.adapters.qcfractal_adapter import fetch_atom_molecule, PortalRequestError
+
+    client = MagicMock()
+    ds = MagicMock()
+    ds.get_entry.side_effect = PortalRequestError(
+        "Request failed: Missing 1 entries: Xe (HTTP status 400)",
+        status_code=400,
+        details={},
+    )
+    client.get_dataset.return_value = ds
+    with pytest.raises(KeyError, match="not found in singlepoint dataset"):
+        fetch_atom_molecule(client, "atoms", "Xe")
+
+
+def test_fetch_atom_molecule_propagates_other_portal_errors():
+    from beep.adapters.qcfractal_adapter import fetch_atom_molecule, PortalRequestError
+
+    client = MagicMock()
+    ds = MagicMock()
+    ds.get_entry.side_effect = PortalRequestError(
+        "Unauthorized (HTTP status 401)",
+        status_code=401,
+        details={},
+    )
+    client.get_dataset.return_value = ds
+    with pytest.raises(PortalRequestError):
+        fetch_atom_molecule(client, "atoms", "H")

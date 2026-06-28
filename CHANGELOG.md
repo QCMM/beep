@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   users plot their own per-functional histograms of `(F_DFT - F_ref)`
   without re-running the workflow.
 
+- **Atom sampling and atom be_hess no longer crash on missing entries.**
+  `qcportal>=0.63` raises `PortalRequestError` (HTTP 400 "Missing N
+  entries: …") — not `KeyError` — when an entry name isn't in the
+  dataset. Both `sampling.py` and `be_hess.py` caught only `KeyError`
+  on the OptimizationDataset lookup before falling through to the
+  atoms_collection, so single-atom adsorbates (e.g. C, N, O) crashed
+  the workflow instead of being routed to the SinglepointDataset
+  fallback. Fixed at the adapter layer: `fetch_opt_record` and
+  `fetch_atom_molecule` now translate the specific "Missing entries"
+  PortalRequestError into `KeyError` while letting genuine
+  server/network/auth failures propagate, so the workflow's
+  `except KeyError` does the right thing and unrelated transient
+  failures aren't silently misrouted as "atom not found". Five
+  regression tests added.
+
 - **Clearer per-LOT submission log in `be_hess` / `energy_benchmark`.**
   `compute_be_dft_energies` used to log `Existing N  Submitted M` per
   LOT, where both `N` and `M` come from `ds.submit()`'s
