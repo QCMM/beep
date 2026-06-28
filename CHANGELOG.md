@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   users plot their own per-functional histograms of `(F_DFT - F_ref)`
   without re-running the workflow.
 
+- **Clearer per-LOT submission log in `be_hess` / `energy_benchmark`.**
+  `compute_be_dft_energies` used to log `Existing N  Submitted M` per
+  LOT, where both `N` and `M` come from `ds.submit()`'s
+  `InsertCountsMetadata` — *newly* linked vs *newly* submitted in this
+  call. On re-runs where every reaction was already linked to the
+  dataset from a prior run, both would correctly be 0, but
+  "Existing 0  Submitted 0" reads as "nothing on the server" rather
+  than "nothing changed." The line now distinguishes the two cases:
+  if both metrics are 0, it logs "all reactions already linked to the
+  dataset (no new submissions)"; otherwise it logs newly-submitted +
+  newly-linked counts explicitly.
+
 - **Refinement summary table in `sampling` workflow.** After refinement
   polling finishes, the workflow now logs a per-cluster breakdown of
   COMPLETE / ERROR / TOTAL refinement opts in the same layout as the

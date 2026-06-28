@@ -1172,13 +1172,24 @@ def compute_be_dft_energies(
 
         all_submitted += lot_submitted
         all_existing += lot_existing
-        logger.info(
-            f"{lot}: Existing {lot_existing}  Submitted {lot_submitted}"
-        )
+        # 0/0 from ds.submit means the reactions for this LOT were already
+        # linked to the dataset from a prior run — neither inserted nor
+        # newly-matched in this call. Make that explicit so users don't
+        # read a misleading "Existing 0  Submitted 0" as a missing submission.
+        if lot_submitted == 0 and lot_existing == 0:
+            logger.info(
+                f"{lot}: all reactions already linked to the dataset "
+                f"(no new submissions)"
+            )
+        else:
+            logger.info(
+                f"{lot}: {lot_submitted} newly submitted, "
+                f"{lot_existing} newly linked (find_existing)"
+            )
 
     logger.info(
         f"\nSubmitted a total of {all_submitted} DFT computations. "
-        f"{all_existing} are already computed."
+        f"{all_existing} are newly linked from existing records."
     )
 
     # Collect record IDs for monitoring
