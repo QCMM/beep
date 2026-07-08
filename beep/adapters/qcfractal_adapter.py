@@ -1462,6 +1462,36 @@ def add_gradient_spec(
     return name
 
 
+def add_energy_spec(
+    ds_sp: SinglepointDataset,
+    spec_name: str,
+    method: str,
+    basis: Optional[str],
+    program: str = "psi4",
+    keywords: Optional[dict] = None,
+    description: str = "",
+) -> str:
+    """Add an energy ``QCSpecification`` to a ``SinglepointDataset``.
+
+    Idempotent: ``add_specification`` silently reports already-existing
+    specs. Returns the lowercased specification name actually registered.
+    """
+    qc_spec = QCSpecification(
+        program=program,
+        driver=SinglepointDriver.energy,
+        method=method,
+        basis=basis,
+        keywords=keywords or {},
+    )
+    name = spec_name.lower()
+    ds_sp.add_specification(
+        name=name,
+        specification=qc_spec,
+        description=description,
+    )
+    return name
+
+
 def add_singlepoint_entries(
     ds_sp: SinglepointDataset,
     entries: List[Tuple[str, Molecule]],

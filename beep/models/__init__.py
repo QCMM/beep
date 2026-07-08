@@ -13,3 +13,4 @@ from .pre_exp import PreExpConfig
 from .geom_benchmark import GeomBenchmarkConfig
 from .energy_benchmark import EnergyBenchmarkConfig
 from .nm_sampling import NmSamplingConfig
+from .sapt import SaptConfig

@@ -60,6 +60,32 @@ def test_main_valid_dispatch(mock_connect, monkeypatch, tmp_path):
 def test_workflow_models_keys():
     expected = {
         "sampling", "be_hess", "extract", "pre_exp",
-        "geom_benchmark", "energy_benchmark", "nm_sampling",
+        "geom_benchmark", "energy_benchmark", "nm_sampling", "sapt",
     }
     assert set(WORKFLOW_MODELS.keys()) == expected
+
+
+@patch("beep.cli.connect")
+def test_main_sapt_dispatch(mock_connect, monkeypatch, tmp_path):
+    mock_client = MagicMock()
+    mock_connect.return_value = mock_client
+
+    cfg_file = tmp_path / "sapt.json"
+    cfg_file.write_text(json.dumps({
+        "workflow": "sapt",
+        "molecule": "SO2",
+        "surface_model": "w5-7",
+        "optimization_spec": "mpwb1k-d3bj_def2-tzvpd",
+        "dry_run": True,
+    }))
+    monkeypatch.setattr(sys, "argv", ["beep", "--config", str(cfg_file)])
+
+    mock_run = MagicMock()
+    fake_module = types.ModuleType("beep.workflows.sapt")
+    fake_module.run = mock_run
+
+    with patch.dict(sys.modules, {"beep.workflows.sapt": fake_module}):
+        main()
+
+    mock_connect.assert_called_once()
+    mock_run.assert_called_once()

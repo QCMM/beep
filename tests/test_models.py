@@ -9,6 +9,7 @@ from beep.models import (
     ExtractConfig,
     GeomBenchmarkConfig,
     PreExpConfig,
+    SaptConfig,
 )
 from beep.models.base import ServerConfig, LevelOfTheory, safe_config_dump
 
@@ -138,3 +139,58 @@ def test_geom_benchmark_lowercases_reference_method_and_basis():
     )
     # Method (idx 0) and basis (idx 1) lowercased; program (idx 2) left alone.
     assert cfg.reference_geometry_level_of_theory == ["ccsd(t)", "aug-cc-pvtz", "psi4"]
+
+
+@pytest.mark.parametrize(
+    ("molecule", "surface_model", "optimization_spec"),
+    [
+        ("SO2", "w5-7", "MPWB1K-D3BJ_DEF2-TZVPD"),
+        ("H2S", "w5-7", "MPWB1K-D3BJ_DEF2-TZVPD"),
+        ("CH2OHCH2OH", "W22", "HF3C_MINIX"),
+    ],
+)
+def test_sapt_config_is_generic(molecule, surface_model, optimization_spec):
+    cfg = SaptConfig(
+        workflow="sapt",
+        molecule=molecule,
+        surface_model=surface_model,
+        optimization_spec=optimization_spec,
+    )
+
+    assert cfg.molecule == molecule
+    assert cfg.surface_model == surface_model
+    assert cfg.optimization_spec == optimization_spec.lower()
+    assert cfg.method == "sapt0"
+    assert cfg.basis == "jun-cc-pvdz"
+    assert cfg.entries == "all"
+    assert cfg.dry_run is True
+
+
+def test_sapt_config_accepts_entry_mapping_and_fragment_metadata():
+    cfg = SaptConfig(
+        workflow="sapt",
+        molecule="OH",
+        surface_model="W22",
+        optimization_spec="HF3C_MINIX",
+        entries={"W22_01": ["OH_W22_01_0001"]},
+        exclude_clusters=["W22_02"],
+        molecule_charge=0,
+        molecule_multiplicity=2,
+        sapt_tag="sapt.radicals",
+    )
+
+    assert cfg.entries == {"W22_01": ["OH_W22_01_0001"]}
+    assert cfg.exclude_clusters == ["W22_02"]
+    assert cfg.molecule_multiplicity == 2
+    assert cfg.sapt_tag == "sapt.radicals"
+
+
+def test_sapt_config_rejects_invalid_fragment_multiplicity():
+    with pytest.raises(ValidationError):
+        SaptConfig(
+            workflow="sapt",
+            molecule="SO2",
+            surface_model="w5-7",
+            optimization_spec="mpwb1k-d3bj_def2-tzvpd",
+            molecule_multiplicity=0,
+        )
