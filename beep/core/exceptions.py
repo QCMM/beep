@@ -28,3 +28,32 @@ class DataNotLoadedError(Exception):
         ):
         self.message = message
         super().__init__(self.message)
+
+# ---------------------------------------------------------------------------
+# MBE (Many-Body Expansion) workflow exceptions
+#
+# Ported from the standalone beep-mbe package. Its ``ConfigError`` has no
+# analogue here because config validation is handled by Pydantic
+# (``pydantic.ValidationError``); the remaining errors map to the
+# ``mbe`` / ``mbe_extract`` workflows.
+# ---------------------------------------------------------------------------
+
+
+class MbeError(Exception):
+    """Base class for errors raised by the MBE workflows."""
+
+
+class MbeFragmentationError(MbeError):
+    """Raised when a molecule cannot be fragmented for the MBE."""
+
+
+class MbeSubmissionError(MbeError):
+    """Raised when MBE submission or monitoring fails."""
+
+
+class MbeRecordMissingError(MbeError):
+    """Raised when an expected optimization record or molecule is missing."""
+
+
+class MbeExtractError(MbeError):
+    """Raised when MBE binding energies cannot be assembled."""

@@ -1,0 +1,25 @@
+{
+    "workflow": "mbe_extract",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "opt_level_of_theory": "hf3c_minix",
+    "small_molecule_collection": "astro_molecules",
+    "small_molecule": "H2CO",
+    "surface_model_collection": "co2_x",
+    "surface_model": "cd5_01",
+    "dataset": "H2CO_cd5_01",
+    "entries": ["H2CO_cd5_01_0001", "H2CO_cd5_01_0002", "H2CO_cd5_01_0003"],
+    "spec": ["scf_adz_vmfc"],
+    "bsse": ["vmfc"],
+    "zpve": {
+        "enabled": true,
+        "molecule": "H2CO",
+        "hessian_clusters": ["cd5_01"],
+        "scale_factor": 0.958,
+        "imag_threshold": 50.0
+    }
+}

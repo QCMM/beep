@@ -1,0 +1,35 @@
+{
+    "workflow": "mbe",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "opt_level_of_theory": "hf3c_minix",
+    "opt_dataset": "H2CO_cd5_01",
+    "entries": ["H2CO_cd5_01_0001", "H2CO_cd5_01_0002", "H2CO_cd5_01_0003"],
+    "small_molecule_collection": "astro_molecules",
+    "small_molecule": "H2CO",
+    "surface_model_collection": "co2_x",
+    "surface_model": "cd5_01",
+    "env_unit_len": 3,
+    "dataset": "H2CO_cd5_01",
+    "spec": ["scf_adz_vmfc"],
+    "program": "psi4",
+    "bsse": ["vmfc"],
+    "tag": "mbe_vmfc",
+    "levels": [
+        {"index": 1, "method": "scf", "basis": "aug-cc-pvdz"},
+        {"index": 2, "method": "scf", "basis": "aug-cc-pvdz"},
+        {"index": 3, "method": "scf", "basis": "aug-cc-pvdz"}
+    ],
+    "update_existing_entries": false,
+    "fetch_only": false,
+    "show_children": false,
+    "monitor": {
+        "enabled": true,
+        "poll_interval": 300,
+        "max_wait": null
+    }
+}

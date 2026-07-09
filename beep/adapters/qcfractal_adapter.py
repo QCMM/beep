@@ -20,7 +20,9 @@ Functions are organized by category:
 import time
 import logging
 from typing import List, Tuple, Dict, Optional, Any
+from typing import Callable, Sequence  # MBE monitoring helpers (additive)
 from collections import Counter
+from dataclasses import dataclass
 
 from qcportal import PortalClient, PortalRequestError
 from qcportal.record_models import RecordStatusEnum, PriorityEnum
@@ -31,6 +33,9 @@ from qcportal.singlepoint.dataset_models import (
     SinglepointDataset, SinglepointDatasetNewEntry,
 )
 from qcportal.reaction.dataset_models import ReactionDataset
+from qcportal.manybody import (
+    ManybodyDataset, ManybodyKeywords, ManybodySpecification,
+)
 import numpy as np
 from qcportal.reaction.record_models import ReactionSpecification, ReactionKeywords
 from qcelemental.models.molecule import Molecule
@@ -52,6 +57,10 @@ __all__ = [
     "RecordStatusEnum",
     "is_complete", "is_incomplete", "is_error", "status_label",
 ]
+# MBE / manybody exports (additive; see the MBE helper section below).
+__all__ += ["ManybodyDataset", "get_or_create_manybody_dataset",
+            "wait_for_manybody_completion", "wait_for_dataset_records",
+            "ManybodyMonitorResult"]
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +75,7 @@ _COLLECTION_TYPE_MAP = {
     "ReactionDataset": "reaction",
     "Dataset": "singlepoint",
     "SinglepointDataset": "singlepoint",
+    "ManybodyDataset": "manybody",
 }
 
 
@@ -1665,3 +1675,269 @@ def get_optimization_trajectory(
             "gradient_hartree_per_bohr": grad,
         })
     return steps
+
+
+# ---------------------------------------------------------------------------
+# MBE / manybody helpers
+#
+# Support for the ``mbe`` / ``mbe_extract`` workflows (ported from the
+# standalone beep-mbe package). These are strictly additive: the monitoring
+# functions below carry distinct names (``wait_for_manybody_completion`` /
+# ``wait_for_dataset_records``) and do NOT touch the existing
+# ``wait_for_completion`` used by sampling / geom_benchmark.
+# ---------------------------------------------------------------------------
+
+_MBE_TERMINAL_STATUSES = {"COMPLETE", "ERROR"}
+_MBE_CHILD_STATUS_KEYS = ("WAITING", "RUNNING", "COMPLETE", "ERROR")
+
+
+@dataclass
+class ManybodyMonitorResult:
+    """Structured result of monitoring an MBE ManybodyDataset submission."""
+    start_time: float
+    end_time: float
+    polls: int
+    per_entry_final_status: Dict[str, str]
+    per_entry_children_counts: Dict[str, Dict[str, int]]
+    n_complete: int
+    n_error: int
+    n_missing: int
+    n_other: int
+    errored_entries: List[str]
+    timed_out: bool
+
+
+def get_or_create_manybody_dataset(client: PortalClient, name: str) -> ManybodyDataset:
+    """Get an existing ManybodyDataset or create a new one (idempotent)."""
+    try:
+        return client.get_dataset("manybody", name)
+    except (KeyError, PortalRequestError):
+        return client.add_dataset("manybody", name)
+
+
+def mbe_levels_to_qc_specifications(levels, program: str) -> Dict[int, QCSpecification]:
+    """Convert MBE level objects to per-order energy QCSpecifications.
+
+    ``levels`` is any iterable of objects exposing ``.index``, ``.method``,
+    ``.basis`` and ``.keywords`` (e.g. :class:`beep.models.mbe.MbeLevel`).
+    Returns a mapping from MBE order index to a QCSpecification.
+    """
+    qc_levels: Dict[int, QCSpecification] = {}
+    for level in levels:
+        qc_levels[level.index] = QCSpecification(
+            program=program,
+            driver=SinglepointDriver.energy,
+            method=level.method,
+            basis=level.basis,
+            # QCSpecification rejects keywords=None; use an empty dict when the
+            # level carries no keywords.
+            keywords=level.keywords or {},
+        )
+    return qc_levels
+
+
+def build_manybody_specification(
+    levels: Dict[int, QCSpecification], bsse_correction: List[str],
+) -> ManybodySpecification:
+    """Build a qcmanybody ManybodySpecification from per-order QCSpecifications."""
+    return ManybodySpecification(
+        program="qcmanybody",
+        levels=levels,
+        bsse_correction=bsse_correction,
+        keywords=ManybodyKeywords(return_total_data=True),
+    )
+
+
+def _mbe_normalize_status(value) -> str:
+    if value is None:
+        return "MISSING"
+    name = getattr(value, "name", None)
+    if name:
+        return str(name).upper()
+    return str(value).upper()
+
+
+def _mbe_normalize_children_status(children_status) -> Dict[str, int]:
+    counts: Dict[str, int] = {key: 0 for key in _MBE_CHILD_STATUS_KEYS}
+    if not children_status:
+        return counts
+    for key, value in children_status.items():
+        status_key = _mbe_normalize_status(key)
+        if status_key in counts:
+            counts[status_key] += int(value)
+    return counts
+
+
+def _mbe_log_poll_summary(poll_index, entries, statuses, children_counts) -> None:
+    logger = logging.getLogger("beep")
+    logger.info(f"Monitoring poll {poll_index}: {len(entries)} entries")
+    for entry in entries:
+        status = statuses[entry]
+        counts = children_counts[entry]
+        total = sum(counts.values())
+        logger.info(
+            f"entry={entry} status={status} children_total={total} "
+            f"waiting={counts['WAITING']} running={counts['RUNNING']} "
+            f"complete={counts['COMPLETE']} error={counts['ERROR']}"
+        )
+
+
+def _mbe_summarize_final_statuses(per_entry_final_status):
+    n_complete = n_error = n_missing = n_other = 0
+    errored_entries = []
+    for entry, status in per_entry_final_status.items():
+        if status == "COMPLETE":
+            n_complete += 1
+        elif status == "ERROR":
+            n_error += 1
+            errored_entries.append(entry)
+        elif status == "MISSING":
+            n_missing += 1
+        else:
+            n_other += 1
+    return n_complete, n_error, n_missing, n_other, errored_entries
+
+
+def wait_for_manybody_completion(
+    client: PortalClient,
+    dataset_name: str,
+    spec_name: str,
+    entry_names: Sequence[str],
+    poll_interval_s: int = 300,
+    max_wait_s: Optional[int] = None,
+    *,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    time_fn: Callable[[], float] = time.time,
+) -> ManybodyMonitorResult:
+    """Poll ManybodyDataset record statuses until all entries reach terminal states.
+
+    Distinct from :func:`wait_for_completion` (which monitors a flat list of
+    record IDs for the reaction-dataset BE route). ``sleep_fn`` / ``time_fn``
+    are injectable to keep the polling loop deterministic under test.
+    """
+    logger = logging.getLogger("beep")
+    start_time = time_fn()
+    polls = 0
+    timed_out = False
+
+    mb_ds = client.get_dataset("manybody", dataset_name)
+    try:
+        overview = mb_ds.detailed_status()
+    except Exception as exc:
+        logger.debug(f"Dataset detailed_status unavailable: {exc}")
+    else:
+        logger.info(f"Dataset detailed status snapshot: {overview}")
+
+    per_entry_status: Dict[str, str] = {}
+    per_entry_children: Dict[str, Dict[str, int]] = {}
+
+    while True:
+        polls += 1
+        for entry in entry_names:
+            rr = mb_ds.get_record(entry_name=entry, specification_name=spec_name)
+            if rr is None:
+                per_entry_status[entry] = "MISSING"
+                per_entry_children[entry] = {key: 0 for key in _MBE_CHILD_STATUS_KEYS}
+                continue
+            per_entry_status[entry] = _mbe_normalize_status(rr.status)
+            per_entry_children[entry] = _mbe_normalize_children_status(rr.children_status)
+
+        _mbe_log_poll_summary(polls, entry_names, per_entry_status, per_entry_children)
+
+        if all(s in _MBE_TERMINAL_STATUSES for s in per_entry_status.values()):
+            break
+
+        elapsed = time_fn() - start_time
+        if max_wait_s is not None and elapsed >= max_wait_s:
+            timed_out = True
+            logger.warning(
+                f"Monitoring timed out after {elapsed:.1f} seconds (max_wait={max_wait_s})."
+            )
+            break
+
+        sleep_fn(poll_interval_s)
+
+    end_time = time_fn()
+    n_complete, n_error, n_missing, n_other, errored_entries = _mbe_summarize_final_statuses(
+        per_entry_status
+    )
+    logger.info(
+        f"Monitoring complete: complete={n_complete} error={n_error} "
+        f"missing={n_missing} other={n_other}"
+    )
+    if errored_entries:
+        logger.info(f"Errored entries: {', '.join(errored_entries)}")
+
+    return ManybodyMonitorResult(
+        start_time=start_time,
+        end_time=end_time,
+        polls=polls,
+        per_entry_final_status=dict(per_entry_status),
+        per_entry_children_counts=dict(per_entry_children),
+        n_complete=n_complete,
+        n_error=n_error,
+        n_missing=n_missing,
+        n_other=n_other,
+        errored_entries=list(errored_entries),
+        timed_out=timed_out,
+    )
+
+
+def wait_for_dataset_records(
+    ds,
+    entry_names: Sequence[str],
+    specification_names: Sequence[str],
+    poll_interval: int,
+    max_wait: Optional[int],
+    *,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    time_fn: Callable[[], float] = time.time,
+) -> Tuple[Dict[Tuple[str, str], str], bool]:
+    """Poll a dataset's entry/spec record statuses until all are terminal.
+
+    Used for the monomer SinglepointDataset in the MBE workflow. Returns the
+    per-(entry, spec) status map and a timed-out flag.
+    """
+    logger = logging.getLogger("beep")
+    start_time = time_fn()
+    polls = 0
+    timed_out = False
+    per_record_status: Dict[Tuple[str, str], str] = {}
+
+    while True:
+        polls += 1
+        for entry in entry_names:
+            for spec in specification_names:
+                rr = ds.get_record(entry_name=entry, specification_name=spec)
+                per_record_status[(entry, spec)] = _mbe_normalize_status(
+                    rr.status if rr else None
+                )
+
+        counts = Counter(per_record_status.values())
+        known = (
+            counts.get("COMPLETE", 0) + counts.get("ERROR", 0)
+            + counts.get("WAITING", 0) + counts.get("RUNNING", 0)
+            + counts.get("MISSING", 0)
+        )
+        logger.info(
+            f"Dataset poll {polls}: total={len(per_record_status)} "
+            f"complete={counts.get('COMPLETE', 0)} error={counts.get('ERROR', 0)} "
+            f"waiting={counts.get('WAITING', 0)} running={counts.get('RUNNING', 0)} "
+            f"missing={counts.get('MISSING', 0)} other={sum(counts.values()) - known}"
+        )
+
+        if all(s in _MBE_TERMINAL_STATUSES for s in per_record_status.values()):
+            break
+
+        elapsed = time_fn() - start_time
+        if max_wait is not None and elapsed >= max_wait:
+            timed_out = True
+            logger.warning(
+                f"Dataset monitoring timed out after {elapsed:.1f} seconds (max_wait={max_wait})."
+            )
+            break
+
+        sleep_fn(poll_interval)
+
+    logger.info(f"Dataset monitoring complete: total={len(per_record_status)}")
+    return dict(per_record_status), timed_out

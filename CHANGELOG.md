@@ -5,6 +5,34 @@ All notable changes to BEEP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.15.0.dev
+
+### Added
+
+- **Many-Body Expansion binding-energy workflows (`mbe` / `mbe_extract`),
+  ported from the standalone `beep-mbe` package (v0.1.0 @ `44a90e6`).** These
+  provide an alternative route to binding energies on the *same* binding sites
+  produced by `sampling` / `be_hess`, re-evaluated at a (typically higher)
+  level of theory via n-body fragmentation on a qcmanybody `ManybodyDataset`
+  plus a monomer `SinglepointDataset`.
+  - `mbe` submits and (optionally) monitors the many-body computations.
+  - `mbe_extract` assembles per-site binding energies (`be_data/total_be.csv`)
+    plus n-body decomposition tables (`decomp__<spec>.csv`,
+    `contrib__<spec>.csv`) and a text report.
+  - `mbe_extract` can optionally apply a **read-only** ZPVE correction borrowed
+    from a prior `be_hess` run on the same sites (`total_be_zpve.csv`); it never
+    submits or mutates the `be_hess` datasets, and sites without a usable
+    Hessian are reported as `NaN`.
+  - New adapter helpers (`get_or_create_manybody_dataset`,
+    `mbe_levels_to_qc_specifications`, `build_manybody_specification`,
+    `wait_for_manybody_completion`, `wait_for_dataset_records`) are strictly
+    additive; the existing `wait_for_completion` used by `sampling` /
+    `geom_benchmark` is unchanged.
+  - Config uses BEEP's Pydantic-v2 schema (nested `server.*`, object-style
+    `levels`); the standalone package's flat JSON format is not supported.
+    See `examples/mbe.json` and `examples/mbe_extract.json`.
+  - `pandas` is now an explicit runtime dependency.
+
 ## [0.14.0] — 2026-07-07
 
 ### Added
