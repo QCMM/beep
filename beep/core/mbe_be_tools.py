@@ -123,6 +123,16 @@ def _convert_energy(value: Optional[float], factor: float) -> Optional[float]:
 
 def extract_mbe_components(rec, pref: str) -> Dict[str, Optional[float]]:
     """Pull per-order energies from a ManybodyRecord's properties."""
+    # TODO(nbody): capped at 3-body. Submission already supports arbitrary
+    # contiguous 1..N levels (qcmanybody computes them), but the decomposition
+    # here reads only the 1/2/3-body keys, so a 4-body+ run keeps a correct
+    # `etot` (from `_total_energy`) while silently dropping Δ₄⁺ from the
+    # decomposition and the convergence estimate. To lift the cap, read
+    # `{pref}_{k}_body_contribution_to_energy` for every k up to the run's max
+    # order and make compute_be_values / build_cumulative / build_contributions /
+    # compute_convergence iterate over the available orders. This is additive:
+    # 3-body runs lack the k≥4 keys, so existing output stays byte-identical.
+    # Confirm qcmanybody's exact property key for k≥4 against a real record first.
     props = getattr(rec, "properties", None) or {}
     results = props.get("results", {}) or {}
 
