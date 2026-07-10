@@ -138,6 +138,21 @@ def test_run_writes_report_and_csvs(tmp_path, monkeypatch):
     assert not (data_dir / "total_be_zpve.csv").exists()
     assert "ZPVE" not in report_text
 
+    # Convergence / truncation-error output (always emitted).
+    conv_csv = data_dir / "convergence__spec.csv"
+    assert conv_csv.exists()
+    df_conv = pd.read_csv(conv_csv, index_col=0)
+    assert list(df_conv.columns) == [
+        "BE_total", "n_body_max", "delta_last", "ratio_r",
+        "error_bar", "rel_error", "converged",
+    ]
+    # cluster-a is a full 3-body site -> a real geometric bar.
+    assert df_conv.loc["cluster-a", "n_body_max"] == 3
+    assert df_conv.loc["cluster-a", "error_bar"] > 0
+    # cluster-b lacks the 2-body term -> not estimable (n/a).
+    assert pd.isna(df_conv.loc["cluster-b", "error_bar"])
+    assert "MBE truncation error" in report_text
+
 
 def test_zpve_enabled_writes_corrected_table(tmp_path, monkeypatch):
     pref = "vmfc_corrected"

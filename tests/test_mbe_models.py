@@ -40,8 +40,12 @@ def test_example_mbe_json_loads():
     cfg = MbeConfig(**raw)
     assert cfg.workflow == "mbe"
     assert cfg.levels
-    assert cfg.spec == ["scf_adz_vmfc"]
+    assert cfg.spec == ["mbe_mixed_vmfc"]
     assert cfg.bsse == ["vmfc"]
+    # entries omitted (null) => run all binding sites of the cluster
+    assert cfg.entries is None
+    # per-tier level of theory: 3-body uses a cheaper method than 1/2-body
+    assert cfg.levels[0].method == "ccsd(t)" and cfg.levels[2].method == "mp2"
 
 
 def test_example_mbe_extract_json_loads():
@@ -50,6 +54,8 @@ def test_example_mbe_extract_json_loads():
     assert cfg.workflow == "mbe_extract"
     assert cfg.zpve is not None
     assert cfg.zpve.enabled is True
+    # ZPVE toggled on without naming clusters => auto-discovery at runtime
+    assert cfg.zpve.hessian_clusters is None
 
 
 # --- spec coercion ------------------------------------------------------------
@@ -115,6 +121,26 @@ def test_env_unit_len_must_be_positive():
         MbeConfig(**_mbe_kwargs(env_unit_len=0))
 
 
+def test_noncontiguous_levels_rejected():
+    # Gap in body orders (1, 3 with no 2) is invalid for qcmanybody.
+    levels = [
+        {"index": 1, "method": "scf", "basis": "sto-3g"},
+        {"index": 3, "method": "scf", "basis": "sto-3g"},
+    ]
+    with pytest.raises(ValidationError):
+        MbeConfig(**_mbe_kwargs(levels=levels))
+
+
+def test_contiguous_levels_accepted():
+    levels = [
+        {"index": 1, "method": "scf", "basis": "sto-3g"},
+        {"index": 2, "method": "scf", "basis": "sto-3g"},
+        {"index": 3, "method": "scf", "basis": "sto-3g"},
+    ]
+    cfg = MbeConfig(**_mbe_kwargs(levels=levels))
+    assert [l.index for l in cfg.levels] == [1, 2, 3]
+
+
 # --- extract: ZPVE optional ---------------------------------------------------
 
 def test_extract_zpve_optional():
@@ -130,6 +156,28 @@ def test_extract_zpve_optional():
         bsse=["vmfc"],
     )
     assert cfg.zpve is None
+    # convergence_tol has a sensible default
+    assert cfg.convergence_tol == 0.05
+
+
+def test_zpve_hessian_clusters_optional():
+    from beep.models.mbe import MbeZpveConfig
+    # Omitting hessian_clusters is allowed => auto-discovery at runtime.
+    z = MbeZpveConfig(enabled=True)
+    assert z.hessian_clusters is None
+    # Explicit list still accepted.
+    z2 = MbeZpveConfig(enabled=True, hessian_clusters=["cd5_01"])
+    assert z2.hessian_clusters == ["cd5_01"]
+
+
+def test_convergence_tol_must_be_positive():
+    with pytest.raises(ValidationError):
+        MbeExtractConfig(
+            workflow="mbe_extract", opt_level_of_theory="hf3c_minix",
+            small_molecule_collection="s", small_molecule="H2CO",
+            surface_model_collection="ss", surface_model="surf",
+            dataset="d", spec=["x"], bsse=["vmfc"], convergence_tol=0.0,
+        )
 
 
 # --- level -> QCSpecification construction (real qcportal objects) -----------

@@ -12,14 +12,11 @@
     "surface_model_collection": "co2_x",
     "surface_model": "cd5_01",
     "dataset": "H2CO_cd5_01",
-    "entries": ["H2CO_cd5_01_0001", "H2CO_cd5_01_0002", "H2CO_cd5_01_0003"],
-    "spec": ["scf_adz_vmfc"],
+    "entries": null,
+    "spec": ["mbe_mixed_vmfc"],
     "bsse": ["vmfc"],
+    "convergence_tol": 0.05,
     "zpve": {
-        "enabled": true,
-        "molecule": "H2CO",
-        "hessian_clusters": ["cd5_01"],
-        "scale_factor": 0.958,
-        "imag_threshold": 50.0
+        "enabled": true
     }
 }

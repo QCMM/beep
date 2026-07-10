@@ -219,6 +219,79 @@ def build_contributions(values: Dict[str, Optional[float]]) -> Dict[str, float]:
     }
 
 
+def compute_convergence(values: Dict[str, Optional[float]], tol: float = 0.05) -> Dict[str, Any]:
+    """Estimate the MBE truncation error for one site/spec.
+
+    The binding energy is the many-body sum ``BE = Δ₁ + Δ₂ + Δ₃ + …`` where
+    ``Δ₁ = be_le1`` (monomer deformation), ``Δ₂ = be_2`` (2-body) and
+    ``Δ₃ = be_3`` (3-body). The uncomputed tail (Δ₄ + …) is estimated by
+    assuming the interaction increments keep shrinking geometrically at the
+    rate seen between the two highest computed orders:
+
+        r    = |Δₙ / Δₙ₋₁|                 (interaction increments only)
+        bar  = |Δₙ| · r / (1 − r)          (magnitude of the geometric tail)
+
+    ``bar`` is reported as a **symmetric** ± uncertainty on ``BE_total`` — never
+    as a signed correction, because the *direction* of the next term is not
+    predictable (the increment sign can flip, as it does for CO on cd5). Only
+    the *magnitude* of the decay is inferable.
+
+    Requirements / edge cases:
+      * needs two interaction increments (Δ₂ and Δ₃), i.e. a 3-body run. A
+        2-body-only run has no ratio → ``error_bar`` is ``None`` ("n/a"): a
+        2-body calculation carries no information about its own convergence.
+      * ``|r| ≥ 1`` (increment did not shrink) → not converging → ``error_bar``
+        ``None`` and ``converged`` ``False``.
+      * ``Δ₁`` (deformation) is excluded from the ratio.
+
+    Returns a dict with ``n_body_max``, ``delta_last``, ``ratio_r``,
+    ``error_bar`` (kcal/mol, or ``None``), ``rel_error`` (or ``None``) and
+    ``converged`` (``bool`` or ``None`` when not estimable).
+    """
+    d2 = values.get("be_2")
+    d3 = values.get("be_3")
+    be_total = values.get("be_total")
+
+    # Highest computed body order (1 = deformation only).
+    if d3 is not None:
+        n_body_max = 3
+    elif d2 is not None:
+        n_body_max = 2
+    else:
+        n_body_max = 1
+
+    result: Dict[str, Any] = {
+        "n_body_max": n_body_max,
+        "delta_last": None,
+        "ratio_r": None,
+        "error_bar": None,
+        "rel_error": None,
+        "converged": None,
+    }
+
+    # Need two interaction increments (Δ₂, Δ₃) to form a decay ratio.
+    if d2 is None or d3 is None or d2 == 0.0:
+        result["delta_last"] = d3 if d3 is not None else d2
+        return result
+
+    r = abs(d3 / d2)
+    result["delta_last"] = d3
+    result["ratio_r"] = r
+
+    if r >= 1.0:
+        # Series is not shrinking — cannot bound the tail; flag non-converged.
+        result["converged"] = False
+        return result
+
+    bar = abs(d3) * r / (1.0 - r)
+    result["error_bar"] = bar
+    if be_total is not None and be_total != 0.0:
+        rel = bar / abs(be_total)
+        result["rel_error"] = rel
+        result["converged"] = rel < tol
+    return result
+
+
 def resolve_bsse(bsse: Sequence[str]):
     """Return (scheme, property-prefix) for the single configured BSSE scheme."""
     from .exceptions import MbeExtractError
@@ -254,6 +327,36 @@ def _format_float(value) -> str:
     return f"{float(value): .6f}"
 
 
+def format_convergence_table(conv_by_entry: Dict[str, Dict[str, Any]]) -> str:
+    """Render the per-site MBE truncation-error summary for the text report.
+
+    One row per site: ``BE_total   ± error_bar   [n-body]   converged?``. Sites
+    without a computable bar (2-body runs, or a non-shrinking series) show
+    ``n/a``.
+    """
+    headers = ["entry", "BE_total", "error_bar", "n_body", "converged"]
+    rows: List[List[str]] = []
+    for entry, c in conv_by_entry.items():
+        bar = c.get("error_bar")
+        n = c.get("n_body_max")
+        conv = c.get("converged")
+        be = c.get("BE_total")
+        if bar is None:
+            bar_str = "n/a (2b)" if n == 2 else "n/a (not conv.)"
+        else:
+            bar_str = f"± {bar:.6f}"
+        conv_str = {True: "yes", False: "no", None: "-"}[conv]
+        be_str = "NaN" if be is None or (isinstance(be, float) and math.isnan(be)) else f"{be: .6f}"
+        rows.append([str(entry), be_str, bar_str, f"{n}b", conv_str])
+
+    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)] if rows else [len(h) for h in headers]
+    lines = ["  ".join(headers[i].ljust(widths[i]) for i in range(len(headers)))]
+    lines.append("  ".join("-" * widths[i] for i in range(len(headers))))
+    for r in rows:
+        lines.append("  ".join(r[i].ljust(widths[i]) for i in range(len(headers))))
+    return "\n".join(lines)
+
+
 def render_table(df: pd.DataFrame) -> str:
     """Render a DataFrame as a fixed-width ASCII table for the text report."""
     headers = ["entry", *[str(col) for col in df.columns]]
@@ -282,10 +385,36 @@ def render_table(df: pd.DataFrame) -> str:
 # ZPVE borrow (read-only) — populated in the ZPVE step
 # ---------------------------------------------------------------------------
 
+def _discover_hessian_clusters(client, molecule, opt_method, opt_basis, logger) -> List[str]:
+    """Find be_hess cluster names for ``molecule`` at the given LOT (read-only).
+
+    Matches reaction datasets named ``be_<MOL>_<CLUSTER>_<METHOD>_<BASIS>_be_nocp``
+    (or the legacy method-only form) and extracts ``<CLUSTER>`` by stripping the
+    known prefix/suffix, so clusters containing underscores (e.g. ``cd5_01``) are
+    recovered intact.
+    """
+    prefix = f"be_{molecule.upper()}_"
+    suffixes = [
+        f"_{opt_method.upper()}_{opt_basis.upper()}_be_nocp",
+        f"_{opt_method.upper()}_be_nocp",
+    ]
+    clusters = []
+    for name in qcf.list_reaction_dataset_names(client):
+        if not name.startswith(prefix):
+            continue
+        for suf in suffixes:
+            if name.endswith(suf):
+                clusters.append(name[len(prefix):-len(suf)].lower())
+                break
+    found = sorted(set(clusters))
+    logger.info(f"Auto-discovered {len(found)} be_hess cluster(s) for {molecule}: {found}")
+    return found
+
+
 def borrow_zpve_corrections(
     client,
     molecule: str,
-    hessian_clusters: Sequence[str],
+    hessian_clusters: Optional[Sequence[str]],
     opt_lot: str,
     entry_names: Sequence[str],
     scale_factor: float = 0.958,
@@ -300,10 +429,18 @@ def borrow_zpve_corrections(
     ZPVE correction from the corresponding Hessians. Never submits anything;
     sites without a usable Hessian are returned as NaN.
 
+    When ``hessian_clusters`` is ``None`` the cluster list is auto-discovered from
+    the server (all ``be_<MOL>_*`` reaction datasets at this LOT).
+
     Returns a Series indexed by site label (``Delta_ZPVE``, kcal/mol).
     """
     hartree_to_kcal = qcelemental.constants.hartree2kcalmol
     opt_method, _, opt_basis = opt_lot.partition("_")
+
+    if hessian_clusters is None:
+        hessian_clusters = _discover_hessian_clusters(
+            client, molecule, opt_method, opt_basis, logger
+        )
 
     # Gather the be_nocp stoichiometry rows across the requested clusters.
     frames = []

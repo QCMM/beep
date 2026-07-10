@@ -81,8 +81,9 @@ class MbeZpveConfig(BaseModel):
         None,
         description="Molecule name used to locate be_hess datasets; defaults to small_molecule",
     )
-    hessian_clusters: List[str] = Field(
-        ..., min_length=1, description="Cluster names whose be_hess Hessians to borrow"
+    hessian_clusters: Optional[List[str]] = Field(
+        None,
+        description="Cluster names whose be_hess Hessians to borrow; null = auto-discover be_<MOL>_* on the server",
     )
     scale_factor: float = Field(0.958, description="Harmonic ZPVE scaling factor")
     imag_threshold: float = Field(
@@ -159,12 +160,17 @@ class MbeConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_levels(self):
-        indices = [lvl.index for lvl in self.levels]
+        indices = sorted(lvl.index for lvl in self.levels)
         if len(set(indices)) != len(indices):
             raise ValueError(f"Duplicate MBE level indices in levels: {indices}.")
-        if 1 not in indices:
+        # Levels must be contiguous 1..N — qcmanybody expects a level for every
+        # body order up to the truncation order, with no gaps.
+        expected = list(range(1, len(indices) + 1))
+        if indices != expected:
             raise ValueError(
-                "levels must include index 1 (the 1-body / monomer specification)."
+                f"MBE level indices must be contiguous starting at 1 (got {indices}, "
+                f"expected {expected}); every body order up to the truncation order "
+                "needs its own level."
             )
         return self
 
@@ -206,6 +212,11 @@ class MbeExtractConfig(BaseModel):
     )
     zpve: Optional[MbeZpveConfig] = Field(
         None, description="Optional ZPVE correction borrowed from be_hess; null = electronic-only"
+    )
+    convergence_tol: float = Field(
+        0.05,
+        gt=0,
+        description="Relative-error threshold for the MBE 'converged' flag (|error_bar/BE|)",
     )
 
     _lower_opt_lot = field_validator("opt_level_of_theory")(lowercase_str)

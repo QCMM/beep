@@ -66,6 +66,41 @@ def test_zpve_math_with_scale_factor(monkeypatch):
     client.submit.assert_not_called()
 
 
+def test_auto_discovery_when_clusters_omitted(monkeypatch):
+    zpve_map = {
+        10: (1.0, True), 11: (0.3, True), 12: (0.2, True),
+        20: (2.0, True), 21: (0.5, True), 22: (0.5, True),
+    }
+    _patch(monkeypatch, zpve_map)
+    # Server reports two be_H2CO_* reaction datasets (+ an unrelated one).
+    monkeypatch.setattr(qcf, "list_reaction_dataset_names", lambda client: [
+        "be_H2CO_CLUSTER-A_HF3C_MINIX_be_nocp",
+        "be_H2CO_CLUSTER-B_HF3C_MINIX_be_nocp",
+        "be_OTHER_XX_HF3C_MINIX_be_nocp",
+        "be_H2CO_CLUSTER-A_HF3C_MINIX_bsse",   # different stoich, ignored
+    ])
+    # Each per-cluster dataset returns only its own site's stoichiometry rows.
+    full = _rxn_frame()
+
+    def per_cluster_fetch(client, base, stoich="be_nocp"):
+        entry = "cluster-a" if "CLUSTER-A" in base else "cluster-b"
+        return full[full["name"] == entry]
+
+    monkeypatch.setattr(qcf, "fetch_reaction_entries", per_cluster_fetch)
+    client = MagicMock()
+
+    series = bt.borrow_zpve_corrections(
+        client, molecule="H2CO", hessian_clusters=None, opt_lot="hf3c_minix",
+        entry_names=["cluster-a", "cluster-b"], scale_factor=0.958, logger=LOGGER,
+    )
+
+    assert series["cluster-a"] == pytest.approx(0.5 * HARTREE2KCAL * 0.958)
+    assert series["cluster-b"] == pytest.approx(1.0 * HARTREE2KCAL * 0.958)
+    # Still strictly read-only under auto-discovery.
+    client.add_dataset.assert_not_called()
+    client.submit.assert_not_called()
+
+
 def test_nan_for_missing_hessian(monkeypatch):
     # cluster-a dimer has no Hessian yet (zpve None) -> NaN; cluster-b fine.
     zpve_map = {

@@ -33,6 +33,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     See `examples/mbe.json` and `examples/mbe_extract.json`.
   - `pandas` is now an explicit runtime dependency.
 
+- **MBE truncation-error estimate in `mbe_extract`.** Each site/spec now gets a
+  symmetric error bar on the binding energy from a geometric extrapolation of
+  the uncomputed n-body tail (`bar = |Δn|·r/(1−r)`, `r = |Δn/Δn−1|`), written to
+  `be_data/convergence__<spec>.csv` and rendered as `BE ± bar (converged?)` in
+  the report. The bar is a magnitude only — no signed `BE_∞` — because the sign
+  of the next term is not predictable. 2-body-only runs report `n/a` (no
+  convergence information); a non-shrinking series is flagged not converged. The
+  `converged` flag uses a configurable `convergence_tol` (default 0.05). The
+  existing `total_be` / `decomp` / `contrib` CSVs are unchanged.
+- **ZPVE correction is now a friction-free toggle.** `mbe_extract`'s
+  `zpve.hessian_clusters` is optional; when omitted, the `be_<MOL>_*` datasets
+  are auto-discovered from the server (still strictly read-only). Turning ZPVE
+  on is just `"zpve": {"enabled": true}`.
+- **MBE level validation.** `mbe` now requires contiguous body-order indices
+  (`1..N`, no gaps), matching qcmanybody's expectation. Per-tier levels of
+  theory (a distinct method/basis per body order) and per-site selection
+  (`entries`, omit for all sites of the cluster) are documented in the examples.
+
 ## [0.14.0] — 2026-07-07
 
 ### Added

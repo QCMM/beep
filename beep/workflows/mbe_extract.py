@@ -100,6 +100,7 @@ def assemble_mbe_be(config: MbeExtractConfig, client: FractalClient, res_folder:
     total_data: Dict[str, Dict[str, float]] = {entry: {} for entry in entry_names}
     decomp_by_spec: Dict[str, Dict[str, Dict[str, float]]] = {}
     contrib_by_spec: Dict[str, Dict[str, Dict[str, float]]] = {}
+    conv_by_spec: Dict[str, Dict[str, Dict]] = {}
 
     for spec in specs:
         surface_rec = mb_ds.get_record(entry_name=config.surface_model, specification_name=spec)
@@ -119,6 +120,7 @@ def assemble_mbe_be(config: MbeExtractConfig, client: FractalClient, res_folder:
 
         decomp_by_spec[spec] = {}
         contrib_by_spec[spec] = {}
+        conv_by_spec[spec] = {}
 
         for entry in entry_names:
             rec = mb_ds.get_record(entry_name=entry, specification_name=spec)
@@ -136,6 +138,9 @@ def assemble_mbe_be(config: MbeExtractConfig, client: FractalClient, res_folder:
             }
             decomp_by_spec[spec][entry] = bt.build_cumulative(be_values_kcal)
             contrib_by_spec[spec][entry] = bt.build_contributions(be_values_kcal)
+            conv_by_spec[spec][entry] = bt.compute_convergence(
+                be_values_kcal, config.convergence_tol
+            )
 
     df_total_be = pd.DataFrame.from_dict(total_data, orient="index", columns=specs).reindex(entry_names)
     df_decomp = {
@@ -149,6 +154,25 @@ def assemble_mbe_be(config: MbeExtractConfig, client: FractalClient, res_folder:
         for spec, v in contrib_by_spec.items()
     }
 
+    # --- MBE truncation-error / convergence estimate (symmetric geometric bar) ---
+    conv_columns = ["BE_total", "n_body_max", "delta_last", "ratio_r",
+                    "error_bar", "rel_error", "converged"]
+    df_conv = {}
+    for spec in specs:
+        rows = {}
+        for entry in entry_names:
+            c = conv_by_spec[spec][entry]
+            rows[entry] = {
+                "BE_total": total_data[entry].get(spec, float("nan")),
+                "n_body_max": c["n_body_max"],
+                "delta_last": c["delta_last"],
+                "ratio_r": c["ratio_r"],
+                "error_bar": c["error_bar"],
+                "rel_error": c["rel_error"],
+                "converged": c["converged"],
+            }
+        df_conv[spec] = pd.DataFrame.from_dict(rows, orient="index", columns=conv_columns).reindex(entry_names)
+
     padded_log(logger, "Saving all dataframes to CSV", padding_char=gear)
     data_dir = res_folder / "be_data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +181,7 @@ def assemble_mbe_be(config: MbeExtractConfig, client: FractalClient, res_folder:
         safe_spec = bt.safe_filename(spec)
         df.to_csv(data_dir / f"decomp__{safe_spec}.csv", index=True, float_format="%.8f")
         df_contrib[spec].to_csv(data_dir / f"contrib__{safe_spec}.csv", index=True, float_format="%.8f")
+        df_conv[spec].to_csv(data_dir / f"convergence__{safe_spec}.csv", index=True, float_format="%.8f")
 
     # --- optional ZPVE correction (read-only borrow from be_hess) ---
     df_total_be_zpve = None
@@ -202,6 +227,13 @@ def assemble_mbe_be(config: MbeExtractConfig, client: FractalClient, res_folder:
         lines.append("")
         lines.append(f"Per-body contributions - spec={spec}")
         lines.append(bt.render_table(df_contrib[spec]))
+        lines.append("")
+        lines.append(f"MBE truncation error (geometric tail, +/- kcal/mol) - spec={spec}")
+        conv_rows = {
+            e: {**conv_by_spec[spec][e], "BE_total": total_data[e].get(spec)}
+            for e in entry_names
+        }
+        lines.append(bt.format_convergence_table(conv_rows))
 
     padded_log(logger, "Summary of MBE binding energy results", padding_char=gear)
     logger.info("\nTotal binding energies (kcal/mol)\n" + bt.render_table(df_total_be))
@@ -209,6 +241,15 @@ def assemble_mbe_be(config: MbeExtractConfig, client: FractalClient, res_folder:
         logger.info(
             "\nTotal binding energies with ZPVE correction (kcal/mol)\n"
             + bt.render_table(df_total_be_zpve)
+        )
+    for spec in specs:
+        conv_rows = {
+            e: {**conv_by_spec[spec][e], "BE_total": total_data[e].get(spec)}
+            for e in entry_names
+        }
+        logger.info(
+            f"\nMBE truncation error (+/- kcal/mol) - spec={spec}\n"
+            + bt.format_convergence_table(conv_rows)
         )
 
     report_path = res_folder / f"mbe_extract_{config.small_molecule}.out"

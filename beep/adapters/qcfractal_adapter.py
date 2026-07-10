@@ -1715,6 +1715,18 @@ def get_or_create_manybody_dataset(client: PortalClient, name: str) -> ManybodyD
         return client.add_dataset("manybody", name)
 
 
+def list_reaction_dataset_names(client: PortalClient) -> List[str]:
+    """Read-only list of all ReactionDataset names on the server.
+
+    Used by the MBE ZPVE-borrow auto-discovery to locate ``be_<MOL>_*`` datasets.
+    """
+    return [
+        r["dataset_name"]
+        for r in client.list_datasets()
+        if r.get("dataset_type") == "reaction"
+    ]
+
+
 def mbe_levels_to_qc_specifications(levels, program: str) -> Dict[int, QCSpecification]:
     """Convert MBE level objects to per-order energy QCSpecifications.
 
