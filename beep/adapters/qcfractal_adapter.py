@@ -1131,14 +1131,22 @@ def _has_dispersion_suffix(name: str) -> bool:
     return any(m.endswith(s) for s in DISPERSION_SUFFIXES)
 
 
-# psi4/dftd3-style dispersion suffix -> native ORCA simple-input keyword.
-# ORCA has no keyword for Grimme's modified-damping -d3m/-d3mbj variants,
-# so those raise instead of silently computing with the wrong damping.
-ORCA_DISPERSION_KEYWORDS: Dict[str, str] = {
-    "-d4": "D4",
-    "-d3bj": "D3BJ",
-    "-d3": "D3ZERO",
+# psi4/dftd3-style dispersion suffix -> (harness keyword field, native keyword
+# token) per program. Programs listed here store dispersion-corrected Hessians
+# as bare functional + native dispersion keyword; the dict's insertion order is
+# also the query order of the get_zpve_mol fallback (keep it deterministic).
+# Variants absent for a program (ORCA: -d3m/-d3mbj; Gaussian: -d4/-d3m/-d3mbj)
+# raise instead of silently computing with the wrong damping.
+DISPERSION_KEYWORD_SPEC: Dict[str, Tuple[str, Dict[str, str]]] = {
+    "orca": ("simple_input", {"-d4": "D4", "-d3bj": "D3BJ", "-d3": "D3ZERO"}),
+    "gaussian": ("route_input", {"-d3bj": "EmpiricalDispersion=GD3BJ", "-d3": "EmpiricalDispersion=GD3"}),
 }
+
+
+def _keyword_token_match(kw_value: Any, token: str) -> bool:
+    """Case-insensitive exact-token match of ``token`` inside a route/simple
+    keyword string (whitespace-split, so ``GD3`` never matches ``GD3BJ``)."""
+    return token.upper() in str(kw_value).upper().split()
 
 
 def hessian_method_and_keywords(method: str, mult: int, program: str) -> Tuple[str, dict]:
@@ -1149,30 +1157,34 @@ def hessian_method_and_keywords(method: str, mult: int, program: str) -> Tuple[s
     derivative contribution — with psi4-style keywords (``dertype 1``,
     ``reference uks`` for open shells).
 
-    orca: the compound method is split into the bare functional plus the
-    native ORCA dispersion keyword on the harness's ``simple_input`` escape
-    hatch (e.g. ``b3lyp-d4`` -> method ``b3lyp``, ``simple_input: "D4"``),
-    because ORCA rejects psi4-style compound method strings. The Hessian
-    physics matches the psi4 workflow: the same Grimme library supplies the
-    dispersion second derivatives, just invoked by ORCA. Only the BE-*energy*
-    stage keeps dispersion in separate dftd3/dftd4 records. The psi4-style
-    keywords are dropped: ORCA's ``Freq`` is analytic and UKS follows from
-    the molecule multiplicity.
+    orca / gaussian (any program in ``DISPERSION_KEYWORD_SPEC``): the compound
+    method is split into the bare functional plus the program's native
+    dispersion keyword on the harness's escape-hatch field (e.g. ``b3lyp-d4``
+    -> orca ``simple_input: "D4"``; ``b3lyp-d3bj`` -> gaussian
+    ``route_input: "EmpiricalDispersion=GD3BJ"``), because those harnesses
+    reject psi4-style compound method strings. The Hessian physics matches
+    the psi4 workflow — the same Grimme library supplies the dispersion
+    second derivatives. Only the BE-*energy* stage keeps dispersion in
+    separate dftd3/dftd4 records. The psi4-style keywords are dropped: both
+    programs' Hessians are analytic and UKS/UHF follows from the molecule
+    multiplicity.
     """
-    if program.lower() == "orca":
+    spec = DISPERSION_KEYWORD_SPEC.get(program.lower())
+    if spec is not None:
+        field, table = spec
         bare, disp_method, _ = _split_dispersion(method)
         if disp_method is None:
             return bare, {}
         suffix = disp_method[len(bare):].lower()
         try:
-            orca_kw = ORCA_DISPERSION_KEYWORDS[suffix]
+            native_kw = table[suffix]
         except KeyError:
             raise ValueError(
                 f"Dispersion variant '{suffix}' of method '{method}' has no native "
-                f"ORCA keyword (ORCA supports {sorted(ORCA_DISPERSION_KEYWORDS)}); "
+                f"{program} keyword ({program} supports {sorted(table)}); "
                 "choose a supported variant or run this level of theory with psi4."
             )
-        return bare, {"simple_input": orca_kw}
+        return bare, {field: native_kw}
 
     kw: dict = {"function_kwargs": {"dertype": 1}}
     if mult != 1:
@@ -1443,26 +1455,30 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
         status=RecordStatusEnum.complete,
     ))
 
-    # ORCA Hessians of dispersion-corrected LOTs are stored under the *bare*
-    # functional with the native dispersion keyword on simple_input (see
-    # hessian_method_and_keywords), so the compound-method query above cannot
-    # see them. Query the bare method on orca and keep only records whose
-    # simple_input carries the matching dispersion keyword.
+    # orca/gaussian Hessians of dispersion-corrected LOTs are stored under the
+    # *bare* functional with the native dispersion keyword on the harness's
+    # escape-hatch field (see hessian_method_and_keywords), so the
+    # compound-method query above cannot see them. Query the bare method per
+    # program (DISPERSION_KEYWORD_SPEC insertion order) and keep only records
+    # whose keyword field carries the matching dispersion token.
     bare, disp_method, _ = _split_dispersion(method)
     if disp_method is not None:
-        orca_kw = ORCA_DISPERSION_KEYWORDS.get(disp_method[len(bare):].lower())
-        if orca_kw is not None:
-            orca_results = client.query_singlepoints(
+        suffix = disp_method[len(bare):].lower()
+        for prog, (field, table) in DISPERSION_KEYWORD_SPEC.items():
+            native_kw = table.get(suffix)
+            if native_kw is None:
+                continue
+            prog_results = client.query_singlepoints(
                 driver=SinglepointDriver.hessian,
                 molecule_id=mol,
                 method=bare,
                 basis=basis,
-                program="orca",
+                program=prog,
                 status=RecordStatusEnum.complete,
             )
             results.extend(
-                r for r in orca_results
-                if orca_kw in str(r.specification.keywords.get("simple_input", "")).upper().split()
+                r for r in prog_results
+                if _keyword_token_match(r.specification.keywords.get(field, ""), native_kw)
             )
 
     # Defensive: even a "complete" record can have None properties if the

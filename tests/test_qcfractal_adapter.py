@@ -257,21 +257,28 @@ def test_get_zpve_mol_filters_incomplete_records():
     assert kwargs["status"] == RecordStatusEnum.complete
 
 
-def test_get_zpve_mol_finds_orca_bare_method_hessian():
-    """ORCA Hessians of dispersion LOTs are stored under the bare functional
-    with the dispersion keyword in simple_input; get_zpve_mol must fall back
-    to that query shape when the compound-method query returns nothing."""
+def _zpve_mock_client():
     mock_client = MagicMock()
-
     mock_mol = MagicMock()
     mock_mol.symbols = ["O", "H", "H"]
     mock_mol.dict.return_value = {"identifiers": {"molecular_formula": "H2O"}}
     mock_client.get_molecules.return_value = [mock_mol]
+    return mock_client
+
+
+def test_get_zpve_mol_finds_orca_bare_method_hessian():
+    """ORCA Hessians of dispersion LOTs are stored under the bare functional
+    with the dispersion keyword in simple_input; get_zpve_mol must fall back
+    to that query shape when the compound-method query returns nothing.
+
+    The fallback queries every program in DISPERSION_KEYWORD_SPEC that knows
+    the suffix, in insertion order (orca, then gaussian for -d3bj)."""
+    mock_client = _zpve_mock_client()
 
     orca_record = MagicMock()
     orca_record.specification.keywords = {"simple_input": "D3BJ"}
-    # No compound-method record (first call), one orca bare-method record (second call)
-    mock_client.query_singlepoints.side_effect = [iter([]), iter([orca_record])]
+    # calls: compound-method (empty), orca bare-method (hit), gaussian bare-method (empty)
+    mock_client.query_singlepoints.side_effect = [iter([]), iter([orca_record]), iter([])]
 
     # Interrupt before the vibrational analysis: we only care about record lookup
     with patch("beep.core.zpve._vibanal_wfn", side_effect=RuntimeError("stop")):
@@ -282,6 +289,41 @@ def test_get_zpve_mol_finds_orca_bare_method_hessian():
     assert calls[0].kwargs["method"] == "mpwb1k-d3bj"
     assert calls[1].kwargs["method"] == "mpwb1k"
     assert calls[1].kwargs["program"] == "orca"
+    assert calls[2].kwargs["program"] == "gaussian"
+
+
+def test_get_zpve_mol_finds_gaussian_bare_method_hessian():
+    """Gaussian Hessians store the dispersion keyword in route_input
+    (e.g. 'EmpiricalDispersion=GD3BJ'); the token filter must accept the
+    matching record and reject a different-damping one (GD3 vs GD3BJ)."""
+    mock_client = _zpve_mock_client()
+
+    gau_record = MagicMock()
+    gau_record.specification.keywords = {"route_input": "EmpiricalDispersion=GD3BJ SCF=Tight"}
+    wrong_damping = MagicMock()
+    wrong_damping.specification.keywords = {"route_input": "EmpiricalDispersion=GD3"}
+    # calls: compound-method (empty), orca (empty), gaussian (one hit + one filtered out)
+    mock_client.query_singlepoints.side_effect = [iter([]), iter([]), iter([wrong_damping, gau_record])]
+
+    with patch("beep.core.zpve._vibanal_wfn", side_effect=RuntimeError("stop")):
+        with pytest.raises(RuntimeError, match="stop"):
+            get_zpve_mol(mock_client, 12345, "b3lyp-d3bj_def2-svp")
+
+    calls = mock_client.query_singlepoints.call_args_list
+    assert calls[2].kwargs["method"] == "b3lyp"
+    assert calls[2].kwargs["program"] == "gaussian"
+
+
+def test_keyword_token_match():
+    from beep.adapters.qcfractal_adapter import _keyword_token_match
+
+    assert _keyword_token_match("D3BJ", "D3BJ")
+    assert _keyword_token_match("d3bj tightscf", "D3BJ")
+    assert _keyword_token_match("EmpiricalDispersion=GD3BJ SCF=Tight", "EmpiricalDispersion=GD3BJ")
+    # exact-token: GD3 must not match GD3BJ and vice versa
+    assert not _keyword_token_match("EmpiricalDispersion=GD3BJ", "EmpiricalDispersion=GD3")
+    assert not _keyword_token_match("EmpiricalDispersion=GD3", "EmpiricalDispersion=GD3BJ")
+    assert not _keyword_token_match("", "D4")
 
 
 @patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
@@ -537,6 +579,12 @@ def test_split_dispersion(method, expected):
         ("pbe-d3", 1, "orca", ("pbe", {"simple_input": "D3ZERO"})),
         ("pbe", 1, "orca", ("pbe", {})),
         ("b3lyp-d4", 1, "ORCA", ("b3lyp", {"simple_input": "D4"})),  # case-insensitive program
+        # gaussian: bare functional + native dispersion keyword via route_input;
+        # no psi4 keywords, UHF/UKS implicit
+        ("b3lyp-d3bj", 1, "gaussian", ("b3lyp", {"route_input": "EmpiricalDispersion=GD3BJ"})),
+        ("pbe-d3", 2, "gaussian", ("pbe", {"route_input": "EmpiricalDispersion=GD3"})),
+        ("pbe", 1, "gaussian", ("pbe", {})),
+        ("b3lyp-d3bj", 1, "Gaussian", ("b3lyp", {"route_input": "EmpiricalDispersion=GD3BJ"})),
     ],
 )
 def test_hessian_method_and_keywords(method, mult, program, expected):
@@ -544,11 +592,20 @@ def test_hessian_method_and_keywords(method, mult, program, expected):
     assert hessian_method_and_keywords(method, mult, program) == expected
 
 
-@pytest.mark.parametrize("method", ["b3lyp-d3m", "b3lyp-d3mbj"])
-def test_hessian_method_and_keywords_orca_unsupported_damping(method):
+@pytest.mark.parametrize(
+    "method, program",
+    [
+        ("b3lyp-d3m", "orca"),
+        ("b3lyp-d3mbj", "orca"),
+        ("b3lyp-d4", "gaussian"),  # G16 has no D4
+        ("b3lyp-d3m", "gaussian"),
+        ("b3lyp-d3mbj", "gaussian"),
+    ],
+)
+def test_hessian_method_and_keywords_unsupported_damping(method, program):
     from beep.adapters.qcfractal_adapter import hessian_method_and_keywords
     with pytest.raises(ValueError, match="no native"):
-        hessian_method_and_keywords(method, 1, "orca")
+        hessian_method_and_keywords(method, 1, program)
 
 
 # ---------------------------------------------------------------------------
