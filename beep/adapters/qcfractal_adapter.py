@@ -1131,6 +1131,55 @@ def _has_dispersion_suffix(name: str) -> bool:
     return any(m.endswith(s) for s in DISPERSION_SUFFIXES)
 
 
+# psi4/dftd3-style dispersion suffix -> native ORCA simple-input keyword.
+# ORCA has no keyword for Grimme's modified-damping -d3m/-d3mbj variants,
+# so those raise instead of silently computing with the wrong damping.
+ORCA_DISPERSION_KEYWORDS: Dict[str, str] = {
+    "-d4": "D4",
+    "-d3bj": "D3BJ",
+    "-d3": "D3ZERO",
+}
+
+
+def hessian_method_and_keywords(method: str, mult: int, program: str) -> Tuple[str, dict]:
+    """Return the (method, keywords) pair for a Hessian submission on ``program``.
+
+    psi4 (default): the method string is passed through unchanged — psi4
+    parses dispersion suffixes itself, so Hessians include the dispersion
+    derivative contribution — with psi4-style keywords (``dertype 1``,
+    ``reference uks`` for open shells).
+
+    orca: the compound method is split into the bare functional plus the
+    native ORCA dispersion keyword on the harness's ``simple_input`` escape
+    hatch (e.g. ``b3lyp-d4`` -> method ``b3lyp``, ``simple_input: "D4"``),
+    because ORCA rejects psi4-style compound method strings. The Hessian
+    physics matches the psi4 workflow: the same Grimme library supplies the
+    dispersion second derivatives, just invoked by ORCA. Only the BE-*energy*
+    stage keeps dispersion in separate dftd3/dftd4 records. The psi4-style
+    keywords are dropped: ORCA's ``Freq`` is analytic and UKS follows from
+    the molecule multiplicity.
+    """
+    if program.lower() == "orca":
+        bare, disp_method, _ = _split_dispersion(method)
+        if disp_method is None:
+            return bare, {}
+        suffix = disp_method[len(bare):].lower()
+        try:
+            orca_kw = ORCA_DISPERSION_KEYWORDS[suffix]
+        except KeyError:
+            raise ValueError(
+                f"Dispersion variant '{suffix}' of method '{method}' has no native "
+                f"ORCA keyword (ORCA supports {sorted(ORCA_DISPERSION_KEYWORDS)}); "
+                "choose a supported variant or run this level of theory with psi4."
+            )
+        return bare, {"simple_input": orca_kw}
+
+    kw: dict = {"function_kwargs": {"dertype": 1}}
+    if mult != 1:
+        kw["reference"] = "uks"
+    return method, kw
+
+
 def compute_be_dft_energies(
     client: PortalClient,
     rdset_base_name: str,
@@ -1298,11 +1347,9 @@ def compute_hessian(
         max_rows=5,
     )
 
-    logger.info(f"\nWill compute Hessian at {method}/{basis} level of theory")
-    kw = {"function_kwargs": {"dertype": 1}}
-    if mult != 1:
-        kw["reference"] = "uks"
+    method, kw = hessian_method_and_keywords(method, mult, program)
 
+    logger.info(f"\nWill compute Hessian at {method}/{basis} level of theory")
     logger.info(f"\nComputing Hessian at {method}/{basis} level of theory")
     logger.info(f"Using keywords: {kw}")
 
@@ -1395,6 +1442,29 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
         basis=basis,
         status=RecordStatusEnum.complete,
     ))
+
+    # ORCA Hessians of dispersion-corrected LOTs are stored under the *bare*
+    # functional with the native dispersion keyword on simple_input (see
+    # hessian_method_and_keywords), so the compound-method query above cannot
+    # see them. Query the bare method on orca and keep only records whose
+    # simple_input carries the matching dispersion keyword.
+    bare, disp_method, _ = _split_dispersion(method)
+    if disp_method is not None:
+        orca_kw = ORCA_DISPERSION_KEYWORDS.get(disp_method[len(bare):].lower())
+        if orca_kw is not None:
+            orca_results = client.query_singlepoints(
+                driver=SinglepointDriver.hessian,
+                molecule_id=mol,
+                method=bare,
+                basis=basis,
+                program="orca",
+                status=RecordStatusEnum.complete,
+            )
+            results.extend(
+                r for r in orca_results
+                if orca_kw in str(r.specification.keywords.get("simple_input", "")).upper().split()
+            )
+
     # Defensive: even a "complete" record can have None properties if the
     # server is in an inconsistent state (e.g. mid-write). Skip those —
     # `result.return_result` dereferences properties and would crash.

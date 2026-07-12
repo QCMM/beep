@@ -161,7 +161,9 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
         )
 
         keyword = None
-        if mult != 1:
+        if mult != 1 and config.program.lower() != "orca":
+            # psi4-style option; the ORCA harness rejects unknown keywords
+            # and ORCA selects UKS automatically from the multiplicity.
             keyword = {"reference": "uks"}
 
         padded_log(logger, f"Sending computations for {rdset_name}", padding_char="*", total_length=60)
