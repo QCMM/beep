@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "beep"
-version = "0.14.0"
+version = "0.15.0.dev0"
 description = "A binding energy evaluation platform and database for molecules on interstellar ice-grain mantles"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
@@ -43,6 +43,7 @@ dependencies = [
     "matplotlib",
     "scipy",
     "seaborn",
+    "pandas",
     "qcportal>=0.63",
     "qcelemental",
     "networkx",

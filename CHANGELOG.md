@@ -5,6 +5,52 @@ All notable changes to BEEP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.15.0.dev
+
+### Added
+
+- **Many-Body Expansion binding-energy workflows (`mbe` / `mbe_extract`),
+  ported from the standalone `beep-mbe` package (v0.1.0 @ `44a90e6`).** These
+  provide an alternative route to binding energies on the *same* binding sites
+  produced by `sampling` / `be_hess`, re-evaluated at a (typically higher)
+  level of theory via n-body fragmentation on a qcmanybody `ManybodyDataset`
+  plus a monomer `SinglepointDataset`.
+  - `mbe` submits and (optionally) monitors the many-body computations.
+  - `mbe_extract` assembles per-site binding energies (`be_data/total_be.csv`)
+    plus n-body decomposition tables (`decomp__<spec>.csv`,
+    `contrib__<spec>.csv`) and a text report.
+  - `mbe_extract` can optionally apply a **read-only** ZPVE correction borrowed
+    from a prior `be_hess` run on the same sites (`total_be_zpve.csv`); it never
+    submits or mutates the `be_hess` datasets, and sites without a usable
+    Hessian are reported as `NaN`.
+  - New adapter helpers (`get_or_create_manybody_dataset`,
+    `mbe_levels_to_qc_specifications`, `build_manybody_specification`,
+    `wait_for_manybody_completion`, `wait_for_dataset_records`) are strictly
+    additive; the existing `wait_for_completion` used by `sampling` /
+    `geom_benchmark` is unchanged.
+  - Config uses BEEP's Pydantic-v2 schema (nested `server.*`, object-style
+    `levels`); the standalone package's flat JSON format is not supported.
+    See `examples/mbe.json` and `examples/mbe_extract.json`.
+  - `pandas` is now an explicit runtime dependency.
+
+- **MBE truncation-error estimate in `mbe_extract`.** Each site/spec now gets a
+  symmetric error bar on the binding energy from a geometric extrapolation of
+  the uncomputed n-body tail (`bar = |Δn|·r/(1−r)`, `r = |Δn/Δn−1|`), written to
+  `be_data/convergence__<spec>.csv` and rendered as `BE ± bar (converged?)` in
+  the report. The bar is a magnitude only — no signed `BE_∞` — because the sign
+  of the next term is not predictable. 2-body-only runs report `n/a` (no
+  convergence information); a non-shrinking series is flagged not converged. The
+  `converged` flag uses a configurable `convergence_tol` (default 0.05). The
+  existing `total_be` / `decomp` / `contrib` CSVs are unchanged.
+- **ZPVE correction is now a friction-free toggle.** `mbe_extract`'s
+  `zpve.hessian_clusters` is optional; when omitted, the `be_<MOL>_*` datasets
+  are auto-discovered from the server (still strictly read-only). Turning ZPVE
+  on is just `"zpve": {"enabled": true}`.
+- **MBE level validation.** `mbe` now requires contiguous body-order indices
+  (`1..N`, no gaps), matching qcmanybody's expectation. Per-tier levels of
+  theory (a distinct method/basis per body order) and per-site selection
+  (`entries`, omit for all sites of the cluster) are documented in the examples.
+
 ## [0.14.0] — 2026-07-07
 
 ### Added

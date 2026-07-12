@@ -58,6 +58,14 @@ Pure computational logic with no external server dependencies.
    :members:
    :undoc-members:
 
+.. automodule:: beep.core.mbe_fragmentation
+   :members:
+   :undoc-members:
+
+.. automodule:: beep.core.mbe_be_tools
+   :members:
+   :undoc-members:
+
 Models (``beep.models``)
 ------------------------
 
@@ -88,6 +96,10 @@ Pydantic configuration models for each workflow.
    :undoc-members:
 
 .. automodule:: beep.models.energy_benchmark
+   :members:
+   :undoc-members:
+
+.. automodule:: beep.models.mbe
    :members:
    :undoc-members:
 
@@ -126,6 +138,14 @@ Orchestration layer that ties core logic and adapters together.
    :undoc-members:
 
 .. automodule:: beep.workflows.energy_benchmark
+   :members:
+   :undoc-members:
+
+.. automodule:: beep.workflows.mbe
+   :members:
+   :undoc-members:
+
+.. automodule:: beep.workflows.mbe_extract
    :members:
    :undoc-members:
 

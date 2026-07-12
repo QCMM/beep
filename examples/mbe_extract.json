@@ -1,0 +1,22 @@
+{
+    "workflow": "mbe_extract",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "opt_level_of_theory": "hf3c_minix",
+    "small_molecule_collection": "astro_molecules",
+    "small_molecule": "H2CO",
+    "surface_model_collection": "co2_x",
+    "surface_model": "cd5_01",
+    "dataset": "H2CO_cd5_01",
+    "entries": null,
+    "spec": ["mbe_mixed_vmfc"],
+    "bsse": ["vmfc"],
+    "convergence_tol": 0.05,
+    "zpve": {
+        "enabled": true
+    }
+}
