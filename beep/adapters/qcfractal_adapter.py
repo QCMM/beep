@@ -19,6 +19,7 @@ Functions are organized by category:
 """
 import time
 import logging
+from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Any
 from typing import Callable, Sequence  # MBE monitoring helpers (additive)
 from collections import Counter
@@ -499,15 +500,21 @@ def submit_optimizations(ds_opt, opt_lot: str, tag: str, subset=None):
 
 def submit_energies(client: PortalClient, rdset_base_name: str,
                     method: str, basis: Optional[str], program: str,
-                    stoich: str, tag: str, keywords=None):
+                    stoich: str, tag: str, keywords=None,
+                    spec_name: Optional[str] = None):
     """Submit energy computations to a stoichiometry-specific ReactionDataset.
 
     If ``basis`` is ``None`` the spec is named after the method alone (used for
     bare dispersion specs like ``pbe-d3bj`` that have no basis set).
+    ``spec_name`` overrides the derived name — used when ``method`` is not a
+    presentable label (e.g. a MACE model file path, whose spec is named by
+    the model alias instead).
     """
     ds_name = _stoich_dataset_name(rdset_base_name, stoich)
     ds = client.get_dataset("reaction", ds_name)
-    spec_name = (f"{method}_{basis}" if basis else method).lower()
+    if spec_name is None:
+        spec_name = f"{method}_{basis}" if basis else method
+    spec_name = spec_name.lower()
 
     kw_dict = keywords if isinstance(keywords, dict) else {}
     qc_spec = QCSpecification(
@@ -1294,7 +1301,12 @@ def compute_be_dft_energies(
         f"{all_existing} are newly linked from existing records."
     )
 
-    # Collect record IDs for monitoring
+    return _collect_reaction_record_ids(client, rdset_base_name)
+
+
+def _collect_reaction_record_ids(client: PortalClient,
+                                 rdset_base_name: str) -> List[int]:
+    """Collect record IDs across all stoichiometry datasets for monitoring."""
     record_ids = []
     for stoich in STOICH_TYPES:
         ds_name = _stoich_dataset_name(rdset_base_name, stoich)
@@ -1307,6 +1319,75 @@ def compute_be_dft_energies(
                 record_ids.append(record.id)
 
     return record_ids
+
+
+def compute_be_mace_energies(
+    client: PortalClient,
+    rdset_base_name: str,
+    mace_models: List[str],
+    tag: str,
+    logger: logging.Logger,
+) -> List[int]:
+    """
+    Submit MACE MLP energy computations for BE calculations.
+
+    Each entry in ``mace_models`` is a path to a serialized MACE model
+    file; the spec (and hence dataframe column) is named by the model
+    file stem (e.g. ``.../mace-polar-ft0.model`` → ``mace-polar-ft0``).
+    Runs through the stock QCEngine MACE harness: ``program='mace'``,
+    method = model file path, ``basis=None``.
+
+    The ``bsse`` (counterpoise) stoichiometry is skipped: MLPs carry no
+    basis functions so there is no BSSE to correct, and the harness would
+    treat ghost atoms as real atoms. Use the ``be_nocp``/``de``/``ie``
+    stoichiometries when extracting MACE binding energies.
+    """
+    log_formatted_list(
+        logger, [Path(p).stem for p in mace_models],
+        "Sending MACE energy computations for the following models:",
+        max_rows=1,
+    )
+    logger.info(f"\nSending MACE computations with tag: {tag}\n")
+
+    all_submitted = 0
+    all_existing = 0
+    for model_path in mace_models:
+        alias = Path(model_path).stem
+        logger.info(f"Processing MACE model: {alias} ({model_path})")
+
+        model_submitted = 0
+        model_existing = 0
+        for stoich in STOICH_TYPES:
+            if stoich == "bsse":
+                continue
+            result = submit_energies(
+                client, rdset_base_name,
+                method=model_path, basis=None, program="mace",
+                stoich=stoich, tag=tag, keywords=None,
+                spec_name=alias,
+            )
+            model_submitted += result.n_inserted
+            model_existing += result.n_existing
+
+        all_submitted += model_submitted
+        all_existing += model_existing
+        if model_submitted == 0 and model_existing == 0:
+            logger.info(
+                f"{alias}: all reactions already linked to the dataset "
+                f"(no new submissions)"
+            )
+        else:
+            logger.info(
+                f"{alias}: {model_submitted} newly submitted, "
+                f"{model_existing} newly linked (find_existing)"
+            )
+
+    logger.info(
+        f"\nSubmitted a total of {all_submitted} MACE computations. "
+        f"{all_existing} are newly linked from existing records."
+    )
+
+    return _collect_reaction_record_ids(client, rdset_base_name)
 
 
 def compute_hessian(

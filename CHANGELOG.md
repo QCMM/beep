@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **MACE machine-learning potential support (`mace_model`) in `sampling`,
+  `be_hess`, and `extract`.** A `LevelOfTheory` can now point at a serialized
+  MACE model file via `mace_model`, which mutes `method`/`basis`/`program`:
+  the spec runs through the stock QCEngine `mace` harness (`program: mace`,
+  method = model file path, no basis), and the model file stem (e.g.
+  `mace-polar-ft0` for `.../mace-polar-ft0.model`) names the spec, reaction
+  datasets, dataframe columns, and output files. Committees are one spec per
+  member model on the same datasets.
+  - `BeHessConfig.mace_models` submits MACE BE single points via the new
+    adapter helper `compute_be_mace_energies`. The `bsse` (counterpoise)
+    stoichiometry is skipped for MACE specs — MLPs carry no basis functions
+    and ghost atoms would be treated as real atoms; extract MACE binding
+    energies with `stoichiometry: be_nocp`, `de`, or `ie`.
+  - Constraints (validated): model file paths must be all-lowercase (qcportal
+    lowercases QCSpec methods server-side) and the file stem must not contain
+    underscores (LOT names split on `_`).
+  - `extract` keeps basis-less BE columns (MACE aliases, tight-binding like
+    `gfn2-xtb`); only bare-dispersion bookkeeping columns are dropped.
+    `be_methods` entries may name basis-less methods directly.
+  - Requires `mace-torch` in the compute-manager worker environment; the
+    QCEngine MACE harness needs the `Configuration` compatibility fix for
+    `mace >= 0.3.10` (patched on the `nothung-deploy` QCEngine fork).
+
 - **Many-Body Expansion binding-energy workflows (`mbe` / `mbe_extract`),
   ported from the standalone `beep-mbe` package (v0.1.0 @ `44a90e6`).** These
   provide an alternative route to binding energies on the *same* binding sites
@@ -50,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (`1..N`, no gaps), matching qcmanybody's expectation. Per-tier levels of
   theory (a distinct method/basis per body order) and per-site selection
   (`entries`, omit for all sites of the cluster) are documented in the examples.
+
+### Fixed
+
+- Basis-less optimization LOTs (e.g. `gfn2-xtb`, MACE aliases) no longer
+  crash `sampling` (refinement LOT-name concatenation) or `be_hess`
+  (`opt_level_of_theory` method/basis split); reaction-dataset names now
+  omit the basis segment for basis-less LOTs.
 
 ## [0.14.0] — 2026-07-07
 

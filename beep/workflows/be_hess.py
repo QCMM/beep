@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 from ..models.be_hess import BeHessConfig
-from ..models.base import safe_config_dump
+from ..models.base import safe_config_dump, split_lot_string
 from ..core.logging_utils import padded_log, beep_banner
 from ..adapters import qcfractal_adapter as qcf
 from ..adapters.qcfractal_adapter import FractalClient, is_complete, is_incomplete, is_error
@@ -139,11 +139,22 @@ def check_refinement_status(client, surf_ds, mol_name, opt_lot,
     return ready_datasets, complete_counts
 
 
+def _rdset_base_name(molecule: str, cluster_name: str, opt_lot: str) -> str:
+    """Reaction-dataset base name for a cluster at an optimization LOT.
+
+    Basis-less opt LOTs (gfn2-xtb, MACE model aliases) omit the basis
+    segment: ``be_H2S_W22_02_MACE-POLAR-FT0``.
+    """
+    opt_method, opt_basis = split_lot_string(opt_lot)
+    name = f"be_{molecule.upper()}_{cluster_name.upper()}_{opt_method.upper()}"
+    if opt_basis:
+        name += f"_{opt_basis.upper()}"
+    return name
+
+
 def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
                            smol_mol, opt_lot, mult, config):
     all_ids = []
-    opt_method = opt_lot.split("_")[0]
-    opt_basis = opt_lot.split("_")[1]
 
     for ds_opt in finished_opt_list:
         padded_log(logger, f"Checking {ds_opt.name} for repeated structures", padding_char="*", total_length=60)
@@ -152,7 +163,7 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
         padded_log(logger, f"Building name for the new ReactionDataset", padding_char="*", total_length=60)
         cluster_name = "_".join(list(opt_stru.keys())[0].split("_")[-3:-1])
         cluster_mol = qcf.fetch_final_molecule(surf_opt_ds, cluster_name, opt_lot)
-        rdset_name = f"be_{config.molecule.upper()}_{cluster_name.upper()}_{opt_method.upper()}_{opt_basis.upper()}"
+        rdset_name = _rdset_base_name(config.molecule, cluster_name, opt_lot)
         logger.info(f"ReactionDataset name for {ds_opt.name} is: {rdset_name}")
 
         padded_log(logger, f"Creating the dataset {rdset_name}", padding_char="*", total_length=60)
@@ -167,11 +178,18 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
             keyword = {"reference": "uks"}
 
         padded_log(logger, f"Sending computations for {rdset_name}", padding_char="*", total_length=60)
-        job_ids = qcf.compute_be_dft_energies(
-            client, rdset_base, config.level_of_theory, config.energy_tag,
-            program=config.program, keyword=keyword, logger=logger,
-        )
-        all_ids.extend(job_ids)
+        if config.level_of_theory:
+            job_ids = qcf.compute_be_dft_energies(
+                client, rdset_base, config.level_of_theory, config.energy_tag,
+                program=config.program, keyword=keyword, logger=logger,
+            )
+            all_ids.extend(job_ids)
+        if config.mace_models:
+            job_ids = qcf.compute_be_mace_energies(
+                client, rdset_base, config.mace_models, config.energy_tag,
+                logger=logger,
+            )
+            all_ids.extend(job_ids)
         logger.info(f"Finished processing {rdset_name}\n\n\n")
 
     return all_ids
@@ -218,18 +236,16 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
     mult = smol_mol.molecular_multiplicity
     logger.info(f"\nThe molecular multiplicity is {mult}\n")
 
-    opt_method = opt_lot.split("_")[0]
-    opt_basis = opt_lot.split("_")[1]
-
     # Process binding energy computations (two-pass)
-    if config.level_of_theory:
+    if config.level_of_theory or config.mace_models:
         padded_log(logger, f"Starting computation of Binding energies")
         be_parameters = (
             f"Binding Energy Computation Parameters:\n"
             f"- Molecule: {config.molecule}\n"
             f"- Surface Model Collection: {config.surface_model_collection}\n"
             f"- Small Molecule Collection: {config.small_molecule_collection}\n"
-            f"- Level of Theory: {' '.join(config.level_of_theory)}\n"
+            f"- Level of Theory: {' '.join(config.level_of_theory) or 'None'}\n"
+            f"- MACE Models: {' '.join(config.mace_models) or 'None'}\n"
             f"- Optimization Level of Theory: {opt_lot}\n"
             f"- Program: {config.program}\n"
             f"- Energy Tag: {config.energy_tag or 'Default: energies'}\n"
@@ -277,7 +293,7 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
         logger.info(hessian_parameters)
         all_hess_ids = []
         for cluster_name in config.hessian_clusters:
-            rdset_name = f"be_{config.molecule.upper()}_{cluster_name.upper()}_{opt_method.upper()}_{opt_basis.upper()}"
+            rdset_name = _rdset_base_name(config.molecule, cluster_name, opt_lot)
             hess_ids = qcf.compute_hessian(
                 client, rdset_name, opt_lot, mult, config.hessian_tag,
                 logger=logger, program=config.program,

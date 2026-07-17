@@ -21,6 +21,21 @@ warnings.filterwarnings("ignore")
 bcheck = "\u2714"
 gear = "\u2699"
 
+
+def resolve_be_column(bm: str, basis: str, columns) -> str:
+    """Resolve the dataframe column for a BE method.
+
+    Conventional methods pair with the basis (``wpbe-d3bj/def2-tzvp``);
+    basis-free methods (MACE model aliases, tight-binding) are their own
+    column name. Prefers the ``method/basis`` form when both exist.
+    """
+    slash = f"{bm}/{basis}"
+    if slash in columns:
+        return slash
+    if bm in columns:
+        return bm
+    return slash
+
 welcome_msg = beep_banner(
     "Binding Energy Data Extraction",
     quote="And now I see. With eye serene. The very. Pulse. Of the machine.",
@@ -90,10 +105,13 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
     #    (mpwb1k-d3bj/def2-tzvpd) already exists.
     # 2. Bare dispersion-only columns (e.g. mpwb1k-d3bj) with no basis — the
     #    composite column already includes their contribution.
+    # Basis-less columns from basis-free methods (MACE model aliases,
+    # tight-binding like gfn2-xtb) are real BE columns and are kept.
     cols_to_drop = []
     for col in df_be.columns:
         if "/" not in col:
-            cols_to_drop.append(col)
+            if any(col.endswith(suf) for suf in DISPERSION_SUFFIXES):
+                cols_to_drop.append(col)
             continue
         me, ba = col.split("/")
         for suffix in DISPERSION_SUFFIXES:
@@ -221,13 +239,12 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
     df_zpve["Delta_ZPVE"] *= scale_factor
 
     # Compute ZPVE-corrected BEs for each method
-    for bm in be_methods:
-        zpve_col_name = f"{bm}/{basis}+ZPVE"
-        df_be[zpve_col_name] = df_be[f"{bm}/{basis}"] + df_zpve["Delta_ZPVE"]
+    uncorr_cols = [resolve_be_column(bm, basis, df_be.columns) for bm in be_methods]
+    zpve_cols = [f"{c}+ZPVE" for c in uncorr_cols]
+    for col, zpve_col_name in zip(uncorr_cols, zpve_cols):
+        df_be[zpve_col_name] = df_be[col] + df_zpve["Delta_ZPVE"]
 
     # Build a single linear model from mean uncorrected BE vs mean ZPVE-corrected BE
-    uncorr_cols = [f"{bm}/{basis}" for bm in be_methods]
-    zpve_cols = [f"{bm}/{basis}+ZPVE" for bm in be_methods]
     x_mean = df_be[uncorr_cols].mean(axis=1).to_numpy(dtype=float)
     y_mean = df_be[zpve_cols].mean(axis=1).to_numpy(dtype=float)
     mask = ~np.isnan(x_mean) & ~np.isnan(y_mean)
@@ -300,9 +317,12 @@ def run(config: ExtractConfig, client: FractalClient) -> None:
             file_handler.close()
             continue
 
-        # Filter to only the requested be_methods (+ basis)
+        # Filter to only the requested be_methods (+ basis where applicable)
         if config.be_methods:
-            requested_cols = [f"{bm}/{config.basis}" for bm in config.be_methods]
+            requested_cols = [
+                resolve_be_column(bm, config.basis, df_no_zpve.columns)
+                for bm in config.be_methods
+            ]
             keep_cols = [c for c in df_no_zpve.columns
                          if c in requested_cols
                          or c in ("Mean_Eb_all_dft", "StdDev_all_dft")]

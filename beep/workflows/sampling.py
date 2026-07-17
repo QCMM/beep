@@ -25,15 +25,14 @@ def config_summary_msg(config):
     separator = "-" * 88
     s_lot = config.sampling_level_of_theory
     r_lot = config.refinement_level_of_theory
-    s_basis = s_lot.basis or "N/A"
     lines = [
         "",
         separator,
         f"  Molecule:             {config.molecule}",
         f"  Surface model:        {config.surface_model_collection}",
         f"  Small molecule coll:  {config.small_molecule_collection}",
-        f"  Sampling LOT:         {s_lot.method}/{s_basis} ({s_lot.program})",
-        f"  Refinement LOT:       {r_lot.method}/{r_lot.basis} ({r_lot.program})",
+        f"  Sampling LOT:         {s_lot.display}",
+        f"  Refinement LOT:       {r_lot.display}",
         f"  Sampling shell:       {config.sampling_shell} Angstrom",
         f"  Sampling condition:   {config.sampling_condition}",
         f"  RMSD cutoff:          {config.rmsd_value}",
@@ -46,10 +45,12 @@ def config_summary_msg(config):
 
 
 def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
-                       qc_keyword, ds_opt, logger, rtag="refinement"):
+                       qc_keyword, ds_opt, logger, rtag="refinement",
+                       lot_display=None):
+    lot_display = lot_display or f"{rmethod}/{rbasis}/{program}"
     spec = {
         "name": ropt_lot_name,
-        "description": f"Geometric + {rmethod}/{rbasis}/{program}",
+        "description": f"Geometric + {lot_display}",
         "optimization_spec": {"program": "geometric", "keywords": None},
         "qc_spec": {
             "driver": "gradient",
@@ -65,7 +66,7 @@ def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
 
     logger.info(
         f"\nRefinement optimization initiated with specification '{ropt_lot_name}' \n"
-        f"using {rmethod}/{rbasis} in {program}. \n"
+        f"using {lot_display}. \n"
         f"Description: {spec['description']}. \n"
         f"Tag applied: '{rtag}'\n"
         f"Optimizations submitted: {c}. {bcheck} \n"
@@ -321,20 +322,19 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
     logger.info(welcome_msg)
 
-    method = config.sampling_level_of_theory.method
-    basis = config.sampling_level_of_theory.basis
-    program = config.sampling_level_of_theory.program
-    rmethod = config.refinement_level_of_theory.method
-    rbasis = config.refinement_level_of_theory.basis
-    rprogram = config.refinement_level_of_theory.program
+    s_lot = config.sampling_level_of_theory
+    r_lot = config.refinement_level_of_theory
+    method = s_lot.qc_method
+    basis = s_lot.qc_basis
+    program = s_lot.qc_program
+    rmethod = r_lot.qc_method
+    rbasis = r_lot.qc_basis
+    rprogram = r_lot.qc_program
 
     qc_keyword = config.keyword_id
 
-    if basis:
-        opt_lot = (method + "_" + basis).lower()
-    else:
-        opt_lot = method.lower()
-    ropt_lot = (rmethod + "_" + rbasis).lower()
+    opt_lot = s_lot.lot_name
+    ropt_lot = r_lot.lot_name
 
     # --- Configuration summary ---
     logger.info(config_summary_msg(config))
@@ -428,6 +428,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         process_refinement(
             client, ropt_lot, rmethod, rbasis, rprogram,
             qc_keyword, ds_ref, logger, config.refinement_tag,
+            lot_display=r_lot.display,
         )
 
         ds_ref = qcf.get_or_create_opt_dataset(client, ref_opt_dset_name)
