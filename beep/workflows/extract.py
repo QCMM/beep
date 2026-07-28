@@ -111,7 +111,14 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
     for col in df_be.columns:
         if "/" not in col:
             if any(col.endswith(suf) for suf in DISPERSION_SUFFIXES):
-                cols_to_drop.append(col)
+                # Bare dispersion column (no basis). Drop it ONLY if a composite
+                # "<col>/<basis>" exists — i.e. a DFT separated pair whose
+                # dispersion contribution is already folded into the composite.
+                # For a range-separated MLP the SAME column is the composite
+                # (fetch_reaction_values summed the electronic MLP into it in place
+                # and there is no "/basis" version), so it must be kept.
+                if any(c.startswith(col + "/") for c in df_be.columns):
+                    cols_to_drop.append(col)
             continue
         me, ba = col.split("/")
         for suffix in DISPERSION_SUFFIXES:

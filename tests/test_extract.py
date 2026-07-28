@@ -124,3 +124,51 @@ def test_zpve_correction_raises_for_truly_missing_hessian():
                 scale_factor=1.0,
                 be_range=(-0.1, -25.0),
             )
+
+
+@patch("beep.workflows.extract.qcf.check_collection_exists", return_value=True)
+@patch("beep.workflows.extract.qcf.fetch_reaction_values")
+def test_concatenate_frames_keeps_mlp_composite(mock_fetch, mock_exists):
+    """Range-separated MLP composite column (basis-less, ends in a dispersion
+    suffix, e.g. ``lmft-co-v0-d3bj``) is the summed electronic + D3BJ BE and must
+    NOT be dropped as a bare-dispersion piece. Regression: dropping it produced
+    "No valid binding energies" for every MLP range-separated extraction."""
+    from beep.workflows.extract import concatenate_frames
+    entries = ["CO_W12_1_0001", "CO_W12_1_0002"]
+    # fetch_reaction_values has already summed the electronic MLP into the
+    # dispersion column, leaving a single basis-less composite column.
+    mock_fetch.return_value = pd.DataFrame(
+        {"lmft-co-v0-d3bj": [-1.7, -2.1]}, index=entries)
+    ds_w = MagicMock()
+    ds_w.entry_names = ["W12_1"]
+    df, ok = concatenate_frames(
+        MagicMock(), "CO", ds_w, "lmft-co-d-v0",
+        be_range=(2.0, -20.0), stoichiometry="ie_nocp")
+    assert ok
+    assert "lmft-co-v0-d3bj" in df.columns          # composite survived
+    assert df["Mean_Eb_all_dft"].notna().all()       # real BEs, not empty
+    assert len(df) == 2
+
+
+@patch("beep.workflows.extract.qcf.check_collection_exists", return_value=True)
+@patch("beep.workflows.extract.qcf.fetch_reaction_values")
+def test_concatenate_frames_drops_dft_bare_dispersion(mock_fetch, mock_exists):
+    """DFT separated pair: the bare-dispersion column (no basis) whose composite
+    ``<disp>/<basis>`` exists is still dropped, and the composite is kept. Guards
+    that the MLP fix does not regress the DFT path."""
+    from beep.workflows.extract import concatenate_frames
+    entries = ["CO_W12_1_0001"]
+    mock_fetch.return_value = pd.DataFrame({
+        "mpwb1k/def2-tzvpd": [-1.5],          # bare electronic -> drop
+        "mpwb1k-d3bj": [-0.3],                 # bare dispersion (no basis) -> drop (composite exists)
+        "mpwb1k-d3bj/def2-tzvpd": [-1.8],      # composite -> keep
+    }, index=entries)
+    ds_w = MagicMock()
+    ds_w.entry_names = ["W12_1"]
+    df, ok = concatenate_frames(
+        MagicMock(), "CO", ds_w, "mpwb1k_def2-tzvpd",
+        be_range=(2.0, -20.0), stoichiometry="bsse")
+    assert ok
+    assert "mpwb1k-d3bj/def2-tzvpd" in df.columns   # composite kept
+    assert "mpwb1k-d3bj" not in df.columns           # bare dispersion dropped
+    assert "mpwb1k/def2-tzvpd" not in df.columns     # bare electronic dropped
