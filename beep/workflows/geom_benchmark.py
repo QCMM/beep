@@ -514,10 +514,30 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     qcf.check_collection_existence(client, surf_dset_name)
 
     smol_dset = qcf.get_collection(client, "OptimizationDataset", smol_dset_name)
-    mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
+    # Atomic adsorbates (a single atom, 0 internal DOF) cannot be geometry
+    # optimized and are stored in a SinglepointDataset (atoms_collection),
+    # not the OptimizationDataset. Detect that case and exclude the atom
+    # monomer from the optimize+RMSD structure set: only the surfaces and the
+    # complexes are benchmarked (a lone atom has no geometry to compare, and
+    # geomeTRIC rejects <2-atom inputs, which would otherwise error the monomer
+    # for every functional and poison the whole ranking). Mirrors the
+    # atoms_collection handling in the sampling and be_hess workflows.
+    try:
+        mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
+        is_atom = False
+    except KeyError:
+        atom_mol = qcf.fetch_atom_molecule(client, config.atoms_collection, smol_name)
+        mol_mult = atom_mol.molecular_multiplicity
+        is_atom = True
     logger.info(f"\n The molecular multiplicity of {smol_name} is {mol_mult}")
+    if is_atom:
+        logger.info(
+            f" {smol_name} is a single atom: the monomer has no geometry to "
+            f"optimize and is excluded from the benchmark "
+            f"(surfaces + complexes only).\n"
+        )
 
-    odset_dict = {smol_name: smol_dset}
+    odset_dict = {} if is_atom else {smol_name: smol_dset}
     for bchmk_struct_name, odset_name in bchmk_dset_names.items():
         odset_dict[bchmk_struct_name] = qcf.get_collection(client, "OptimizationDataset", odset_name)
         # Extract surface model: strip molecule prefix and binding site suffix

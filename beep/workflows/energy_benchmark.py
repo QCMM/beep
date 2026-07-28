@@ -300,7 +300,8 @@ def get_reference_be_result(bchmk_structs, cbs_col, cbs_list):
 
 
 def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
-                                        bchmk_structs, dft_opt_lot, odset_dict):
+                                        bchmk_structs, dft_opt_lot, odset_dict,
+                                        atom_mol=None):
     logger = logging.getLogger("beep")
     rdset_name = f"bchmk_be_{smol_name}_{surf_dset_name}"
     logger.info(f"Creating a loading ReactionDataset: {rdset_name}\n")
@@ -316,7 +317,7 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
             logger.info(f"Adding entry for {bench_struct} of {lot} geometry")
             try:
                 smol_mol, surf_mol, struc_mol = _fetch_be_molecules(
-                    odset_dict, bench_struct, lot
+                    odset_dict, bench_struct, lot, atom_mol=atom_mol
                 )
                 be_stoich = be_stoichiometry(smol_mol, surf_mol, struc_mol, logger)
             except (TypeError, KeyError) as e:
@@ -336,20 +337,25 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
     return rdset_name
 
 
-def _fetch_be_molecules(odset, bench_struct, lot_geom):
+def _fetch_be_molecules(odset, bench_struct, lot_geom, atom_mol=None):
     """Fetch the three molecules needed for BE stoichiometry from optimization datasets.
 
     Returns (smol_mol, surf_mol, struc_mol) — the small molecule, surface model,
-    and full complex, all as optimized geometries.
+    and full complex, all as optimized geometries. When ``atom_mol`` is given
+    (atomic adsorbate) it is used directly as the small molecule, since a single
+    atom has no optimized geometry in the OptimizationDataset.
     """
     dataset_name = bench_struct.rsplit("_", 1)[0]
     mol_name = dataset_name.split("_")[0]
     surf_name = dataset_name.split(f"{mol_name}_", 1)[1]
-    smol_mol = (
-        odset[mol_name.upper()]
-        .get_record(mol_name.upper(), lot_geom)
-        .final_molecule
-    )
+    if atom_mol is not None:
+        smol_mol = atom_mol
+    else:
+        smol_mol = (
+            odset[mol_name.upper()]
+            .get_record(mol_name.upper(), lot_geom)
+            .final_molecule
+        )
     surf_mol = (
         odset[surf_name]
         .get_record(surf_name, lot_geom)
@@ -399,7 +405,16 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     logger.info(f"DFT and SQM  geometry levels of theory: {' '.join(dft_opt_lot)}")
 
     smol_dset = qcf.get_collection(client, "OptimizationDataset", smol_dset_name)
-    mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
+    # Atomic adsorbates live in a SinglepointDataset (atoms_collection), not the
+    # OptimizationDataset, and cannot be optimized. Detect that case and fetch
+    # the atom molecule directly; its single-point energy is still needed for
+    # the BE stoichiometry (BE = complex - surface - atom). Mirrors be_hess.
+    try:
+        mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
+        atom_mol = None
+    except KeyError:
+        atom_mol = qcf.fetch_atom_molecule(client, config.atoms_collection, smol_name)
+        mol_mult = atom_mol.molecular_multiplicity
     logger.info(f"\nThe molecular multiplicity of {smol_name} is {mol_mult}\n\n")
     logger.info(f"Retriving data of the reference equilibrium geometries at {geom_ref_opt_lot}:\n")
 
@@ -418,6 +433,11 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
+        if atom_mol is not None and struct_name == smol_name:
+            # Atomic adsorbate: no optimized reference geometry; the atom
+            # molecule itself is the geometry for the CBS reference fragment.
+            ref_geom_fmols[struct_name] = atom_mol
+            continue
         record = odset.get_record(struct_name, geom_ref_opt_lot)
         if config.use_initial_reference_geometry:
             ref_geom_fmols[struct_name] = record.initial_molecule
@@ -458,6 +478,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     rdset_base = create_or_load_reaction_dataset_eb(
         client, smol_name, surf_dset_name, bchmk_structs, dft_opt_lot, odset_dict,
+        atom_mol=atom_mol,
     )
 
     dft_func = {
