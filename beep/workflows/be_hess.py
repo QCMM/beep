@@ -167,8 +167,13 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
         logger.info(f"ReactionDataset name for {ds_opt.name} is: {rdset_name}")
 
         padded_log(logger, f"Creating the dataset {rdset_name}", padding_char="*", total_length=60)
+        # MACE-only runs save just the ghost-free stoichiometries (be_nocp,
+        # ie_nocp, de); any DFT level_of_theory needs the full set (incl.
+        # counterpoise bsse/ie).
+        stoich_types = qcf.STOICH_TYPES if config.level_of_theory else qcf.MACE_STOICH_TYPES
         rdset_base = qcf.create_or_load_reaction_dataset(
-            client, rdset_name, opt_lot, smol_mol, cluster_mol, ds_opt, opt_stru, logger
+            client, rdset_name, opt_lot, smol_mol, cluster_mol, ds_opt, opt_stru, logger,
+            stoich_types=stoich_types,
         )
 
         keyword = None
@@ -187,7 +192,8 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
         if config.mace_models:
             job_ids = qcf.compute_be_mace_energies(
                 client, rdset_base, config.mace_models, config.energy_tag,
-                logger=logger,
+                logger=logger, mace_dispersion=config.mace_dispersion,
+                dispersion_tag=config.dispersion_tag,
             )
             all_ids.extend(job_ids)
         logger.info(f"Finished processing {rdset_name}\n\n\n")

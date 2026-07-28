@@ -19,7 +19,7 @@ def _make_struc_mol(ws3_cluster, h2_mol):
 def test_be_stoichiometry_keys(ws3_cluster, h2_mol, test_logger):
     struc = _make_struc_mol(ws3_cluster, h2_mol)
     result = be_stoichiometry(h2_mol, ws3_cluster, struc, test_logger)
-    assert set(result.keys()) == {"bsse", "be_nocp", "ie", "de"}
+    assert set(result.keys()) == {"bsse", "be_nocp", "ie", "ie_nocp", "de"}
 
 
 def test_be_stoichiometry_default_count(ws3_cluster, h2_mol, test_logger):
@@ -38,6 +38,25 @@ def test_be_stoichiometry_ie_count(ws3_cluster, h2_mol, test_logger):
     struc = _make_struc_mol(ws3_cluster, h2_mol)
     result = be_stoichiometry(h2_mol, ws3_cluster, struc, test_logger)
     assert len(result["ie"]) == 3
+
+
+def test_be_stoichiometry_ie_nocp(ws3_cluster, h2_mol, test_logger):
+    """ie_nocp (ghost-free interaction energy, for basis-set-free MLPs): complex
+    minus REAL in-complex fragments (no counterpoise ghosts), 3 components with
+    coefficients [1, -1, -1]. Its fragments are the same real fragments as ``de``
+    (j4/j5), NOT the ghost fragments (j6/j7) used by ``ie``."""
+    struc = _make_struc_mol(ws3_cluster, h2_mol)
+    result = be_stoichiometry(h2_mol, ws3_cluster, struc, test_logger)
+    ien = result["ie_nocp"]
+    assert len(ien) == 3
+    assert [c for _, c in ien] == [1.0, -1.0, -1.0]
+    # ie_nocp's real fragments are exactly de's in-complex (real) fragments...
+    de_real = {id(m) for m, c in result["de"] if c > 0}
+    ienocp_frags = {id(m) for m, c in ien if c < 0}
+    assert ienocp_frags == de_real
+    # ...and are distinct from ie's counterpoise (ghost) fragments.
+    ie_ghosts = {id(m) for m, c in result["ie"] if c < 0}
+    assert ienocp_frags.isdisjoint(ie_ghosts)
 
 
 def test_be_stoichiometry_de_count(ws3_cluster, h2_mol, test_logger):
@@ -80,7 +99,7 @@ def test_real_co_w2_stoichiometry(co_w2_0001, test_logger):
 
     result = be_stoichiometry(co_mol, w2_mol, co_w2_0001, test_logger)
 
-    assert set(result.keys()) == {"bsse", "be_nocp", "ie", "de"}
+    assert set(result.keys()) == {"bsse", "be_nocp", "ie", "ie_nocp", "de"}
     assert len(result["bsse"]) == 7
     assert len(result["be_nocp"]) == 3
 

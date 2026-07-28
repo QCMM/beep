@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Range-separated MACE binding energies (`mace_dispersion`) in `be_hess`.**
+  A MACE model trained on the *electronic* (dispersion-subtracted) energy can
+  now be paired with an analytic dispersion tail so `be_hess` reproduces the
+  full method — mirroring how DFT-D is stored as separated
+  (bare-functional + bare-dispersion) specs. New optional
+  `BeHessConfig.mace_dispersion` field (e.g. `"mpwb1k-d4"`, `"mpwb1k-d3bj"`);
+  when set, `compute_be_mace_energies` submits, per model and stoichiometry, an
+  additional `dftd4`/`s-dftd3` spec named `"<model-stem><suffix>"` with the
+  functional params taken from the prefix (`mpwb1k`), and
+  `fetch_reaction_values` sums the electronic MLP column with its dispersion
+  into the composite `"<model-stem>-d4"` BE (extended to pair basis-free MLP
+  electronic columns, reusing the DFT-D `_split_dispersion` /
+  `DISPERSION_PROGRAMS` single source of truth). This lets a short-range MLP
+  handle the electronic PES (cutoff-adequate) while the exact long-range
+  dispersion — untruncated and transferable to periodic surfaces — is added
+  analytically; the dispersion records persist on the server via the standard
+  `dftd4`/`s-dftd3` harnesses. A companion `BeHessConfig.dispersion_tag`
+  (defaults to `energy_tag`) routes the CPU-only dispersion single-points to a
+  separate queue, so the electronic MLP energies can run on a GPU manager while
+  `dftd4`/`s-dftd3` run on a CPU manager.
+
+- **Atomic (single-atom) adsorbate support in `geom_benchmark`.** The workflow
+  now recognizes an atomic adsorbate the same way `sampling` and `be_hess` do:
+  when the adsorbate is absent from the `small_molecule_collection`
+  OptimizationDataset it is fetched from the `atoms_collection`
+  SinglepointDataset (new `GeomBenchmarkConfig.atoms_collection` field, default
+  `"atoms"`). Because a lone atom has 0 internal DOF (geomeTRIC rejects
+  <2-atom inputs) and has no geometry to compare, the atom monomer is excluded
+  from the optimize+RMSD structure set — only the surfaces and the complexes
+  are benchmarked. Previously the forced monomer optimization errored for every
+  functional, and `compare_rmsd` excludes any functional that errors on any
+  structure, so the erroring monomer silently poisoned the entire ranking
+  (empty result). Multiplicity is read from the atom's stored molecule.
+
+- **Atomic (single-atom) adsorbate support in `energy_benchmark`.** The BE
+  benchmark now handles an atomic adsorbate, mirroring `be_hess`: when the
+  adsorbate is absent from the `small_molecule_collection` OptimizationDataset
+  it is fetched from the `atoms_collection` SinglepointDataset (new
+  `EnergyBenchmarkConfig.atoms_collection` field, default `"atoms"`). Unlike
+  `geom_benchmark` the atom cannot be excluded — its single-point energy is
+  required for the binding-energy stoichiometry (`BE = complex − surface −
+  atom`) and for the CCSD(T)/CBS reference — so the atom molecule is used
+  directly as the small-molecule fragment (no optimized geometry needed) in
+  both the reference-geometry fragment set and `_fetch_be_molecules`. The
+  open-shell CCSD(T)/CBS keywords (`reference uhf`, `qc_module OCC`) are already
+  selected automatically from the adsorbate multiplicity.
+
 - **MACE machine-learning potential support (`mace_model`) in `sampling`,
   `be_hess`, and `extract`.** A `LevelOfTheory` can now point at a serialized
   MACE model file via `mace_model`, which mutes `method`/`basis`/`program`:

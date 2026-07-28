@@ -68,7 +68,12 @@ __all__ += ["ManybodyDataset", "get_or_create_manybody_dataset",
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-STOICH_TYPES = ("bsse", "be_nocp", "ie", "de")
+STOICH_TYPES = ("bsse", "be_nocp", "ie", "ie_nocp", "de")
+# Stoichiometries saved for MACE (MLP) runs: only ghost-free ones. The
+# counterpoise stoichiometries (``bsse``, ``ie``) use ghost atoms, which a
+# basis-set-free potential cannot evaluate (the harness treats ghosts as real
+# atoms, yielding garbage). ``ie_nocp`` = ``be_nocp - de`` replaces ``ie``.
+MACE_STOICH_TYPES = ("be_nocp", "ie_nocp", "de")
 
 
 _COLLECTION_TYPE_MAP = {
@@ -959,23 +964,37 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
         if "/" not in c and any(c.endswith(suf) for suf in DISPERSION_SUFFIXES)
     ]
     bare_dft_cols_consumed = set()
+    mlp_composite_cols = set()
     for disp_col in disp_cols:
         for suffix in DISPERSION_SUFFIXES:
             if disp_col.endswith(suffix):
                 bare = disp_col[: -len(suffix)]
                 break
         dft_matches = [c for c in df.columns if c.startswith(bare + "/")]
-        for dft_col in dft_matches:
-            basis_part = dft_col.split("/", 1)[1]
-            composite_col = f"{disp_col}/{basis_part}"
-            df[composite_col] = df[dft_col] + df[disp_col]
-            bare_dft_cols_consumed.add(dft_col)
+        if dft_matches:
+            for dft_col in dft_matches:
+                basis_part = dft_col.split("/", 1)[1]
+                composite_col = f"{disp_col}/{basis_part}"
+                df[composite_col] = df[dft_col] + df[disp_col]
+                bare_dft_cols_consumed.add(dft_col)
+        elif bare in df.columns:
+            # Range-separated MACE model: the electronic MLP column has no
+            # basis (e.g. "h-elec-large"), so there is no "bare/basis" match.
+            # Sum it with its dispersion in place — the dispersion column
+            # itself becomes the composite MLP+dispersion BE (e.g.
+            # "h-elec-large-d4") and the bare electronic column is dropped.
+            df[disp_col] = df[bare] + df[disp_col]
+            bare_dft_cols_consumed.add(bare)
+            mlp_composite_cols.add(disp_col)
 
     # The bare-DFT and bare-dispersion columns are submission/summing
     # artifacts; user-facing output (log tables, saved JSON) should only
     # carry the composite or integrated columns. Drop them now so every
-    # downstream caller sees a clean DataFrame.
-    cols_to_drop = list(bare_dft_cols_consumed) + disp_cols
+    # downstream caller sees a clean DataFrame. MLP composite columns
+    # (dispersion column reused in place) are kept.
+    cols_to_drop = list(bare_dft_cols_consumed) + [
+        c for c in disp_cols if c not in mlp_composite_cols
+    ]
     if cols_to_drop:
         df = df.drop(columns=cols_to_drop, errors="ignore")
 
@@ -1049,10 +1068,15 @@ def create_or_load_reaction_dataset(
     ds_opt,
     opt_stru: Dict[str, object],
     logger: logging.Logger,
+    stoich_types: Tuple[str, ...] = STOICH_TYPES,
 ) -> str:
     """
     Create stoichiometry-specific ReactionDatasets and populate with
     benchmark structures.
+
+    ``stoich_types`` selects which stoichiometry datasets are created and
+    populated (default all of :data:`STOICH_TYPES`; pass
+    :data:`MACE_STOICH_TYPES` for MLP runs to save only the ghost-free ones).
 
     Creates one dataset per stoichiometry type (default, be_nocp, ie, de),
     named ``{rdset_name}_{stoich_type}``.
@@ -1063,7 +1087,7 @@ def create_or_load_reaction_dataset(
     # in place: qcportal 0.63+ ``add_specification`` and ``add_entry`` are
     # idempotent, so a second be_hess run at a different LOT now layers its
     # specs on top of the existing dataset instead of wiping it.
-    for stoich_type in STOICH_TYPES:
+    for stoich_type in stoich_types:
         ds_name = _stoich_dataset_name(rdset_name, stoich_type)
         try:
             client.get_dataset("reaction", ds_name)
@@ -1091,6 +1115,7 @@ def create_or_load_reaction_dataset(
         struct_mol = rr.final_molecule
         logger.info(f"Generating BE stoichiometry for {st}")
         be_stoich = be_stoichiometry(smol_mol, cluster_mol, struct_mol, logger)
+        be_stoich = {k: v for k, v in be_stoich.items() if k in stoich_types}
 
         n_entries += 1
         try:
@@ -1305,10 +1330,11 @@ def compute_be_dft_energies(
 
 
 def _collect_reaction_record_ids(client: PortalClient,
-                                 rdset_base_name: str) -> List[int]:
-    """Collect record IDs across all stoichiometry datasets for monitoring."""
+                                 rdset_base_name: str,
+                                 stoich_types: Tuple[str, ...] = STOICH_TYPES) -> List[int]:
+    """Collect record IDs across the given stoichiometry datasets for monitoring."""
     record_ids = []
-    for stoich in STOICH_TYPES:
+    for stoich in stoich_types:
         ds_name = _stoich_dataset_name(rdset_base_name, stoich)
         ds = client.get_dataset("reaction", ds_name)
         for _, _, record in ds.iterate_records(
@@ -1327,6 +1353,8 @@ def compute_be_mace_energies(
     mace_models: List[str],
     tag: str,
     logger: logging.Logger,
+    mace_dispersion: Optional[str] = None,
+    dispersion_tag: Optional[str] = None,
 ) -> List[int]:
     """
     Submit MACE MLP energy computations for BE calculations.
@@ -1337,10 +1365,12 @@ def compute_be_mace_energies(
     Runs through the stock QCEngine MACE harness: ``program='mace'``,
     method = model file path, ``basis=None``.
 
-    The ``bsse`` (counterpoise) stoichiometry is skipped: MLPs carry no
-    basis functions so there is no BSSE to correct, and the harness would
-    treat ghost atoms as real atoms. Use the ``be_nocp``/``de``/``ie``
-    stoichiometries when extracting MACE binding energies.
+    Only the ghost-free stoichiometries in :data:`MACE_STOICH_TYPES`
+    (``be_nocp``, ``ie_nocp``, ``de``) are computed. The counterpoise
+    stoichiometries (``bsse``, ``ie``) are skipped: MLPs carry no basis
+    functions so there is no BSSE to correct, and the harness would treat
+    ghost atoms as real atoms. The ghost-free interaction energy is
+    ``ie_nocp`` (equivalently ``be_nocp - de``).
     """
     log_formatted_list(
         logger, [Path(p).stem for p in mace_models],
@@ -1348,6 +1378,21 @@ def compute_be_mace_energies(
         max_rows=1,
     )
     logger.info(f"\nSending MACE computations with tag: {tag}\n")
+
+    # Range separation: if a dispersion is paired with the (electronic) MLPs,
+    # each model additionally gets an analytic dispersion spec (dftd4/s-dftd3,
+    # functional params from the prefix) named "<alias><suffix>" so the read
+    # side (fetch_reaction_values) sums electronic + dispersion into the
+    # composite MLP+dispersion BE, mirroring the DFT-D separated pair.
+    disp_program = disp_suffix = None
+    disp_tag = dispersion_tag or tag
+    if mace_dispersion:
+        _bare, _disp_method, disp_program = _split_dispersion(mace_dispersion)
+        disp_suffix = mace_dispersion[len(_bare):]
+        logger.info(
+            f"Range separation: pairing MLPs with {mace_dispersion} "
+            f"({disp_program}, spec '<model>{disp_suffix}', tag: {disp_tag})\n"
+        )
 
     all_submitted = 0
     all_existing = 0
@@ -1357,9 +1402,7 @@ def compute_be_mace_energies(
 
         model_submitted = 0
         model_existing = 0
-        for stoich in STOICH_TYPES:
-            if stoich == "bsse":
-                continue
+        for stoich in MACE_STOICH_TYPES:
             result = submit_energies(
                 client, rdset_base_name,
                 method=model_path, basis=None, program="mace",
@@ -1368,6 +1411,16 @@ def compute_be_mace_energies(
             )
             model_submitted += result.n_inserted
             model_existing += result.n_existing
+
+            if mace_dispersion:
+                disp_result = submit_energies(
+                    client, rdset_base_name,
+                    method=mace_dispersion, basis=None, program=disp_program,
+                    stoich=stoich, tag=disp_tag, keywords=None,
+                    spec_name=f"{alias}{disp_suffix}",
+                )
+                model_submitted += disp_result.n_inserted
+                model_existing += disp_result.n_existing
 
         all_submitted += model_submitted
         all_existing += model_existing
@@ -1387,7 +1440,7 @@ def compute_be_mace_energies(
         f"{all_existing} are newly linked from existing records."
     )
 
-    return _collect_reaction_record_ids(client, rdset_base_name)
+    return _collect_reaction_record_ids(client, rdset_base_name, MACE_STOICH_TYPES)
 
 
 def compute_hessian(

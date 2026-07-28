@@ -13,8 +13,14 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
     Generates the Binding Energy (BE) stoichiometry for a given molecular system.
 
     This function computes the BE stoichiometry for different scenarios, including the
-    BSSE-corrected BE stoichiometry, BE without counterpoise (nocp), interaction energy (ie),
-    and deformation energy (de).
+    BSSE-corrected BE stoichiometry, BE without counterpoise (nocp), counterpoise-corrected
+    interaction energy (ie), ghost-free interaction energy (ie_nocp), and deformation
+    energy (de).
+
+    ``ie_nocp`` is the interaction energy with the fragments taken at their in-complex
+    geometry but WITHOUT ghost atoms (real fragments only). It equals ``be_nocp - de``
+    and, unlike ``ie``, is well-defined for basis-set-free potentials (e.g. MACE MLPs),
+    which cannot evaluate the counterpoise ghost atoms used by ``ie``/``bsse``.
 
     Parameters:
         smol_mol (Molecule): The small molecule bound to the surface.
@@ -77,6 +83,7 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
             (smol_mol, -1.0),
         ],
         "ie": [(f_struc_mol, 1.0), (j7, -1.0), (j6, -1.0)],
+        "ie_nocp": [(f_struc_mol, 1.0), (j5, -1.0), (j4, -1.0)],
         "de": [(cluster_mol, -1.0), (smol_mol, -1.0), (j4, 1.0), (j5, 1.0)],
     }
 

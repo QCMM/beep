@@ -177,6 +177,7 @@ from unittest.mock import MagicMock
 
 from beep.adapters.qcfractal_adapter import (
     STOICH_TYPES,
+    MACE_STOICH_TYPES,
     compute_be_mace_energies,
     submit_energies,
 )
@@ -212,10 +213,13 @@ def test_mace_energies_skip_bsse_and_use_alias_spec():
         name: ds for name, ds in datasets.items()
         if ds.add_specification.called
     }
-    # bsse dataset must never receive a MACE spec
+    # Counterpoise stoichiometries (bsse, ie) use ghost atoms a basis-set-free
+    # MLP cannot evaluate, so MACE saves only the ghost-free ones
+    # (MACE_STOICH_TYPES = be_nocp, ie_nocp, de); ie_nocp replaces ie.
     assert "be_H2S_W22_02_MACE-POLAR-FT0_bsse" not in submitted
+    assert "be_H2S_W22_02_MACE-POLAR-FT0_ie" not in submitted
     expected = {
-        f"be_H2S_W22_02_MACE-POLAR-FT0_{s}" for s in STOICH_TYPES if s != "bsse"
+        f"be_H2S_W22_02_MACE-POLAR-FT0_{s}" for s in MACE_STOICH_TYPES
     }
     assert set(submitted) == expected
 
