@@ -5,7 +5,7 @@ All notable changes to BEEP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 0.15.0.dev
+## [0.15.0] — 2026-07-11
 
 ### Added
 
@@ -120,6 +120,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (`1..N`, no gaps), matching qcmanybody's expectation. Per-tier levels of
   theory (a distinct method/basis per body order) and per-site selection
   (`entries`, omit for all sites of the cluster) are documented in the examples.
+
+- **Multi-program Hessian submissions in `be_hess` (ORCA, Gaussian).** New
+  `hessian_method_and_keywords()` helper in the adapter routes Hessian
+  submissions through a per-program dispersion-keyword table
+  (`DISPERSION_KEYWORD_SPEC`), so DFT-D methods work on ORCA and Gaussian in
+  addition to psi4. The compound method (e.g. `b3lyp-d4`) is split into the
+  bare functional plus the program's native dispersion keyword on the
+  harness's escape-hatch field:
+  - **ORCA**: `simple_input` = `D4` / `D3BJ` / `D3ZERO` for `-d4` / `-d3bj` /
+    `-d3`. Raises on `-d3m` / `-d3mbj` (no native ORCA keyword).
+  - **Gaussian**: `route_input` = `EmpiricalDispersion=GD3BJ` /
+    `EmpiricalDispersion=GD3` for `-d3bj` / `-d3`. Raises on `-d4` /
+    `-d3m` / `-d3mbj` (not in Gaussian).
+
+  psi4-style keywords (`dertype`, `reference`) are dropped for the ORCA and
+  Gaussian paths, since both programs' Hessians are analytic and UKS/UHF
+  follows from the molecule multiplicity. The Hessian physics matches the
+  psi4 workflow: the same Grimme library supplies the dispersion second
+  derivatives, invoked by the target program. Only the BE-*energy* stage
+  keeps dispersion in separate `dftd3` / `dftd4` records; the psi4 path is
+  unchanged.
 
 ### Fixed
 
