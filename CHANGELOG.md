@@ -5,6 +5,26 @@ All notable changes to BEEP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.16.0.dev
+
+### Added
+
+- **User-settable geomeTRIC keywords in `sampling`.** Both stages of the
+  sampling workflow now expose the geomeTRIC `optimization_spec.keywords`
+  dict to the config: `SamplingConfig.sampling_opt_keywords` and
+  `SamplingConfig.refinement_opt_keywords`. Fully backward-compatible:
+  both fields default to `None`, and the workflow's prior defaults are
+  preserved unchanged — sampling stays at `{"maxiter": 125}` (geomeTRIC's
+  own default `coordsys: tric` continues to apply), refinement stays at
+  `keywords: None`. When set, sampling-stage keywords are *merged over*
+  the built-in `{"maxiter": 125}` (user's `maxiter` wins if given, other
+  keys added alongside); refinement-stage keywords replace the empty
+  default. Motivating case: on large surfaces (W200 ≈ 600 atoms) the
+  `tric` coordinate system incurs an O(N^2-N^3) Wilson/G-matrix cost per
+  step and dominates wall time; setting `sampling_opt_keywords:
+  {"coordsys": "cart"}` in the config now switches to Cartesian
+  coordinates without a source edit.
+
 ## [0.15.0] — 2026-07-11
 
 ### Added

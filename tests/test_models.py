@@ -129,6 +129,48 @@ def test_safe_config_dump_strips_credentials():
     assert "CO" in text
 
 
+def test_sampling_opt_keywords_defaults_none():
+    """Both opt-keyword fields default to None so the workflow keeps
+    its historical defaults (sampling: {'maxiter': 125}, refinement: None)."""
+    cfg = SamplingConfig(
+        workflow="sampling",
+        molecule="CO",
+        sampling_level_of_theory={"method": "hf3c"},
+        refinement_level_of_theory={"method": "b3lyp", "basis": "def2-tzvp"},
+    )
+    assert cfg.sampling_opt_keywords is None
+    assert cfg.refinement_opt_keywords is None
+
+
+def test_sampling_opt_keywords_accepted_as_dict():
+    cfg = SamplingConfig(
+        workflow="sampling",
+        molecule="CO",
+        sampling_level_of_theory={"method": "hf3c"},
+        refinement_level_of_theory={"method": "b3lyp", "basis": "def2-tzvp"},
+        sampling_opt_keywords={"coordsys": "cart"},
+        refinement_opt_keywords={"coordsys": "cart", "maxiter": 200},
+    )
+    assert cfg.sampling_opt_keywords == {"coordsys": "cart"}
+    assert cfg.refinement_opt_keywords == {"coordsys": "cart", "maxiter": 200}
+
+
+def test_sampling_opt_keywords_merge_semantics():
+    """Sampling-stage merge preserves the workflow's {'maxiter': 125} default
+    unless the user explicitly overrides it."""
+    user_kw = {"coordsys": "cart"}
+    merged = {"maxiter": 125, **(user_kw or {})}
+    assert merged == {"maxiter": 125, "coordsys": "cart"}
+
+    user_kw = {"maxiter": 200}
+    merged = {"maxiter": 125, **(user_kw or {})}
+    assert merged == {"maxiter": 200}
+
+    user_kw = None
+    merged = {"maxiter": 125, **(user_kw or {})}
+    assert merged == {"maxiter": 125}
+
+
 def test_geom_benchmark_lowercases_reference_method_and_basis():
     cfg = GeomBenchmarkConfig(
         workflow="geom_benchmark",

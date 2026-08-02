@@ -46,12 +46,15 @@ def config_summary_msg(config):
 
 def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
                        qc_keyword, ds_opt, logger, rtag="refinement",
-                       lot_display=None):
+                       lot_display=None, refinement_opt_keywords=None):
     lot_display = lot_display or f"{rmethod}/{rbasis}/{program}"
     spec = {
         "name": ropt_lot_name,
         "description": f"Geometric + {lot_display}",
-        "optimization_spec": {"program": "geometric", "keywords": None},
+        "optimization_spec": {
+            "program": "geometric",
+            "keywords": refinement_opt_keywords or None,
+        },
         "qc_spec": {
             "driver": "gradient",
             "method": rmethod,
@@ -92,6 +95,7 @@ def run_sampling(
     sampling_shell: float,
     sampling_condition: str,
     logger,
+    sampling_opt_keywords=None,
 ):
     """
     Run the full sampling loop: generate structures, optimize, filter by RMSD.
@@ -120,10 +124,11 @@ def run_sampling(
             method = method.split("-")[0]
 
     # Build specification dict for the adapter
+    _smpl_opt_kw = {"maxiter": 125, **(sampling_opt_keywords or {})}
     spec = {
         "name": opt_lot,
         "description": "Geometric Optimization",
-        "optimization_spec": {"program": "geometric", "keywords": {"maxiter": 125}},
+        "optimization_spec": {"program": "geometric", "keywords": _smpl_opt_kw},
         "qc_spec": {
             "driver": "gradient",
             "method": method,
@@ -352,6 +357,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         "sampling_condition": config.sampling_condition,
         "opt_lot": opt_lot,
         "logger": logger,
+        "sampling_opt_keywords": config.sampling_opt_keywords,
     }
 
     # --- Validate collections ---
@@ -429,6 +435,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
             client, ropt_lot, rmethod, rbasis, rprogram,
             qc_keyword, ds_ref, logger, config.refinement_tag,
             lot_display=r_lot.display,
+            refinement_opt_keywords=config.refinement_opt_keywords,
         )
 
         ds_ref = qcf.get_or_create_opt_dataset(client, ref_opt_dset_name)
