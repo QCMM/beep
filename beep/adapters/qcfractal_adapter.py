@@ -1734,6 +1734,36 @@ def add_gradient_spec(
     return name
 
 
+def add_energy_spec(
+    ds_sp: SinglepointDataset,
+    spec_name: str,
+    method: str,
+    basis: Optional[str],
+    program: str = "psi4",
+    keywords: Optional[dict] = None,
+    description: str = "",
+) -> str:
+    """Add an SP energy ``QCSpecification`` to a ``SinglepointDataset``.
+
+    Sister of :func:`add_gradient_spec` for the energy driver — used by
+    ``be_comp_periodic`` to register the BE electronic + dispersion specs
+    on the complex, bare-surface, and gas-phase SinglepointDatasets.
+    Idempotent; returns the lowercased spec name actually registered.
+    """
+    qc_spec = QCSpecification(
+        program=program,
+        driver=SinglepointDriver.energy,
+        method=method,
+        basis=basis,
+        keywords=keywords or {},
+    )
+    name = spec_name.lower()
+    ds_sp.add_specification(
+        name=name, specification=qc_spec, description=description,
+    )
+    return name
+
+
 def add_singlepoint_entries(
     ds_sp: SinglepointDataset,
     entries: List[Tuple[str, Molecule]],

@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **New workflow `be_comp_periodic`** — submission workflow for periodic
+  binding energies on `sampling_periodic` outputs. Range-separated: pairs
+  an MLP electronic spec with an explicit dispersion spec, using the
+  QCEngine MACE + `dftd3`/`dftd4` harness patches that read
+  `cell`/`pbc` from spec keywords. Per slab, registers the two paired
+  specs on:
+  - `<smol>_<slab>_be_sp` — SPs on optimized complex geometries
+  - `<smol>_<slab>_surface_be_sp` — SPs on per-site bare-surface geometries
+  Once (shared across runs), same paired specs on `<smol>_gas_be_sp`
+  (non-periodic — no cell/pbc in the gas-phase adsorbate SPs). Submits all,
+  waits for completion. Only entries that appear COMPLETE in both the
+  complex and bare-surface datasets from `sampling_periodic` are BE-
+  evaluated, guaranteeing a per-site reference is always available for the
+  downstream difference. Assembly of the per-site BE = E(complex) −
+  E(bare_site) − E(adsorbate_gas), plus per-adsorbate ZPVE correction,
+  happens in the (not-yet-written) `be_assemble_periodic` workflow. Config
+  requires an MLP `be_electronic_lot` and a dispersion string
+  (`mpwb1k-d4`, `b3lyp-d3bj`, etc.) — the dispersion program is inferred
+  from the suffix by the existing `_split_dispersion` helper. New adapter
+  helper `add_energy_spec` (sister of `add_gradient_spec`) added.
+
 - **New workflow `sampling_periodic`** — grid-based binding-site sampling
   on periodic slabs, MLP-only (MACE). Complements the cluster-based
   `sampling` workflow. Single-pass optimization (no separate refinement
