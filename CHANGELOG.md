@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **New workflow `sampling_periodic`** — grid-based binding-site sampling
+  on periodic slabs, MLP-only (MACE). Complements the cluster-based
+  `sampling` workflow. Single-pass optimization (no separate refinement
+  stage): for each slab in a `surface_collection`, generates one adsorbate
+  candidate per node on a PBC-aware xy grid, submits an MLP optimization
+  per candidate, and reports per-slab unique binding sites via RMSD
+  filtering.
+
+  Ported from gbovolenta's `sampling_grid_noise_*.py` monoliths with the
+  following changes to what shipped there:
+  - **PBC-aware placement**: minimum-image nearest-atom search, wraps
+    adsorbate atoms back into the cell after placement, and covers the
+    full periodic footprint (no dead 1 Å borders — the monoliths' grid
+    started at 1 Å from each edge to avoid boundary artefacts that PBC
+    now handles correctly).
+  - **Improved cavity strategy**: widened `cavity_z_scan_window_ang`
+    (default 1.0 Å, was implicit 0.5 Å), scans the full z-range and
+    picks the *best-fit* z rather than the first hit, and gracefully
+    skips a grid node when no z qualifies (the monoliths would inherit
+    a stale `z_shift` from a previous iteration).
+  - **Sanity check over every adsorbate atom** (not just one), with an
+    explicit `sanity_max_iter` cap on the retry loop so an impossible
+    site is skipped cleanly instead of looping forever.
+  - **Seeded RNG (`random_seed`)** for reproducibility.
+  - **`freeze_below_z_ang` / `freeze_atoms`** — freeze bottom slab layers
+    during optimization via geomeTRIC's `constraints` keyword (compressed
+    to `$freeze / xyz i-j,k` ranges). Explicit atom list overrides the z
+    threshold. Neither set = fully relaxed.
+  - **Cell resolution**: config-level `cell` overrides; falls back to
+    per-slab `surface.extras['cell']` if unset. `pbc` defaults to a 2D
+    slab `[True, True, False]`.
+
+  Requires the QCEngine MACE-harness patch that reads
+  `keywords['cell']` / `keywords['pbc']` from the QC specification; the
+  cell + pbc are threaded through those keywords per submission so
+  QCFractal caches remain correct (different cells hash to different
+  specs). See `examples/sampling_periodic.json` and
+  `beep --schema sampling_periodic` for all fields.
+
 - **User-settable geomeTRIC keywords in `sampling`.** Both stages of the
   sampling workflow now expose the geomeTRIC `optimization_spec.keywords`
   dict to the config: `SamplingConfig.sampling_opt_keywords` and

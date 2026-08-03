@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .models import (
     SamplingConfig,
+    SamplingPeriodicConfig,
     BeHessConfig,
     ExtractConfig,
     PreExpConfig,
@@ -31,6 +32,7 @@ from .adapters.qcfractal_adapter import connect
 
 WORKFLOW_MODELS = {
     "sampling": SamplingConfig,
+    "sampling_periodic": SamplingPeriodicConfig,
     "be_hess": BeHessConfig,
     "extract": ExtractConfig,
     "pre_exp": PreExpConfig,
@@ -151,6 +153,8 @@ def main():
     # Import and dispatch to the appropriate workflow
     if workflow == "sampling":
         from .workflows.sampling import run
+    elif workflow == "sampling_periodic":
+        from .workflows.sampling_periodic import run
     elif workflow == "be_hess":
         from .workflows.be_hess import run
     elif workflow == "extract":

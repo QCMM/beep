@@ -1,0 +1,279 @@
+"""BEEP `sampling_periodic` workflow — MLP binding-site sampling on periodic slabs.
+
+Single-pass workflow (no refinement): for each slab in the surface collection,
+place adsorbate candidates on a periodic-aware xy grid, optimize each with a
+MACE MLP under periodic boundary conditions, then report per-cluster unique
+binding sites via RMSD filtering.
+
+The cell + pbc are passed to the MACE harness via the QC spec keywords (see
+QCEngine's MACE harness patch that reads keywords['cell'] / keywords['pbc']).
+Bottom-layer freezing goes through geomeTRIC's constraints keyword.
+"""
+from __future__ import annotations
+
+import logging
+import random
+from pathlib import Path
+
+from qcportal import PortalClient as FractalClient
+
+from ..models.sampling_periodic import SamplingPeriodicConfig
+from ..models.base import safe_config_dump
+from ..adapters import qcfractal_adapter as qcf
+from ..core.periodic_sampler import (
+    ANG2BOHR,
+    build_freeze_constraint_string,
+    frozen_atom_indices,
+    run_periodic_sampling,
+)
+from ..core.sampling import filter_binding_sites
+
+bcheck = "✓"
+POLL_FREQUENCY_SEC = 120
+
+
+def _resolve_cell(config: SamplingPeriodicConfig, surface) -> list:
+    """Return the 3x3 cell (Angstrom) for a slab, preferring config over surface extras."""
+    if config.cell is not None:
+        return config.cell
+    extras_cell = (surface.extras or {}).get("cell")
+    if extras_cell is None:
+        raise ValueError(
+            "sampling_periodic: no cell available. Either set 'cell' in the workflow "
+            "config or store it on each slab's molecule.extras['cell']."
+        )
+    return extras_cell
+
+
+def _build_sampling_spec(
+    lot,
+    cell_ang,
+    pbc,
+    freeze_indices_0based,
+    base_opt_keywords,
+    logger,
+):
+    """Construct the OptimizationDataset spec dict for a periodic MACE run."""
+    # QC spec keywords: cell + pbc for the MACE harness (see QCEngine patch)
+    qc_keywords = {
+        "cell": [list(row) for row in cell_ang],
+        "pbc": list(pbc),
+    }
+
+    # Optimizer keywords: base defaults + user overrides + optional freeze block
+    opt_keywords = {"maxiter": 125}
+    if base_opt_keywords:
+        opt_keywords.update(base_opt_keywords)
+    freeze_str = build_freeze_constraint_string(freeze_indices_0based)
+    if freeze_str is not None:
+        existing = opt_keywords.get("constraints")
+        if existing:
+            logger.info(
+                "  freeze constraint requested but 'constraints' already set in "
+                "sampling_opt_keywords — appending freeze block to user-supplied constraints."
+            )
+            opt_keywords["constraints"] = existing.rstrip() + "\n" + freeze_str
+        else:
+            opt_keywords["constraints"] = freeze_str
+        logger.info(f"  freezing {len(freeze_indices_0based)} atoms during optimization")
+
+    spec = {
+        "name": lot.lot_name,
+        "description": f"Periodic sampling with {lot.display}",
+        "optimization_spec": {"program": "geometric", "keywords": opt_keywords},
+        "qc_spec": {
+            "driver": "gradient",
+            "method": lot.qc_method,
+            "basis": lot.qc_basis,
+            "keywords": qc_keywords,
+            "program": lot.qc_program,
+        },
+    }
+    return spec
+
+
+def _log_config_summary(config: SamplingPeriodicConfig, logger):
+    lines = [
+        "\n" + "=" * 80,
+        "  BEEP sampling_periodic — configuration",
+        "=" * 80,
+        f"  Adsorbate:          {config.molecule}",
+        f"  Surface collection: {config.surface_collection}",
+        f"  Level of theory:    {config.sampling_level_of_theory.display}",
+        f"  PBC:                {config.pbc}",
+        f"  Step size:          {config.step_size_ang} A  (noise ±{config.grid_noise_frac*config.step_size_ang:.2f} A)",
+        f"  Sampling distance:  {config.sampling_distance_ang} A",
+        f"  Sanity min dist:    {config.sanity_min_distance_ang} A  (max {config.sanity_max_iter} attempts)",
+        f"  Cavity z-scan:      step {config.cavity_z_scan_step_ang} A, window ±{config.cavity_z_scan_window_ang} A",
+        f"  RMSD threshold:     {config.rmsd_value} A",
+        f"  Freeze below z:     {config.freeze_below_z_ang} A" if config.freeze_below_z_ang else "  Freeze below z:     -",
+        f"  Freeze atoms:       {len(config.freeze_atoms)} atoms" if config.freeze_atoms else "  Freeze atoms:       -",
+        f"  Random seed:        {config.random_seed}",
+        "=" * 80 + "\n",
+    ]
+    logger.info("\n".join(lines))
+
+
+def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
+    logger = logging.getLogger("beep")
+
+    smol_name = config.molecule
+
+    # Output folder: <cwd>/<molecule>/
+    res_folder = Path.cwd() / smol_name
+    res_folder.mkdir(parents=True, exist_ok=True)
+    data_folder = res_folder / "data"
+    data_folder.mkdir(exist_ok=True)
+
+    # Per-workflow log file
+    log_file = res_folder / f"sampling_periodic_{smol_name}.log"
+    file_handler = logging.FileHandler(str(log_file), mode="w")
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(file_handler)
+
+    # Copy input config for reproducibility
+    (res_folder / f"sampling_periodic_{smol_name}.json").write_text(safe_config_dump(config))
+
+    _log_config_summary(config, logger)
+
+    lot = config.sampling_level_of_theory
+
+    # RNG (seed once, share across grid noise + rotations)
+    rng = random.Random(config.random_seed) if config.random_seed is not None else random.Random()
+
+    # --- Load adsorbate ---
+    ds_sm = qcf.get_collection(client, "OptimizationDataset", config.small_molecule_collection)
+    try:
+        # No opt-LOT for MLP-only runs; take the initial-molecule slot
+        adsorbate = qcf.fetch_initial_molecule(ds_sm, smol_name, lot.lot_name)
+    except KeyError:
+        adsorbate = qcf.fetch_atom_molecule(client, config.atoms_collection, smol_name)
+
+    # --- Load surfaces ---
+    ds_surf = qcf.get_collection(client, "OptimizationDataset", config.surface_collection)
+    all_slabs = list(ds_surf.entry_names)
+    slabs = (
+        [s for s in all_slabs if s in config.surface_clusters]
+        if config.surface_clusters else all_slabs
+    )
+    logger.info(f"  Surface slabs to sample: {len(slabs)}/{len(all_slabs)}  ({', '.join(slabs)})\n")
+
+    total_candidates = 0
+    total_unique = 0
+
+    for c, slab_name in enumerate(slabs):
+        logger.info("\n" + "=" * 80)
+        logger.info(f"  Slab {c+1}/{len(slabs)}: {slab_name}")
+        logger.info("=" * 80 + "\n")
+
+        surface = qcf.fetch_initial_molecule(ds_surf, slab_name, lot.lot_name)
+        cell_ang = _resolve_cell(config, surface)
+
+        # Build the OptimizationDataset for this slab's sampling run
+        opt_dset_name = f"{smol_name}_{slab_name}"
+        ds_opt = qcf.get_or_create_opt_dataset(client, opt_dset_name)
+
+        # Choose freeze list (surface atoms only, indexed 0..N_surface-1)
+        freeze_list = frozen_atom_indices(
+            surface.geometry,
+            config.freeze_below_z_ang,
+            config.freeze_atoms,
+            n_surface_atoms=len(surface.symbols),
+        )
+
+        # Register spec + submit
+        spec = _build_sampling_spec(
+            lot, cell_ang, config.pbc, freeze_list,
+            config.sampling_opt_keywords, logger,
+        )
+        qcf.add_opt_specification(ds_opt, spec, overwrite=False)
+
+        # Generate candidates
+        candidates, debug_mol = run_periodic_sampling(
+            surface=surface,
+            adsorbate=adsorbate,
+            cell_ang=cell_ang,
+            pbc=config.pbc,
+            step_size_ang=config.step_size_ang,
+            grid_noise_frac=config.grid_noise_frac,
+            sampling_distance_ang=config.sampling_distance_ang,
+            cavity_z_scan_step_ang=config.cavity_z_scan_step_ang,
+            cavity_z_scan_window_ang=config.cavity_z_scan_window_ang,
+            sanity_min_distance_ang=config.sanity_min_distance_ang,
+            sanity_max_iter=config.sanity_max_iter,
+            rng=rng,
+            logger=logger,
+        )
+
+        if config.store_initial_structures:
+            debug_dir = data_folder / "site_finder" / smol_name / slab_name
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            debug_mol.to_file(str(debug_dir / "all_sampled_sites.xyz"), "xyz")
+            for name, mol in candidates:
+                mol.to_file(str(debug_dir / f"{name}.xyz"), "xyz")
+
+        # Add entries + submit
+        added_names = []
+        existing_names = set(ds_opt.entry_names)
+        for name, mol in candidates:
+            entry_name = f"{slab_name}_{name}"
+            if entry_name in existing_names:
+                added_names.append(entry_name)
+                continue
+            try:
+                qcf.add_opt_entry(ds_opt, entry_name, mol)
+                added_names.append(entry_name)
+            except KeyError as e:
+                logger.info(f"  {e}")
+
+        if added_names:
+            comp_rec = qcf.submit_optimizations(
+                ds_opt, lot.lot_name, tag=config.sampling_tag, subset=added_names,
+            )
+            logger.info(
+                f"  Submitted: {comp_rec.n_inserted} new, "
+                f"{comp_rec.n_existing} already computed."
+            )
+
+        pid_list = qcf.get_job_ids(ds_opt, added_names, lot.lot_name)
+        if pid_list:
+            logger.info(f"  Optimizing {len(pid_list)} candidates (tag='{config.sampling_tag}')")
+            qcf.wait_for_completion(client, pid_list, POLL_FREQUENCY_SEC, logger)
+
+        # Pull optimized molecules + RMSD dedup
+        opt_molecules = qcf.fetch_opt_molecules(
+            ds_opt, added_names, lot.lot_name, status="COMPLETE",
+        )
+        n_complete = len(opt_molecules)
+        logger.info(
+            f"  {n_complete} optimizations COMPLETE, "
+            f"{len(added_names) - n_complete} in other states."
+        )
+
+        unique = filter_binding_sites(
+            opt_molecules, [], cut_off_val=config.rmsd_value,
+            rmsd_symm=config.rmsd_symmetry, ligand_size=len(adsorbate.symbols),
+            logger=logger, grid=0.5, nb_radius=4, dm_tau=1e-3,
+        )
+        n_unique = len(unique)
+
+        # Write per-slab unique-sites list to data/
+        unique_names = {name for name, _ in unique}
+        report_lines = ["entry_name,is_unique"]
+        for name, _ in opt_molecules:
+            report_lines.append(f"{name},{'yes' if name in unique_names else 'no'}")
+        (data_folder / f"unique_sites_{slab_name}.csv").write_text(
+            "\n".join(report_lines) + "\n"
+        )
+
+        logger.info(
+            f"\n  {bcheck} Slab {slab_name}: {n_complete} optimized, "
+            f"{n_unique} unique (RMSD {config.rmsd_value} A)"
+        )
+        total_candidates += n_complete
+        total_unique += n_unique
+
+    logger.info("\n" + "=" * 80)
+    logger.info(f"  DONE — {total_candidates} optimizations across {len(slabs)} slabs, "
+                f"{total_unique} unique binding sites total.")
+    logger.info("=" * 80 + "\n")
