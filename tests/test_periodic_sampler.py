@@ -23,6 +23,8 @@ from beep.core.periodic_sampler import (
     min_image_distance,
     min_image_vec,
     nearest_surface_atom,
+    recenter_adsorbate_com,
+    strip_adsorbate,
     wrap_into_cell,
     _atom_index_ranges,
     _cell_diag_bohr,
@@ -245,13 +247,13 @@ def _tiny_adsorbate() -> qcel.models.Molecule:
 
 
 def test_generate_candidate_happy_path():
-    """Placement directly above a surface atom returns a molecule (surface + adsorbate)."""
+    """Placement directly above a surface atom returns a tuple (mol, orig_ads_coords)."""
     cell_diag = np.array([10.0, 10.0, 30.0])
     pbc = [True, True, False]
     surface = _tiny_slab(cell_diag)
     adsorbate = _tiny_adsorbate()
     rng = random.Random(0)
-    mol = generate_candidate(
+    result = generate_candidate(
         surface, adsorbate,
         x_bohr=2.0 * ANG2BOHR, y_bohr=2.0 * ANG2BOHR,
         z_top_bohr=5.0 * ANG2BOHR,
@@ -264,11 +266,42 @@ def test_generate_candidate_happy_path():
         sanity_max_iter=20,
         rng=rng,
     )
-    assert mol is not None
+    assert result is not None
+    mol, orig_ads = result
     assert list(mol.symbols) == ["O", "O", "O", "C", "O"]
-    # last two atoms (adsorbate) sit above the slab
+    # last two atoms (adsorbate) sit above the slab in the centered molecule
     ads_geom = mol.geometry[3:].reshape(-1, 3)
     assert (ads_geom[:, 2] > 0).all()
+    # original adsorbate coords should be the *pre-shift* placement (2 atoms)
+    assert orig_ads.shape == (2, 3)
+
+
+def test_generate_candidate_recenters_adsorbate_to_cell_center():
+    """After generate_candidate, the adsorbate COM sits at (Lx/2, Ly/2)."""
+    cell_diag = np.array([10.0, 10.0, 30.0])
+    pbc = [True, True, False]
+    surface = _tiny_slab(cell_diag)
+    adsorbate = _tiny_adsorbate()
+    rng = random.Random(0)
+    result = generate_candidate(
+        surface, adsorbate,
+        x_bohr=2.0 * ANG2BOHR, y_bohr=2.0 * ANG2BOHR,   # away from center
+        z_top_bohr=5.0 * ANG2BOHR,
+        z_scan_range_bohr=(0.0, 5.0 * ANG2BOHR),
+        sampling_distance_bohr=2.5 * ANG2BOHR,
+        cell_diag_bohr=cell_diag, pbc=pbc,
+        cavity_scan_step_bohr=0.5 * ANG2BOHR,
+        cavity_window_bohr=1.0 * ANG2BOHR,
+        sanity_min_dist_bohr=1.5 * ANG2BOHR,
+        sanity_max_iter=20,
+        rng=rng,
+    )
+    mol, _ = result
+    n_surf = len(surface.symbols)
+    ads_com = mol.geometry[n_surf:].reshape(-1, 3).mean(axis=0)
+    # xy at cell center; z untouched by the shift so it's still above the slab
+    assert ads_com[0] == pytest.approx(0.5 * cell_diag[0])
+    assert ads_com[1] == pytest.approx(0.5 * cell_diag[1])
 
 
 def test_generate_candidate_skips_impossible_sanity():
@@ -278,7 +311,7 @@ def test_generate_candidate_skips_impossible_sanity():
     surface = _tiny_slab(cell_diag)
     adsorbate = _tiny_adsorbate()
     rng = random.Random(0)
-    mol = generate_candidate(
+    result = generate_candidate(
         surface, adsorbate,
         x_bohr=2.0 * ANG2BOHR, y_bohr=2.0 * ANG2BOHR,
         z_top_bohr=5.0 * ANG2BOHR,
@@ -291,4 +324,49 @@ def test_generate_candidate_skips_impossible_sanity():
         sanity_max_iter=5,
         rng=rng,
     )
-    assert mol is None
+    assert result is None
+
+
+def test_strip_adsorbate_returns_only_surface_atoms():
+    """Given a combined slab+adsorbate, strip_adsorbate returns only the first
+    n_surface_atoms — atom order + positions preserved bit-for-bit."""
+    combined = qcel.models.Molecule(
+        symbols=["O", "O", "O", "C", "O"],  # 3 surface + 2 adsorbate (CO)
+        geometry=np.array([
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [1.0, 1.0, 3.0],
+            [1.0, 1.0, 4.13],
+        ]).flatten(),
+        fix_com=False, fix_orientation=False,
+    )
+    bare = strip_adsorbate(combined, n_surface_atoms=3)
+    assert list(bare.symbols) == ["O", "O", "O"]
+    assert bare.geometry.shape == (3, 3)
+    np.testing.assert_allclose(bare.geometry, combined.geometry.reshape(-1, 3)[:3])
+
+
+def test_recenter_adsorbate_com_shifts_only_periodic_axes():
+    """Non-periodic z is unchanged; xy shifts atoms uniformly."""
+    cell_diag = np.array([10.0, 10.0, 30.0])
+    pbc = [True, True, False]
+    # 2 surface atoms at z=0, 1 adsorbate atom at (2, 2, 3)
+    geom = np.array([
+        [0.0, 0.0, 0.0],
+        [5.0, 5.0, 0.0],
+        [2.0, 2.0, 3.0],
+    ])
+    out = recenter_adsorbate_com(geom, n_surface_atoms=2, cell_diag_bohr=cell_diag, pbc=pbc)
+    # adsorbate COM (only 1 atom) was (2, 2) → should end at (5, 5)
+    assert out[2, 0] == pytest.approx(5.0)
+    assert out[2, 1] == pytest.approx(5.0)
+    # z unchanged
+    assert out[2, 2] == pytest.approx(3.0)
+    # surface atoms shifted by the same (+3, +3, 0) then wrapped
+    assert out[0, 0] == pytest.approx(3.0)
+    assert out[0, 1] == pytest.approx(3.0)
+    assert out[0, 2] == pytest.approx(0.0)
+    # second surface atom at (5,5) → (8,8)
+    assert out[1, 0] == pytest.approx(8.0)
+    assert out[1, 1] == pytest.approx(8.0)

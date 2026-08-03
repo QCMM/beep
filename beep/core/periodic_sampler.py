@@ -244,12 +244,17 @@ def generate_candidate(
     sanity_min_dist_bohr: float,
     sanity_max_iter: int,
     rng: random.Random,
-) -> Optional[Molecule]:
+) -> Optional[Tuple[Molecule, np.ndarray]]:
     """Try to build one valid slab+adsorbate structure at the given (x, y).
 
-    Returns a fully-formed qcelemental Molecule (surface atoms first, adsorbate
-    atoms last) with adsorbate coordinates wrapped into the cell, or None if
-    no valid placement was found within ``sanity_max_iter`` rotation attempts.
+    Returns ``(centered_mol, original_ads_coords)`` on success, or ``None``
+    if no valid placement was found within ``sanity_max_iter`` rotation
+    attempts. The returned ``centered_mol`` has been slid in xy so the
+    adsorbate COM sits at the periodic cell center (pure gauge shift; use
+    this for compute + per-candidate xyz files). ``original_ads_coords`` is
+    the adsorbate placement *before* the recentering shift (used by the
+    aggregate debug xyz so the sampling coverage remains visible instead of
+    collapsing to a single point at cell center).
     """
     surface_geom = surface.geometry
     idx, xy_atom_dist = nearest_surface_atom(
@@ -289,7 +294,22 @@ def generate_candidate(
         )[0]
         ads_coords = wrap_into_cell(mol_shifted.geometry, cell_diag_bohr, pbc)
         if all_atoms_ok(ads_coords, surface_geom, cell_diag_bohr, pbc, sanity_min_dist_bohr):
-            return _combine(surface, adsorbate, ads_coords)
+            # Return the CENTERED combined molecule (used for compute + saved
+            # per-candidate xyz) plus the pre-shift adsorbate coordinates
+            # (used by the aggregate debug xyz so the sampling coverage stays
+            # visible instead of collapsing to a single point at cell center).
+            combined = _combine(surface, adsorbate, ads_coords)
+            n_surf = len(surface.symbols)
+            centered_geom = recenter_adsorbate_com(
+                combined.geometry, n_surf, cell_diag_bohr, pbc
+            )
+            centered_mol = qcel.models.Molecule(
+                symbols=list(combined.symbols),
+                geometry=centered_geom.flatten(),
+                fix_com=False,
+                fix_orientation=False,
+            )
+            return centered_mol, ads_coords
     return None
 
 
@@ -303,6 +323,52 @@ def _combine(surface: Molecule, adsorbate: Molecule, ads_coords_bohr: np.ndarray
         fix_com=False,
         fix_orientation=False,
     )
+
+
+def strip_adsorbate(
+    combined_mol: Molecule, n_surface_atoms: int
+) -> Molecule:
+    """Return a qcel Molecule of just the surface atoms from a combined slab+adsorbate.
+
+    Assumes the ``_combine()`` convention (surface first, adsorbate last).
+    Used to build the per-site bare-surface starting geometry for the
+    ``_surface`` sibling OptimizationDataset: the surface positions after the
+    complex is optimized carry the site-specific deformation, and re-relaxing
+    from that state gives a physically clean bare-surface reference for BE.
+    """
+    n = int(n_surface_atoms)
+    symbols = list(combined_mol.symbols[:n])
+    geometry = np.asarray(combined_mol.geometry, dtype=float).reshape(-1, 3)[:n]
+    return qcel.models.Molecule(
+        symbols=symbols,
+        geometry=geometry.flatten(),
+        fix_com=False,
+        fix_orientation=False,
+    )
+
+
+def recenter_adsorbate_com(
+    combined_geom: np.ndarray,
+    n_surface_atoms: int,
+    cell_diag_bohr: np.ndarray,
+    pbc: Sequence[bool],
+) -> np.ndarray:
+    """Slide every atom in xy so the adsorbate COM lands at the cell center.
+
+    Pure PBC gauge shift — energy, gradient, Hessian invariant. Only the
+    periodic axes (x, y in a standard slab; per `pbc`) are shifted; z is
+    left unchanged so `freeze_below_z_ang` still picks the same atoms and
+    the vacuum gap is preserved. Returns wrapped coordinates.
+    """
+    coords = np.asarray(combined_geom, dtype=float).copy().reshape(-1, 3)
+    ads_com = coords[n_surface_atoms:].mean(axis=0)
+    target = 0.5 * cell_diag_bohr
+    shift = np.zeros(3)
+    for i in range(3):
+        if pbc[i]:
+            shift[i] = target[i] - ads_com[i]
+    coords += shift
+    return wrap_into_cell(coords, cell_diag_bohr, pbc)
 
 
 def run_periodic_sampling(
@@ -358,21 +424,22 @@ def run_periodic_sampling(
 
     for ix, x in enumerate(x_grid):
         for iy, y in enumerate(y_grid):
-            mol = generate_candidate(
+            result = generate_candidate(
                 surface, adsorbate, x, y, z_top, z_scan_range,
                 sampling_distance_bohr, cell_diag_bohr, pbc,
                 cavity_scan_step_bohr, cavity_window_bohr,
                 sanity_min_dist_bohr, sanity_max_iter, rng,
             )
             name = f"X{ix:02d}_Y{iy:02d}"
-            if mol is None:
+            if result is None:
                 logger.info(
                     f"  skip {name}: no valid placement at "
                     f"({x*BOHR2ANG:.2f}, {y*BOHR2ANG:.2f}) A"
                 )
                 continue
-            candidates.append((name, mol))
-            all_ads_coords.append(mol.geometry[len(surface.symbols):].reshape(-1, 3))
+            centered_mol, orig_ads_coords = result
+            candidates.append((name, centered_mol))
+            all_ads_coords.append(orig_ads_coords)
 
     # Build a single debug molecule for visualisation
     if all_ads_coords:

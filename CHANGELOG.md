@@ -40,6 +40,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - **Cell resolution**: config-level `cell` overrides; falls back to
     per-slab `surface.extras['cell']` if unset. `pbc` defaults to a 2D
     slab `[True, True, False]`.
+  - **Adsorbate auto-centering in xy**: every generated candidate is slid
+    (unconditional, unwarrantied) so the adsorbate COM sits at the periodic
+    cell center. Pure PBC gauge shift — energy, gradient, Hessian invariant
+    — but makes visualisation and human inspection dramatically cleaner
+    (no boundary-straddling adsorbates). Z is left untouched so
+    `freeze_below_z_ang` still picks the same atoms and the vacuum gap is
+    preserved.
+  - **Aggregate `all_sampled_sites_<slab>.xyz`** always written under
+    `data/`, showing the slab plus every accepted adsorbate copy in its
+    *pre-centering* placement — matching the monoliths'
+    `all_sampled_sites.xyz` output and preserving spatial coverage for
+    visual inspection. Per-candidate xyz files remain gated behind
+    `store_initial_structures=true`.
+  - **Per-site bare-surface companion opts** — for every unique confirmed
+    binding site (after the RMSD filter), the adsorbate is stripped from
+    the optimized complex and the remaining surface is re-optimized under
+    the same LOT + freeze policy + cell/pbc. Results land in a sibling
+    OptimizationDataset `<smol>_<slab>_surface` with entry names matching
+    the sampling entries (1:1). Point: recover the site-specific slab
+    deformation energy on amorphous ice — using a shared bare-slab
+    reference for every site drops that ~5-20 meV contribution. Cheap
+    with an MLP, prohibitive with DFT. Feeds the future
+    `be_comp_periodic` / `be_assemble_periodic` workflows.
 
   Requires the QCEngine MACE-harness patch that reads
   `keywords['cell']` / `keywords['pbc']` from the QC specification; the
