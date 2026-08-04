@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **New workflow `be_assemble_periodic`** — extraction workflow closing the
+  periodic BE pipeline. Reads the paired MACE-electronic + explicit-dispersion
+  single-point energies submitted by `be_comp_periodic` (from the
+  `<smol>_<slab>_be_sp`, `<smol>_<slab>_surface_be_sp`, and `<smol>_gas_be_sp`
+  SinglepointDatasets), sums electronic + dispersion per record to composite
+  BE-LOT totals, and computes per site
+  `BE = E(complex) - E(bare_site) - E(adsorbate_gas)` shifted by a
+  configurable `zpve_correction_kcal_mol` (scalar per adsorbate; kept as
+  config so no periodic Hessians are ever needed). Only sites COMPLETE in
+  all three record sets yield a BE; missing/errored records are logged and
+  skipped. Writes `<molecule>/data/<prefix>_<slab>.csv` per slab (with
+  intermediate hartree energies for auditability) and a
+  `<prefix>_summary.csv` across all slabs.
+
 - **New workflow `be_comp_periodic`** — submission workflow for periodic
   binding energies on `sampling_periodic` outputs. Range-separated: pairs
   an MLP electronic spec with an explicit dispersion spec, using the

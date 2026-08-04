@@ -20,6 +20,7 @@ from .models import (
     SamplingConfig,
     SamplingPeriodicConfig,
     BeCompPeriodicConfig,
+    BeAssemblePeriodicConfig,
     BeHessConfig,
     ExtractConfig,
     PreExpConfig,
@@ -35,6 +36,7 @@ WORKFLOW_MODELS = {
     "sampling": SamplingConfig,
     "sampling_periodic": SamplingPeriodicConfig,
     "be_comp_periodic": BeCompPeriodicConfig,
+    "be_assemble_periodic": BeAssemblePeriodicConfig,
     "be_hess": BeHessConfig,
     "extract": ExtractConfig,
     "pre_exp": PreExpConfig,
@@ -159,6 +161,8 @@ def main():
         from .workflows.sampling_periodic import run
     elif workflow == "be_comp_periodic":
         from .workflows.be_comp_periodic import run
+    elif workflow == "be_assemble_periodic":
+        from .workflows.be_assemble_periodic import run
     elif workflow == "be_hess":
         from .workflows.be_hess import run
     elif workflow == "extract":

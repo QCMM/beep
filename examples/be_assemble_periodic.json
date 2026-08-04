@@ -1,0 +1,21 @@
+{
+    "workflow": "be_assemble_periodic",
+    "server": {
+        "address": "http://qcf-astrochem",
+        "username": "user",
+        "password": "changeme",
+        "verify": false
+    },
+
+    "molecule": "CO",
+    "surface_clusters": ["slab_01", "slab_02"],
+
+    "be_electronic_lot": {
+        "mace_model": "/path/to/models/mace-electronic-only.model"
+    },
+    "be_dispersion": "mpwb1k-d4",
+
+    "zpve_correction_kcal_mol": 0.72,
+
+    "output_prefix": "be_periodic"
+}
