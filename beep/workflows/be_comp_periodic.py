@@ -21,11 +21,40 @@ from qcportal import PortalClient as FractalClient
 
 from ..models.be_comp_periodic import BeCompPeriodicConfig
 from ..models.base import safe_config_dump
+from ..core.logging_utils import beep_banner
 from ..adapters import qcfractal_adapter as qcf
 from ..adapters.qcfractal_adapter import _split_dispersion
 
-bcheck = "✓"
+bcheck = "✔"
 POLL_FREQUENCY_SEC = 120
+
+
+welcome_msg = beep_banner(
+    "Periodic Binding-Energy Computation",
+    quote="A wet sheet and a flowing sea, and a wind that follows fast.",
+    quote_author="Allan Cunningham",
+    tagline="Range-separated MACE meets periodic dispersion.",
+    authors="Stefan Vogt-Geisse",
+)
+
+
+def config_summary_msg(config: BeCompPeriodicConfig) -> str:
+    separator = "-" * 88
+    cell_source = "config-level" if config.cell is not None else "per-slab extras"
+    lines = [
+        "",
+        separator,
+        f"  Adsorbate:            {config.molecule}",
+        f"  Slabs:                {len(config.surface_clusters)}  ({', '.join(config.surface_clusters)})",
+        f"  BE electronic LOT:    {config.be_electronic_lot.display}",
+        f"  BE dispersion:        {config.be_dispersion}",
+        f"  PBC (slab SPs):       {config.pbc}",
+        f"  Cell (slab SPs):      {cell_source}",
+        f"  Compute tag:          {config.be_tag}",
+        separator,
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def _build_be_specs(
@@ -100,23 +129,6 @@ def _resolve_cell(config: BeCompPeriodicConfig, surface_extras) -> list:
     return extras_cell
 
 
-def _log_config_summary(config: BeCompPeriodicConfig, logger):
-    lines = [
-        "\n" + "=" * 80,
-        "  BEEP be_comp_periodic — configuration",
-        "=" * 80,
-        f"  Adsorbate:            {config.molecule}",
-        f"  Slabs:                {len(config.surface_clusters)}  ({', '.join(config.surface_clusters)})",
-        f"  BE electronic LOT:    {config.be_electronic_lot.display}",
-        f"  BE dispersion:        {config.be_dispersion}",
-        f"  PBC (slab SPs):       {config.pbc}",
-        f"  Cell (slab SPs):      {'per-slab extras' if config.cell is None else 'config-level'}",
-        f"  Compute tag:          {config.be_tag}",
-        "=" * 80 + "\n",
-    ]
-    logger.info("\n".join(lines))
-
-
 def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
 
@@ -133,7 +145,8 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
 
     (res_folder / f"be_comp_periodic_{smol_name}.json").write_text(safe_config_dump(config))
 
-    _log_config_summary(config, logger)
+    logger.info(welcome_msg)
+    logger.info(config_summary_msg(config))
 
     elec_lot = config.be_electronic_lot
 

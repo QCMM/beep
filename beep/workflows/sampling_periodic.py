@@ -19,6 +19,7 @@ from qcportal import PortalClient as FractalClient
 
 from ..models.sampling_periodic import SamplingPeriodicConfig
 from ..models.base import safe_config_dump
+from ..core.logging_utils import beep_banner
 from ..adapters import qcfractal_adapter as qcf
 from ..core.periodic_sampler import (
     ANG2BOHR,
@@ -29,8 +30,45 @@ from ..core.periodic_sampler import (
 )
 from ..core.sampling import filter_binding_sites
 
-bcheck = "✓"
+bcheck = "✔"
 POLL_FREQUENCY_SEC = 120
+
+
+welcome_msg = beep_banner(
+    "Periodic Set-of-clusters Sampling",
+    quote="Everywhere is here.",
+    quote_author="Buckminster Fuller",
+    tagline="Cover the periodic footprint, one grid node at a time.",
+    authors="Stefan Vogt-Geisse and Giulia M. Bovolenta",
+)
+
+
+def config_summary_msg(config: SamplingPeriodicConfig) -> str:
+    """Format a clean summary of the periodic sampling configuration."""
+    separator = "-" * 88
+    lot = config.sampling_level_of_theory
+    freeze_desc = (
+        f"below z={config.freeze_below_z_ang} A" if config.freeze_below_z_ang is not None
+        else (f"{len(config.freeze_atoms)} atoms (explicit)" if config.freeze_atoms else "none")
+    )
+    lines = [
+        "",
+        separator,
+        f"  Adsorbate:            {config.molecule}",
+        f"  Surface collection:   {config.surface_collection}",
+        f"  Level of theory:      {lot.display}",
+        f"  PBC:                  {config.pbc}",
+        f"  Step size:            {config.step_size_ang} A  (noise ±{config.grid_noise_frac*config.step_size_ang:.2f} A)",
+        f"  Sampling distance:    {config.sampling_distance_ang} A",
+        f"  Sanity min distance:  {config.sanity_min_distance_ang} A  (max {config.sanity_max_iter} attempts)",
+        f"  Cavity z-scan:        step {config.cavity_z_scan_step_ang} A, window ±{config.cavity_z_scan_window_ang} A",
+        f"  RMSD threshold:       {config.rmsd_value} A",
+        f"  Freeze:               {freeze_desc}",
+        f"  Random seed:          {config.random_seed}",
+        separator,
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def _resolve_cell(config: SamplingPeriodicConfig, surface) -> list:
@@ -93,28 +131,6 @@ def _build_sampling_spec(
     return spec
 
 
-def _log_config_summary(config: SamplingPeriodicConfig, logger):
-    lines = [
-        "\n" + "=" * 80,
-        "  BEEP sampling_periodic — configuration",
-        "=" * 80,
-        f"  Adsorbate:          {config.molecule}",
-        f"  Surface collection: {config.surface_collection}",
-        f"  Level of theory:    {config.sampling_level_of_theory.display}",
-        f"  PBC:                {config.pbc}",
-        f"  Step size:          {config.step_size_ang} A  (noise ±{config.grid_noise_frac*config.step_size_ang:.2f} A)",
-        f"  Sampling distance:  {config.sampling_distance_ang} A",
-        f"  Sanity min dist:    {config.sanity_min_distance_ang} A  (max {config.sanity_max_iter} attempts)",
-        f"  Cavity z-scan:      step {config.cavity_z_scan_step_ang} A, window ±{config.cavity_z_scan_window_ang} A",
-        f"  RMSD threshold:     {config.rmsd_value} A",
-        f"  Freeze below z:     {config.freeze_below_z_ang} A" if config.freeze_below_z_ang else "  Freeze below z:     -",
-        f"  Freeze atoms:       {len(config.freeze_atoms)} atoms" if config.freeze_atoms else "  Freeze atoms:       -",
-        f"  Random seed:        {config.random_seed}",
-        "=" * 80 + "\n",
-    ]
-    logger.info("\n".join(lines))
-
-
 def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
 
@@ -135,7 +151,8 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
     # Copy input config for reproducibility
     (res_folder / f"sampling_periodic_{smol_name}.json").write_text(safe_config_dump(config))
 
-    _log_config_summary(config, logger)
+    logger.info(welcome_msg)
+    logger.info(config_summary_msg(config))
 
     lot = config.sampling_level_of_theory
 
