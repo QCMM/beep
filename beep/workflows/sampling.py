@@ -100,7 +100,7 @@ def run_sampling(
     """
     Run the full sampling loop: generate structures, optimize, filter by RMSD.
     """
-    from ..core.sampling import generate_shell_list, filter_binding_sites
+    from ..core.sampling import filter_binding_sites
     from ..core.molecule_sampler import random_molecule_sampler as mol_sample
 
     FREQUENCY = 120
@@ -108,10 +108,22 @@ def run_sampling(
     binding_site_num = 0
     n_smpl_mol = 0
 
-    max_structures = int(
-        max(3, (len(cluster.symbols) / ATOMS_PER_CLUSTER_MOL) // 3)
+    shell_list = [sampling_shell]  # adaptive: one conformal pass; the level sets density
+
+    # Candidate count is driven by the sampling level: a fraction of the accessible
+    # surface anchors times orientations per anchor (see SAMPLING_LEVELS). This
+    # replaces the old n_water//3 heuristic, which badly undersampled large clusters
+    # (W200: 66 vs ~371 real anchors), and the multi-shell height passes (now
+    # redundant -- adsorption height is sampled per anchor in one pass).
+    from ..core.molecule_sampler import adaptive_shift_vectors, SAMPLING_LEVELS
+    frac, n_orient, _jit = SAMPLING_LEVELS.get(
+        sampling_condition, SAMPLING_LEVELS["normal"]
     )
-    shell_list = generate_shell_list(sampling_shell, sampling_condition)
+    try:
+        n_anchors = len(adaptive_shift_vectors(cluster, target_mol, sampling_shell))
+        max_structures = max(3, int(-(-(frac * n_anchors) // 1)) * n_orient)  # ceil * orient
+    except Exception:  # degenerate/mocked geometry -> fall back to the size heuristic
+        max_structures = int(max(3, (len(cluster.symbols) / ATOMS_PER_CLUSTER_MOL) // 3))
 
     logger.info(
         f"Entering the sampling procedure, will generate a total of "
@@ -199,6 +211,7 @@ def run_sampling(
                 sampling_shell=shell,
                 max_structures=max_structures,
                 debug=True,
+                condition=sampling_condition,
             )
 
             logger.info(

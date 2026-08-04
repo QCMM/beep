@@ -183,12 +183,165 @@ def create_debug_molecule(cluster: Molecule, sampled_mol: list[Molecule]) -> Mol
     )
 
 
+# --- composition-agnostic surface-anchored placement (adaptive sampler) --------
+# Defines "surface" and "contact" purely from per-element vdW radii + geometry,
+# so water, CO2, methanol and mixed ices all work with the same code. Anchoring
+# on accessible surface atoms (instead of a global sphere at the average radius)
+# gives uniform, curvature-unbiased coverage that also reaches into concavities.
+
+def _vdw_radii_bohr(symbols: list) -> np.ndarray:
+    """Per-element MANTINA2009 vdW radii in bohr (no element assumptions)."""
+    vr = qcel.VanderWaalsRadii("MANTINA2009")
+    return np.array([float(vr.vdwr[s.capitalize()].data) * angst2bohr for s in symbols])
+
+
+def surface_distance_to_cluster(
+    point: np.ndarray, geom: np.ndarray, vdw: np.ndarray
+) -> Tuple[int, float]:
+    """(nearest_atom_index, distance from ``point`` to the cluster vdW surface).
+
+    Composition-agnostic: min over atoms of |point - atom| - vdw(atom). Negative
+    means ``point`` is inside an atom's vdW sphere.
+    """
+    d = np.linalg.norm(geom - point, axis=1) - vdw
+    j = int(np.argmin(d))
+    return j, float(d[j])
+
+
+def local_outward_normal(i: int, geom: np.ndarray, cutoff: float) -> np.ndarray:
+    """Unit vector away from atom ``i``'s neighbours (points out of a pocket).
+
+    Falls back to the COM-radial direction for a symmetric neighbourhood, which
+    is what keeps small / near-convex clusters well behaved without special-casing.
+    """
+    d = np.linalg.norm(geom - geom[i], axis=1)
+    nbrs = (d > 1e-3) & (d < cutoff)
+    n = (geom[i] - geom[nbrs].mean(0)) if nbrs.any() else (geom[i] - geom.mean(0))
+    nn = np.linalg.norm(n)
+    if nn < 1e-6:                                   # symmetric -> COM fallback
+        n = geom[i] - geom.mean(0)
+        nn = np.linalg.norm(n)
+    return n / nn if nn > 0 else np.array([0.0, 0.0, 1.0])
+
+
+def _farthest_point_indices(pts: np.ndarray, k: int) -> list:
+    """Indices of k well-spread points (greedy farthest-point) for even coverage."""
+    keep = [0]
+    d = np.linalg.norm(pts - pts[0], axis=1)
+    while len(keep) < k:
+        j = int(np.argmax(d))
+        keep.append(j)
+        d = np.minimum(d, np.linalg.norm(pts - pts[j], axis=1))
+    return keep
+
+
+# sampling_condition -> (anchor_fraction, orientations_per_anchor, jitter_Angstrom).
+# The adaptive scheme retires the old shell-count meaning: thoroughness now scales
+# surface coverage, then approach-angle, then off-atom (hollow/bridge) positional
+# noise -- each tier adds a genuinely distinct search dimension instead of redundant
+# height passes.
+SAMPLING_LEVELS = {
+    "sparse":    (1.0 / 6.0, 1, 0.0),
+    "normal":    (0.5,       1, 0.0),
+    "fine":      (1.0,       1, 0.0),
+    "hyperfine": (1.0,       2, 1.0),
+}
+
+
+def _tangent_basis(n: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Two orthonormal vectors spanning the plane perpendicular to unit vector ``n``."""
+    a = np.array([1.0, 0.0, 0.0]) if abs(n[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    t1 = a - a.dot(n) * n
+    t1 /= np.linalg.norm(t1)
+    return t1, np.cross(n, t1)
+
+
+def adaptive_shift_vectors(
+    cluster: Molecule,
+    target_molecule: Molecule,
+    sampling_shell: float,
+    anchor_fraction: float = 1.0,
+    n_orient: int = 1,
+    jitter: float = 0.0,
+) -> List[np.ndarray]:
+    """Surface-anchored, cavity-aware, composition-agnostic adsorbate-COM positions.
+
+    For every accessible surface atom, march outward along its local normal to the
+    point that sits at the target gap from the vdW surface (band thickness set by
+    ``sampling_shell`` in Angstrom). Buried atoms yield no placement, so accessibility
+    is automatic; coverage is uniform per surface atom (no protrusion bias) and
+    descends into pockets.
+
+    Thoroughness knobs (driven by ``sampling_condition`` via :data:`SAMPLING_LEVELS`):
+      * ``anchor_fraction`` -- fraction of accessible anchors kept (farthest-point,
+        so a subset is still well spread over the whole surface);
+      * ``n_orient`` -- placements per kept anchor (each gets a fresh random
+        orientation in ``random_molecule_sampler``);
+      * ``jitter`` -- tangential displacement (Angstrom) applied per placement, which
+        moves candidates off the atop position into the hollow/bridge sites between
+        surface atoms.
+
+    Returns a list of shift vectors (bohr); empty if nothing is accessible (the
+    caller may fall back to the sphere sampler).
+    """
+    geom = np.asarray(cluster.geometry, dtype=float)          # bohr, centered
+    vdw = _vdw_radii_bohr(list(cluster.symbols))
+    shell_b = sampling_shell * angst2bohr
+    cutoff = 3.5 * angst2bohr
+    base_gap = 0.5 * calculate_diameter(target_molecule.geometry) + 1.2 * angst2bohr
+    window = 0.4 * angst2bohr
+    step = 0.15 * angst2bohr
+
+    pos, nrm_list = [], []
+    for i in range(len(geom)):
+        nrm = local_outward_normal(i, geom, cutoff)
+        target = base_gap + np.random.uniform(0.0, shell_b)   # band above local surface
+        r = vdw[i] + 0.3 * angst2bohr
+        r_max = vdw[i] + target + 3.0 * angst2bohr
+        best, best_err = None, np.inf
+        while r < r_max:
+            _, sd = surface_distance_to_cluster(geom[i] + r * nrm, geom, vdw)
+            err = abs(sd - target)
+            if err <= window and err < best_err:
+                best_err, best = err, geom[i] + r * nrm
+            r += step
+        if best is not None:
+            pos.append(best)
+            nrm_list.append(nrm)
+
+    if not pos:
+        return []
+    pos = np.asarray(pos)
+    nrm_list = np.asarray(nrm_list)
+
+    # keep the requested coverage fraction, well spread over the surface
+    k = max(3, int(np.ceil(anchor_fraction * len(pos))))
+    if k < len(pos):
+        idx = _farthest_point_indices(pos, k)
+        pos, nrm_list = pos[idx], nrm_list[idx]
+
+    # expand by orientation count, with tangential jitter into hollows/bridges
+    jitter_b = jitter * angst2bohr
+    out = []
+    for p, n in zip(pos, nrm_list):
+        t1, t2 = _tangent_basis(n)
+        for _ in range(max(1, int(n_orient))):
+            if jitter_b > 0.0:
+                a, b = np.random.uniform(-jitter_b, jitter_b, 2)
+                out.append(p + a * t1 + b * t2)
+            else:
+                out.append(p.copy())
+    return out
+
+
 def random_molecule_sampler(
     cluster: Molecule,
     target_molecule: Molecule,
     sampling_shell: float,
     max_structures: int,
     debug: bool = False,
+    method: str = "adaptive",
+    condition: str = "normal",
 ) -> Tuple[List[Molecule], Molecule]:
     """
     Sample random molecule placements around a given molecular cluster.
@@ -241,7 +394,33 @@ def random_molecule_sampler(
     logger.debug(f"Maximum number of structures to be sampled: {max_structures }")
     fill_num = len(str(max_structures))
 
-    while c < max_structures:
+    # Adaptive (surface-anchored, composition-agnostic, cavity-aware) placement.
+    # Reverts to the spherical sampler below if no accessible anchors are found.
+    if method == "adaptive":
+        frac, n_orient, jitter = SAMPLING_LEVELS.get(condition, SAMPLING_LEVELS["normal"])
+        shift_list = adaptive_shift_vectors(
+            cluster, target_molecule, sampling_shell, frac, n_orient, jitter
+        )[:max_structures]
+        if not shift_list:
+            logger.warning(
+                "Adaptive sampler found no accessible surface anchors; "
+                "falling back to spherical sampling."
+            )
+            method = "sphere"
+        else:
+            for shift_vect in shift_list:
+                mol_shift = target_molecule.scramble(
+                    do_shift=shift_vect, do_rotate=True, do_resort=False, deflection=1.0
+                )[0]
+                # No inter-candidate spacing filter: anchors are already well spread,
+                # and multiple orientations / jittered positions per anchor are
+                # intentional (they would otherwise be rejected as "too close").
+                if not surface_distance_check(cluster, mol_shift, surface_closness_cutoff):
+                    continue
+                sampled_mol.append(mol_shift)
+                cluster_with_sampled_mol.append(create_molecule(cluster, mol_shift))
+
+    while method != "adaptive" and c < max_structures:
         attempts += 1
         if attempts == total_attempts:
             break

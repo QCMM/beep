@@ -108,6 +108,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   {"coordsys": "cart"}` in the config now switches to Cartesian
   coordinates without a source edit.
 
+### Changed
+
+- **Adaptive surface-anchored binding-site sampler** (now the default;
+  `method="sphere"` kept as a fallback). Replaces the spherical-shell scheme,
+  which placed candidates on a single averaged-radius sphere and so floated over
+  concavities and undersampled large clusters. The new sampler is
+  composition-agnostic (per-element vdW radii only — water, CO2, methanol and
+  mixed ices work with no O/H-bond assumptions), anchors candidates on the
+  accessible surface atoms so coverage is curvature-unbiased and descends into
+  pockets, and runs unchanged from a water trimer to W200. `sampling_condition`
+  now sets thoroughness as coverage → orientations → off-atom jitter
+  (`sparse` = 1/6 of anchors, `normal` = 1/2, `fine` = all, `hyperfine` = all +
+  2 orientations + ~1 Å lateral jitter into hollow/bridge sites) instead of the
+  redundant multi-shell height passes, and `max_structures` scales with the
+  accessible-anchor count rather than the old `n_water//3` (W200: ~371 vs 66).
+
 ## [0.15.0] — 2026-07-11
 
 ### Added
