@@ -600,7 +600,7 @@ def run_nm_sampling(
                 "\n  ABORT: imaginary frequencies detected at the equilibrium "
                 "geometry — the system is a saddle, not a minimum:\n  "
                 + "\n  ".join(msg_lines)
-                + f"\n  Open {molden_dir}/<system>.molden to see which "
+                + f"\n  Open {res_folder}/normal_modes_<system>.molden to see which "
                 "modes are imaginary."
                 + "\n  Re-optimise the geometry before nm_sampling, or set "
                 "allow_imaginary_modes=true to override.\n"
@@ -621,7 +621,7 @@ def run_nm_sampling(
             padding_char=gear,
         )
         logger.info(
-            f"\n  Inspect the modes in {molden_dir}/ before re-running with "
+            f"\n  Inspect the modes in {res_folder}/ before re-running with "
             "pre_run=false.\n"
         )
         return mode_data, {}
