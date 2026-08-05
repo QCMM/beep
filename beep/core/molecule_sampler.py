@@ -235,6 +235,17 @@ def _farthest_point_indices(pts: np.ndarray, k: int) -> list:
     return keep
 
 
+def _dedup_by_score(pts: np.ndarray, score: np.ndarray, min_sep: float) -> list:
+    """Greedy dedup: keep highest-score points first, drop any within ``min_sep`` of a
+    kept one. Thins the overlapping fan placements toward the best-coordinated sites."""
+    order = np.argsort(-score)
+    kept = []
+    for j in order:
+        if all(np.linalg.norm(pts[j] - pts[k]) > min_sep for k in kept):
+            kept.append(int(j))
+    return kept
+
+
 # sampling_condition -> (anchor_fraction, orientations_per_anchor, jitter_Angstrom).
 # The adaptive scheme retires the old shell-count meaning: thoroughness now scales
 # surface coverage, then approach-angle, then off-atom (hollow/bridge) positional
@@ -266,11 +277,13 @@ def adaptive_shift_vectors(
 ) -> List[np.ndarray]:
     """Surface-anchored, cavity-aware, composition-agnostic adsorbate-COM positions.
 
-    For every accessible surface atom, march outward along its local normal to the
-    point that sits at the target gap from the vdW surface (band thickness set by
-    ``sampling_shell`` in Angstrom). Buried atoms yield no placement, so accessibility
-    is automatic; coverage is uniform per surface atom (no protrusion bias) and
-    descends into pockets.
+    For every accessible surface atom, probe a fan of directions (its local normal
+    plus four tilts) and march each to vdW CONTACT with the surface -- the adsorbate is
+    seated where it actually binds (nearest-atom ~ contact distance), never floated a
+    fixed gap above it. Candidates are then ranked by coordination so the multi-atom
+    hollow/bridge sites the sphere sampler misses are kept preferentially. Buried atoms
+    yield no placement, so accessibility is automatic; ``sampling_shell`` adds only a
+    small outward radial spread.
 
     Thoroughness knobs (driven by ``sampling_condition`` via :data:`SAMPLING_LEVELS`):
       * ``anchor_fraction`` -- fraction of accessible anchors kept (farthest-point,
@@ -288,37 +301,65 @@ def adaptive_shift_vectors(
     vdw = _vdw_radii_bohr(list(cluster.symbols))
     shell_b = sampling_shell * angst2bohr
     cutoff = 3.5 * angst2bohr
-    base_gap = 0.5 * calculate_diameter(target_molecule.geometry) + 1.2 * angst2bohr
+    # Contact gap from the nearest vdW surface: a generic adsorbate contact radius
+    # (carbon-like) minus a small overlap, so the adsorbate vdW shell just touches the
+    # surface. The adsorbate composition does not enter the geometry.
+    contact = (1.70 - 0.25) * angst2bohr
     window = 0.4 * angst2bohr
     step = 0.15 * angst2bohr
+    tilt = np.radians(30.0)
 
-    pos, nrm_list = [], []
+    pos, nrm_list, coord = [], [], []
     for i in range(len(geom)):
         nrm = local_outward_normal(i, geom, cutoff)
-        target = base_gap + np.random.uniform(0.0, shell_b)   # band above local surface
-        r = vdw[i] + 0.3 * angst2bohr
-        r_max = vdw[i] + target + 3.0 * angst2bohr
-        best, best_err = None, np.inf
-        while r < r_max:
-            _, sd = surface_distance_to_cluster(geom[i] + r * nrm, geom, vdw)
-            err = abs(sd - target)
-            if err <= window and err < best_err:
-                best_err, best = err, geom[i] + r * nrm
-            r += step
-        if best is not None:
-            pos.append(best)
-            nrm_list.append(nrm)
+        t1, t2 = _tangent_basis(nrm)
+        # fan: straight out + four tilted approaches, so a placement can tuck into the
+        # hollow/bridge between adjacent surface atoms instead of only sitting atop one.
+        dirs = [nrm]
+        for t in (t1, -t1, t2, -t2):
+            u = np.cos(tilt) * nrm + np.sin(tilt) * t
+            dirs.append(u / np.linalg.norm(u))
+        target = contact + np.random.uniform(0.0, 0.5 * shell_b)   # small outward-only spread
+        for u in dirs:
+            r = vdw[i] + 0.3 * angst2bohr
+            r_max = vdw[i] + target + 3.0 * angst2bohr
+            best, best_err = None, np.inf
+            while r < r_max:
+                _, sd = surface_distance_to_cluster(geom[i] + r * u, geom, vdw)
+                err = abs(sd - target)
+                if err <= window and err < best_err:
+                    best_err, best = err, geom[i] + r * u
+                r += step
+            if best is not None:
+                c = int((np.linalg.norm(geom - best, axis=1) < cutoff).sum())
+                pos.append(best)
+                nrm_list.append(nrm)
+                coord.append(c)
 
     if not pos:
         return []
     pos = np.asarray(pos)
     nrm_list = np.asarray(nrm_list)
+    coord = np.asarray(coord, dtype=float)
 
-    # keep the requested coverage fraction, well spread over the surface
+    # the fan overlaps between neighbouring atoms -> drop near-duplicate placements,
+    # keeping the better-coordinated one of any close pair.
+    keep = _dedup_by_score(pos, coord, 1.0 * angst2bohr)
+    pos, nrm_list, coord = pos[keep], nrm_list[keep], coord[keep]
+
+    # keep the requested coverage fraction: the best-coordinated half (hollow/bridge
+    # sites the sphere sampler misses), then spread the rest over the surface evenly.
     k = max(3, int(np.ceil(anchor_fraction * len(pos))))
     if k < len(pos):
-        idx = _farthest_point_indices(pos, k)
-        pos, nrm_list = pos[idx], nrm_list[idx]
+        order = np.argsort(-coord)
+        n_strong = k // 2
+        rest = order[n_strong:]
+        if len(rest) and k - n_strong > 0:
+            spread = _farthest_point_indices(pos[rest], min(k - n_strong, len(rest)))
+            sel = np.concatenate([order[:n_strong], rest[spread]])
+        else:
+            sel = order[:k]
+        pos, nrm_list = pos[sel], nrm_list[sel]
 
     # expand by orientation count, with tangential jitter into hollows/bridges
     jitter_b = jitter * angst2bohr

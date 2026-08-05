@@ -236,3 +236,27 @@ def test_adaptive_hyperfine_jitter_overlap_free():
     assert len(mols) > 0
     for m in mols:
         assert _min_cross_dist_ang(m, len(cl.symbols)) > 1.0
+
+
+def _placement_metrics(mols, n_cluster):
+    """(mean nearest-atom distance, mean coordination) of the adsorbate over a set."""
+    near, coord = [], []
+    for m in mols:
+        g = np.asarray(m.geometry) * _B2A
+        clu, p = g[:n_cluster], g[n_cluster:].mean(0)
+        d = np.linalg.norm(clu - p, axis=1)
+        near.append(d.min())
+        coord.append(int((d < 3.5).sum()))
+    return float(np.mean(near)), float(np.mean(coord))
+
+def test_adaptive_seats_at_contact_not_floating():
+    """Regression guard for the floating-placement bug: adaptive must seat the adsorbate
+    at vdW contact (nearest-atom ~3.2 A) with real neighbours, never a fixed gap above
+    the surface. The pre-fix code placed candidates ~4 A out with ~0.4 mean coordination
+    (many with zero neighbours), which produced weak, poorly sampled binding sites."""
+    cl = Molecule.from_file(str(DATA_DIR / "w22_01.xyz"))
+    ads = Molecule.from_file(str(DATA_DIR / "sm_h2.xyz"))
+    mols, _ = random_molecule_sampler(cl, ads, 2.0, 200, method="adaptive")
+    near, coord = _placement_metrics(mols, len(cl.symbols))
+    assert near < 3.7        # contact-seated, not floating (bug gave ~4.0-4.2 A)
+    assert coord >= 1.5      # real neighbours present (bug gave < 0.6)

@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   evaluated, guaranteeing a per-site reference is always available for the
   downstream difference. Assembly of the per-site BE = E(complex) −
   E(bare_site) − E(adsorbate_gas), plus per-adsorbate ZPVE correction,
-  happens in the (not-yet-written) `be_assemble_periodic` workflow. Config
+  happens in the paired `be_assemble_periodic` workflow. Config
   requires an MLP `be_electronic_lot` and a dispersion string
   (`mpwb1k-d4`, `b3lyp-d3bj`, etc.) — the dispersion program is inferred
   from the suffix by the existing `_split_dispersion` helper. New adapter
@@ -129,9 +129,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   which placed candidates on a single averaged-radius sphere and so floated over
   concavities and undersampled large clusters. The new sampler is
   composition-agnostic (per-element vdW radii only — water, CO2, methanol and
-  mixed ices work with no O/H-bond assumptions), anchors candidates on the
-  accessible surface atoms so coverage is curvature-unbiased and descends into
-  pockets, and runs unchanged from a water trimer to W200. `sampling_condition`
+  mixed ices work with no O/H-bond assumptions), probes a fan of directions per
+  accessible surface atom and seats each candidate at vdW *contact* with the
+  surface (nearest-atom ≈ contact distance) rather than floating it a fixed gap
+  above, then ranks placements by coordination so multi-atom hollow/bridge sites
+  are kept preferentially over single-atom caps — coverage is curvature-unbiased
+  and reaches into pockets, and it runs unchanged from a water trimer to W200.
+  `sampling_condition`
   now sets thoroughness as coverage → orientations → off-atom jitter
   (`sparse` = 1/6 of anchors, `normal` = 1/2, `fine` = all, `hyperfine` = all +
   2 orientations + ~1 Å lateral jitter into hollow/bridge sites) instead of the
