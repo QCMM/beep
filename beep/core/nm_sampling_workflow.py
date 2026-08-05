@@ -361,16 +361,24 @@ def submit_nm_singlepoints(
 # ---------------------------------------------------------------------------
 
 def wait_for_nm_completion(
-    sp_dsets: dict, all_spec_names: List[str], wait_interval: int,
-    logger: logging.Logger,
+    client, sp_dsets: dict, all_spec_names: List[str], wait_interval: int,
+    logger: logging.Logger, max_resets: int = 2,
 ):
     """Poll until every (system × entry × spec) record is terminal.
 
     ``all_spec_names`` should include both the DFT functionals and the
     reference spec name (all lowercase).
+
+    Errored leaf records are auto-reset up to ``max_resets`` times each to
+    recover transient infrastructure failures (e.g. ManagerLost / worker
+    walltime on clusters like Aire), which would otherwise drop a whole
+    functional from the report. Genuine failures (e.g. SCF non-convergence)
+    exhaust their retries and are left in ERROR, so the loop still terminates.
     """
+    reset_counts: dict = {}                      # record_id -> times reset
     while True:
         complete = incomplete = error = 0
+        to_reset: List[int] = []
         for ds_sp in sp_dsets.values():
             for entry_name in ds_sp.entry_names:
                 for spec_key in all_spec_names:
@@ -382,7 +390,34 @@ def wait_for_nm_completion(
                     elif is_incomplete(record.status):
                         incomplete += 1
                     elif is_error(record.status):
-                        error += 1
+                        if reset_counts.get(record.id, 0) < max_resets:
+                            to_reset.append(record.id)
+                        else:
+                            error += 1              # retries exhausted -> give up
+        # Recover transient failures before deciding we are done.
+        if to_reset:
+            # A single record can appear via more than one (entry, spec) if two
+            # spec definitions hash identically; dedupe so the retry budget
+            # isn't burned twice in one cycle.
+            to_reset = list(set(to_reset))
+            logger.info(
+                f"  NM SP: auto-resetting {len(to_reset)} errored record(s) "
+                f"(transient-failure recovery, <= {max_resets}x each)..."
+            )
+            try:
+                client.reset_records(to_reset)
+            except Exception as e:
+                logger.warning(
+                    f"  NM SP: reset failed ({e}); will retry next cycle."
+                )
+            else:
+                # Count the attempt only on a successful reset — a failed call
+                # would silently spend the retry budget without ever kicking
+                # the server, defeating the transient-failure recovery.
+                for rid in to_reset:
+                    reset_counts[rid] = reset_counts.get(rid, 0) + 1
+            time.sleep(wait_interval)
+            continue
         if incomplete == 0:
             logger.info(
                 f"  NM SP: Complete: {complete}, Error: {error} {bcheck}"
@@ -663,7 +698,7 @@ def run_nm_sampling(
     # 7. Wait
     logger.info("\nWaiting for NM gradient SPs to complete…")
     wait_for_nm_completion(
-        sp_dsets, all_spec_names, wait_interval=200, logger=logger,
+        client, sp_dsets, all_spec_names, wait_interval=200, logger=logger,
     )
 
     # 8. Compute metrics

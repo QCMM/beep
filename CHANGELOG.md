@@ -142,6 +142,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   redundant multi-shell height passes, and `max_structures` scales with the
   accessible-anchor count rather than the old `n_water//3` (W200: ~371 vs 66).
 
+### Fixed
+
+- **`nm_sampling`: `NameError` on the imaginary-mode abort path** — the abort
+  and pre-run messages referenced an undefined `molden_dir`; they now point to
+  `res_folder/normal_modes_<system>.molden` (where the molden files are
+  actually written), so an equilibrium geometry with imaginary frequencies
+  aborts with a useful message instead of crashing.
+
+- **`nm_sampling`: transient gradient failures no longer drop a functional
+  from the report** — `wait_for_nm_completion` now auto-resets errored leaf
+  records up to `max_resets` (default 2) times each before finishing, so
+  transient infrastructure failures (ManagerLost / worker walltime, common on
+  clusters like Aire) recover and the affected functional is kept. Genuine
+  failures (e.g. SCF non-convergence) exhaust their retries and are left in
+  ERROR, so the poll still terminates.
+
 ## [0.15.0] — 2026-07-11
 
 ### Added
