@@ -260,6 +260,12 @@ def build_displaced_molecules(
             f"  {struct_name}: {len(picks)} mode picks → "
             f"{len(entries)} displaced structures"
         )
+        logger.info(f"    {'#':>3}  {'band':<14}  {'ν (cm⁻¹)':>10}  {'A (Å)':>7}")
+        for mode_idx, amp_A, band in picks:
+            freq = float(np.real(freqs[mode_idx]))
+            logger.info(
+                f"    {mode_idx:>3d}  {band:<14}  {freq:>10.2f}  {amp_A:>7.3f}"
+            )
         out[struct_name] = entries
     return out
 
