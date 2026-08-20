@@ -15,7 +15,7 @@ Hessian record off the server and unpacking it into the array shape used here.
 """
 import json
 from pathlib import Path
-from typing import Dict, List, Literal, Tuple
+from typing import Dict, List, Literal, Sequence, Tuple
 
 import numpy as np
 
@@ -120,7 +120,7 @@ def classify_mode(
     mode_cart: np.ndarray,
     masses: np.ndarray,
     positions: np.ndarray,
-    n_adsorbate_atoms: int,
+    fragment_atom_indices: Sequence[Sequence[int]],
     frequency_cm: float,
     inter_threshold: float = 0.5,
     bend_max_cm: float = 1500.0,
@@ -131,10 +131,10 @@ def classify_mode(
 
       1. Compute ``f_inter`` — the fraction of the mode's kinetic energy
          carried by **rigid-body motion of each fragment** (translation
-         of the fragment COM plus rotation about that COM). If
-         ``f_inter > inter_threshold`` the mode is labelled
-         *intermolecular* — it primarily moves the adsorbate against the
-         cluster, whether by translation or by libration.
+         of the fragment COM plus rotation about that COM), summed over
+         every fragment. If ``f_inter > inter_threshold`` the mode is
+         labelled *intermolecular* — it primarily moves whole fragments
+         against one another, whether by translation or by libration.
 
       2. Otherwise the mode is intramolecular; split by frequency:
          ``frequency_cm < bend_max_cm`` → *bending*, else *stretching*.
@@ -149,9 +149,11 @@ def classify_mode(
     the complex. A COM-displacement-only ratio misses librations and
     labels them as internal bends.
 
-    Fragment convention: the **last** ``n_adsorbate_atoms`` rows are the
-    adsorbate, the rest are the cluster — same convention BEEP uses
-    everywhere else (see ``reference_beep_last_molecule_adsorbate``).
+    Generalises transparently from adsorbate+cluster (N=2) to arbitrary
+    N-mer systems: pass one atom-index list per fragment and the
+    per-fragment rigid-body kinetic contributions are summed. Disjoint
+    fragments have orthogonal rigid-body subspaces, so the sum is
+    well-defined and bounded above by 1.
 
     Parameters
     ----------
@@ -164,8 +166,11 @@ def classify_mode(
         Equilibrium atomic positions, same Cartesian frame as
         ``mode_cart``. Used to compute angular momenta + inertia
         tensors about each fragment COM. Units cancel in the ratio.
-    n_adsorbate_atoms : int
-        Number of trailing atoms that constitute the adsorbate.
+    fragment_atom_indices : list of list-of-int
+        One 0-indexed atom-index list per fragment (matches
+        ``qcel.Molecule.fragments`` shape). Every atom must appear in
+        exactly one fragment. A single fragment covering the whole
+        system reduces f_inter to 0 and lets the frequency cut decide.
     frequency_cm : float
         Mode frequency (real part if complex) in cm⁻¹.
     inter_threshold : float, default 0.5
@@ -173,21 +178,21 @@ def classify_mode(
     bend_max_cm : float, default 1500.0
         Intramolecular cutoff between bending and stretching.
     """
-    n_atoms = mode_cart.shape[0]
-    if n_adsorbate_atoms <= 0 or n_adsorbate_atoms >= n_atoms:
-        # Degenerate fragmenting (whole system or empty) — call everything
-        # intramolecular and let the frequency cut decide.
+    n_frags = len(fragment_atom_indices) if fragment_atom_indices else 0
+    if n_frags <= 1:
+        # Degenerate fragmenting (whole system as one fragment or empty) —
+        # rigid-body motion is a null operation on the whole system's
+        # vibrational subspace, so f_inter is 0 and the frequency cut decides.
         f_inter = 0.0
     else:
-        n_cluster = n_atoms - n_adsorbate_atoms
-        k_rigid = (
-            _fragment_rigid_kinetic(
-                positions[:n_cluster], masses[:n_cluster], mode_cart[:n_cluster],
+        k_rigid = 0.0
+        for frag_idx in fragment_atom_indices:
+            idx = np.asarray(frag_idx, dtype=int)
+            if idx.size == 0:
+                continue
+            k_rigid += _fragment_rigid_kinetic(
+                positions[idx], masses[idx], mode_cart[idx],
             )
-            + _fragment_rigid_kinetic(
-                positions[n_cluster:], masses[n_cluster:], mode_cart[n_cluster:],
-            )
-        )
         k_total = float(np.einsum("a,ai,ai->", masses, mode_cart, mode_cart))
         f_inter = k_rigid / k_total if k_total > 0.0 else 0.0
 
@@ -404,15 +409,15 @@ def write_modes_json(
     frequencies_cm: np.ndarray,
     modes_cart: np.ndarray,
     classes: List[str],
-    n_adsorbate_atoms: int,
+    fragment_atom_indices: Sequence[Sequence[int]],
     level_of_theory: str = "",
 ) -> None:
     """Write a per-system normal-mode JSON.
 
-    Matches the structure of the test-case file BEEP was validated against
-    (``h2s_h2o_modes.json``): symbols, geometry in Å, the fragment
-    boundary (BEEP convention: last ``n_adsorbate_atoms`` rows are the
-    adsorbate), and a list of ``{freq_cm, disp, class}`` entries per mode.
+    Structure: symbols, geometry in Å, the N-fragment partition
+    (``fragments`` key — one 0-indexed atom-index list per fragment,
+    matching ``qcel.Molecule.fragments`` shape), and a list of
+    ``{freq_cm, disp, class}`` entries per mode.
 
     Parameters
     ----------
@@ -425,14 +430,13 @@ def write_modes_json(
     modes_cart : (n_vib, n_atoms, 3) ndarray
     classes : list of str, length n_vib
         Output of ``classify_mode`` per mode.
-    n_adsorbate_atoms : int
-        BEEP convention: last N atoms are the adsorbate.
+    fragment_atom_indices : list of list-of-int
+        Same partition used for classification.
     level_of_theory : str
         For the ``level_of_theory`` key — e.g. ``hf_def2-svp``.
     """
-    n_atoms = len(symbols)
     geom_A = (np.asarray(geometry_bohr) * _BOHR_TO_A).tolist()
-    adsorbate_index = list(range(n_atoms - n_adsorbate_atoms, n_atoms))
+    fragments_json = [list(int(i) for i in frag) for frag in fragment_atom_indices]
 
     modes = []
     for omega, disp, cls in zip(frequencies_cm, modes_cart, classes):
@@ -450,7 +454,7 @@ def write_modes_json(
         "level_of_theory": level_of_theory,
         "symbols": list(symbols),
         "geometry_A": geom_A,
-        "adsorbate_atom_index": adsorbate_index,
+        "fragments": fragments_json,
         "modes": modes,
     }
     Path(filepath).write_text(json.dumps(payload, indent=2))

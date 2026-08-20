@@ -6,22 +6,27 @@
         "password": null,
         "verify": false
     },
-    "molecule": null,
-    "benchmark_structures": [],
-    "small_molecule_collection": "Small_molecules",
-    "surface_model_collection": null,
-    "geometry_opt_lot": null,
+
+    "opt_dataset": "mix-h2o-h2s",
+    "benchmark_structures": ["h2s_3", "h2s_2_h2o_1", "h2s_1_h2o_2", "h2o_3"],
+    "fragments": [[0, 1, 2], [3, 4, 5], [6, 7, 8]],
+
+    "geometry_opt_lot": "mpwb1k-d3bj_def2-tzvpd",
+
     "hessian_lot": "hf_def2-svp",
     "hessian_program": "psi4",
     "hessian_keywords": null,
-    "tag_hessian": null,
+    "tag_hessian": "hess",
+
     "reference_grad_lot": "ccsd(t)_aug-cc-pvtz",
     "reference_grad_program": "psi4",
     "reference_grad_keywords": {"scf_type": "df", "cc_type": "df", "freeze_core": "true"},
-    "tag_reference_grad": null,
+    "tag_reference_grad": "ref-grad",
+
     "dft_program": "psi4",
     "dft_keyword": null,
-    "tag_dft_grad": null,
+    "tag_dft_grad": "dft-grad",
+
     "bands": {
         "intermolecular": {"cap": 3, "amplitude_A": 0.08},
         "bending":        {"cap": 2, "amplitude_A": 0.05},
@@ -32,6 +37,7 @@
     "freq_max_imag_cm": 50.0,
     "extra_amplitudes_lowest_count": 1,
     "extra_amplitude_factor": 2.0,
+
     "pre_run": false,
     "allow_imaginary_modes": false
 }

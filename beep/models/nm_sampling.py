@@ -1,6 +1,6 @@
 """Normal-mode displacement sampling workflow config."""
 from typing import Optional, Literal, List, Dict
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from .base import ServerConfig, lowercase_str
 
 
@@ -38,13 +38,17 @@ def _default_bands() -> Dict[str, BandSpec]:
 class NmSamplingConfig(BaseModel):
     """Configuration for the normal-mode displacement benchmark workflow.
 
-    The workflow, per binding site:
-      1. Pulls the equilibrium geometry from an `OptimizationDataset` at
+    Works on any set of optimised geometries stored in a single
+    ``OptimizationDataset`` — adsorbate-on-cluster, N-mer clusters,
+    or any partition into rigid-body fragments. Per system:
+
+      1. Pulls the equilibrium geometry from ``opt_dataset`` at
          ``geometry_opt_lot``.
       2. Computes a Hessian at ``hessian_lot`` (default ``hf_def2-svp``).
       3. Diagonalises it (via qcelemental ``vibanal``), classifies each
          normal mode as intermolecular / bending / stretching using
-         fragment-COM projection (adsorbate vs cluster).
+         fragment-COM + rotation-about-COM projection summed over the
+         fragments given by ``fragments``.
       4. Picks the lowest-frequency modes from each band up to its cap;
          the N lowest-frequency selected modes get a second amplitude.
       5. Generates ± displaced geometries at the per-band amplitude.
@@ -57,10 +61,33 @@ class NmSamplingConfig(BaseModel):
     """
     workflow: Literal["nm_sampling"] = Field(..., description="Must be 'nm_sampling'")
     server: ServerConfig = Field(default_factory=ServerConfig, description="QCFractal server connection settings")
-    molecule: str = Field(..., description="Name of the target adsorbate (e.g. 'H2', 'NH3', 'CFC')")
-    benchmark_structures: List[str] = Field(..., description="List of benchmark structure identifiers (e.g. ['H2_W1_0001'])")
-    small_molecule_collection: str = Field("Small_molecules", description="Name of the small-molecule (adsorbate) collection")
-    surface_model_collection: str = Field(..., description="Name of the surface-model (cluster) collection")
+    opt_dataset: str = Field(
+        ...,
+        description=(
+            "Name of the OptimizationDataset containing every entry in "
+            "``benchmark_structures``. Entry names are free-form labels; "
+            "no rsplit / dataset-name-in-entry-name convention required."
+        ),
+    )
+    benchmark_structures: List[str] = Field(
+        ...,
+        description=(
+            "Entry names within ``opt_dataset`` to benchmark. "
+            "All entries must have the same atom-count layout matching ``fragments``."
+        ),
+    )
+    fragments: List[List[int]] = Field(
+        ...,
+        description=(
+            "Per-fragment atom-index lists (0-indexed), matching the shape of "
+            "``qcel.Molecule.fragments``. Every atom in the equilibrium geometry "
+            "must appear in exactly one fragment. For the classic BEEP "
+            "cluster+adsorbate case (cluster first, adsorbate last) use "
+            "e.g. ``[[0,1,2,3,4,5], [6,7,8]]`` for a 6-atom cluster with a "
+            "3-atom adsorbate. Single-fragment partitions are allowed "
+            "(f_inter is forced to 0 → only the frequency cut classifies)."
+        ),
+    )
     geometry_opt_lot: str = Field(
         ...,
         description=(
@@ -176,3 +203,22 @@ class NmSamplingConfig(BaseModel):
     _lower_geom_opt = field_validator("geometry_opt_lot")(lowercase_str)
     _lower_hess_lot = field_validator("hessian_lot")(lowercase_str)
     _lower_ref_lot = field_validator("reference_grad_lot")(lowercase_str)
+
+    @model_validator(mode="after")
+    def _validate_fragments(self):
+        if not self.fragments:
+            raise ValueError("fragments must be non-empty.")
+        seen = set()
+        for i, frag in enumerate(self.fragments):
+            if not frag:
+                raise ValueError(f"fragments[{i}] is empty.")
+            for a in frag:
+                if a < 0:
+                    raise ValueError(f"fragments[{i}] contains negative atom index {a}.")
+                if a in seen:
+                    raise ValueError(
+                        f"atom index {a} appears in more than one fragment — "
+                        "fragments must be disjoint."
+                    )
+                seen.add(a)
+        return self

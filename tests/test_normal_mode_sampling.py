@@ -42,7 +42,8 @@ def test_classify_intermolecular_pure_com_translation():
     masses, positions = _ten_atom_setup(n_ads=2)
     mode = np.zeros((10, 3))
     mode[8:10, 2] = 1.0  # both adsorbate atoms move +z
-    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
+    assert classify_mode(mode, masses, positions,
+                          fragment_atom_indices=[list(range(8)), [8, 9]],
                           frequency_cm=200.0) == "intermolecular"
 
 
@@ -62,7 +63,8 @@ def test_classify_intermolecular_libration():
     mode = np.zeros((10, 3))
     mode[8, 1] = +1.0
     mode[9, 1] = -1.0
-    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
+    assert classify_mode(mode, masses, positions,
+                          fragment_atom_indices=[list(range(8)), [8, 9]],
                           frequency_cm=120.0) == "intermolecular"
 
 
@@ -76,7 +78,8 @@ def test_classify_stretching_intramolecular_bond_oscillation():
     mode = np.zeros((10, 3))
     mode[8, 0] = +1.0   # H₁ moves +x (along bond, outward)
     mode[9, 0] = -1.0   # H₂ moves −x  (outward) → no COM motion, no rotation
-    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
+    assert classify_mode(mode, masses, positions,
+                          fragment_atom_indices=[list(range(8)), [8, 9]],
                           frequency_cm=4000.0) == "stretching"
 
 
@@ -88,19 +91,21 @@ def test_classify_bending_intramolecular_low_freq():
     mode = np.zeros((10, 3))
     mode[8, 0] = +1.0
     mode[9, 0] = -1.0
-    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
+    assert classify_mode(mode, masses, positions,
+                          fragment_atom_indices=[list(range(8)), [8, 9]],
                           frequency_cm=800.0) == "bending"
 
 
-def test_classify_degenerate_n_ads_falls_back_to_freq():
-    """If n_adsorbate_atoms is 0 or full system, f_inter is zero, so
-    only frequency drives the classification."""
+def test_classify_degenerate_single_fragment_falls_back_to_freq():
+    """A single-fragment partition (the whole system as one block) forces
+    f_inter to 0 so only frequency drives the classification."""
     masses, positions = _ten_atom_setup(n_ads=2)
     mode = np.ones((10, 3))
-    # n_ads=0 → degenerate, falls through to frequency cut
-    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=0,
+    assert classify_mode(mode, masses, positions,
+                          fragment_atom_indices=[list(range(10))],
                           frequency_cm=500.0) == "bending"
-    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=0,
+    assert classify_mode(mode, masses, positions,
+                          fragment_atom_indices=[list(range(10))],
                           frequency_cm=3000.0) == "stretching"
 
 
@@ -109,8 +114,69 @@ def test_classify_zero_mode_returns_bending_low_freq():
     masses, positions = _ten_atom_setup(n_ads=2)
     mode = np.zeros((10, 3))
     # zero kinetic → f_inter forced to 0 → falls through to frequency
-    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=2,
+    assert classify_mode(mode, masses, positions,
+                          fragment_atom_indices=[list(range(8)), [8, 9]],
                           frequency_cm=100.0) == "bending"
+
+
+def test_classify_trimer_all_three_intermolecular_modes_labelled_correctly():
+    """N=3 fragments: intermolecular motion of ANY pair must classify as
+    intermolecular, not just motion involving the last fragment.
+
+    Setup: three diatomic fragments arranged in a triangle. Test each of
+    the three canonical intermolecular displacements (translate fragment
+    A only, translate fragment B only, translate fragment C only) and
+    verify all three come out intermolecular. The old 2-fragment
+    classifier would silently mislabel the "translate A only" mode
+    (leftmost fragment moving) because A is not the "adsorbate".
+    """
+    # Three diatomic fragments, well-separated
+    masses = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    positions = np.array([
+        [0.0, 0.0, 0.0], [1.0, 0.0, 0.0],   # fragment 0
+        [4.0, 0.0, 0.0], [5.0, 0.0, 0.0],   # fragment 1
+        [8.0, 0.0, 0.0], [9.0, 0.0, 0.0],   # fragment 2
+    ])
+    fragments = [[0, 1], [2, 3], [4, 5]]
+
+    for moving_frag in fragments:
+        mode = np.zeros((6, 3))
+        for a in moving_frag:
+            mode[a, 2] = 1.0                # rigid +z translation of that fragment
+        assert classify_mode(
+            mode, masses, positions,
+            fragment_atom_indices=fragments,
+            frequency_cm=180.0,
+        ) == "intermolecular", (
+            f"fragment translation of {moving_frag} misclassified"
+        )
+
+
+def test_classify_trimer_intramolecular_bond_still_classified_by_freq():
+    """Sanity check for the N=3 classifier: an intra-fragment stretch is
+    classified by frequency (bending vs stretching), same as N=2."""
+    masses = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    positions = np.array([
+        [0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+        [4.0, 0.0, 0.0], [5.0, 0.0, 0.0],
+        [8.0, 0.0, 0.0], [9.0, 0.0, 0.0],
+    ])
+    fragments = [[0, 1], [2, 3], [4, 5]]
+    # Stretch of fragment 1: atoms 2, 3 move ±x. No net translation, no
+    # rotation (v parallel to ρ w.r.t. fragment COM) → not intermolecular.
+    mode = np.zeros((6, 3))
+    mode[2, 0] = +1.0
+    mode[3, 0] = -1.0
+    assert classify_mode(
+        mode, masses, positions,
+        fragment_atom_indices=fragments,
+        frequency_cm=3500.0,
+    ) == "stretching"
+    assert classify_mode(
+        mode, masses, positions,
+        fragment_atom_indices=fragments,
+        frequency_cm=800.0,
+    ) == "bending"
 
 
 def test_classify_single_atom_adsorbate_handled():
@@ -120,7 +186,8 @@ def test_classify_single_atom_adsorbate_handled():
     mode = np.zeros((9, 3))
     mode[8, 2] = 1.0  # the lone adsorbate atom moves +z
     # Pure intermolecular translation of the monatomic adsorbate.
-    assert classify_mode(mode, masses, positions, n_adsorbate_atoms=1,
+    assert classify_mode(mode, masses, positions,
+                          fragment_atom_indices=[list(range(8)), [8]],
                           frequency_cm=80.0) == "intermolecular"
 
 
@@ -348,20 +415,20 @@ def test_write_modes_json_matches_reference_shape(tmp_path):
     out = tmp_path / "modes.json"
     write_modes_json(
         out, symbols, geom, freqs, modes,
-        classes=classes, n_adsorbate_atoms=1,
+        classes=classes, fragment_atom_indices=[[0, 1], [2]],
         level_of_theory="hf_def2-svp",
     )
     payload = json.loads(out.read_text())
-    # Keys mirror the validation file shape
+    # Keys mirror the current schema
     for k in ("level_of_theory", "symbols", "geometry_A",
-              "adsorbate_atom_index", "modes"):
+              "fragments", "modes"):
         assert k in payload
     assert payload["level_of_theory"] == "hf_def2-svp"
     assert payload["symbols"] == ["H", "O", "H"]
     # Geometry converted Bohr → Å
     assert payload["geometry_A"][0][0] == pytest.approx(-1.5 * _BOHR_TO_A)
-    # Adsorbate convention: last n atoms
-    assert payload["adsorbate_atom_index"] == [2]
+    # Fragments carried through verbatim
+    assert payload["fragments"] == [[0, 1], [2]]
     # Mode entries carry freq + disp + class + imaginary flag
     assert len(payload["modes"]) == 2
     assert payload["modes"][0]["class"] == "stretching"

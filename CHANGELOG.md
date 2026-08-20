@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — 0.16.0.dev
 
+### Changed
+
+- **`nm_sampling` generalised from 2 fragments to N (BREAKING config change).**
+  The mode classifier previously hardcoded "last `n_adsorbate_atoms` = adsorbate,
+  rest = cluster" — silently mislabelling intermolecular modes of any non-last
+  fragment as bending on N-mer systems (N>2). It now takes an explicit
+  `fragments: List[List[int]]` partition (matches `qcel.Molecule.fragments`
+  shape) and sums the per-fragment rigid-body-motion projection over every
+  fragment. The N=2 case (`fragments=[[cluster], [adsorbate]]`) reproduces
+  the old behavior exactly.
+
+  Config changes (breaking, no deprecation alias):
+  - **New required** `opt_dataset: str` — the OptimizationDataset containing
+    every entry in `benchmark_structures`. Entry names are now free-form
+    labels; no rsplit / dataset-name-in-entry-name convention.
+  - **New required** `fragments: List[List[int]]` — 0-indexed atom-index
+    lists per fragment. Every atom must appear in exactly one fragment;
+    disjointness is validated at load time.
+  - **Removed**: `molecule`, `small_molecule_collection`,
+    `surface_model_collection`. None of them influenced the computation
+    once the fragment partition is explicit; the old adsorbate-atom-count
+    lookup that motivated them is gone, and output naming derives from
+    `opt_dataset` instead of `molecule`.
+
+  Migration for existing configs (BEEP-1 cluster+adsorbate case): add
+  `opt_dataset` (was implicit via `benchmark_structures` name mangling),
+  add `fragments: [[0..n_cluster-1], [n_cluster..n_total-1]]`, remove the
+  three old fields. `nm_sampling` output folder is now `<opt_dataset>/`
+  instead of `<molecule>/`. Existing OptimizationDatasets on the server
+  don't need to change — the partition is applied in-memory during
+  classification, not stored on the molecules.
+
+  New tests: trimer classifier fixture verifying all three intermolecular
+  modes (translate fragment A / B / C) come out labelled correctly, and
+  intramolecular-stretch-and-bend of a mid-position fragment classified
+  by frequency as before.
+
 ### Added
 
 - **New workflow `be_assemble_periodic`** — extraction workflow closing the

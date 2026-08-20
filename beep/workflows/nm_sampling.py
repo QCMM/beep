@@ -23,7 +23,6 @@ from ..core.logging_utils import padded_log, beep_banner
 from ..core.dft_functionals import (
     geom_hmgga_dz, geom_hmgga_tz, geom_gga_dz, geom_gga_tz, geom_sqm_mb,
 )
-from ..core.benchmark_utils import create_benchmark_dataset_dict
 from ..core.nm_sampling_workflow import run_nm_sampling
 from ..adapters import qcfractal_adapter as qcf
 from ..adapters.qcfractal_adapter import FractalClient
@@ -42,55 +41,42 @@ welcome_msg = beep_banner(
 def run(config: NmSamplingConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
 
-    smol_name = config.molecule
+    opt_dset_name = config.opt_dataset
 
-    res_folder = Path.cwd() / smol_name
+    res_folder = Path.cwd() / opt_dset_name
     res_folder.mkdir(parents=True, exist_ok=True)
     data_folder = res_folder / "data"
     data_folder.mkdir(exist_ok=True)
 
-    log_file = res_folder / f"nm_sampling_{smol_name}.log"
+    log_file = res_folder / f"nm_sampling_{opt_dset_name}.log"
     file_handler = logging.FileHandler(str(log_file), mode="w")
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(file_handler)
 
-    config_path = res_folder / f"nm_sampling_{smol_name}.json"
+    config_path = res_folder / f"nm_sampling_{opt_dset_name}.json"
     config_path.write_text(safe_config_dump(config))
 
     logger.info(welcome_msg)
 
     bchmk_structs = config.benchmark_structures
-    surf_dset_name = config.surface_model_collection
-    smol_dset_name = config.small_molecule_collection
+    fragments = [list(f) for f in config.fragments]
+    n_atoms_expected = sum(len(f) for f in fragments)
 
     padded_log(logger, "Starting BEEP NM-sampling benchmark", padding_char=gear)
-    logger.info(f"Molecule: {smol_name}")
-    logger.info(f"Surface model collection: {surf_dset_name}")
-    logger.info(f"Small molecule collection: {smol_dset_name}")
+    logger.info(f"Optimization dataset: {opt_dset_name}")
     logger.info(f"Benchmark structures: {bchmk_structs}")
+    logger.info(f"Fragments ({len(fragments)}): {fragments}  "
+                 f"(total {n_atoms_expected} atoms)")
     logger.info(f"Geometry LOT: {config.geometry_opt_lot}")
     logger.info(f"Hessian LOT:  {config.hessian_lot}")
     logger.info(f"Reference grad LOT: {config.reference_grad_lot}\n")
 
-    bchmk_dset_names = create_benchmark_dataset_dict(bchmk_structs)
-    qcf.check_collection_existence(client, *bchmk_dset_names.values())
-    qcf.check_collection_existence(client, smol_dset_name)
-    qcf.check_collection_existence(client, surf_dset_name)
+    qcf.check_collection_existence(client, opt_dset_name)
+    opt_dset = qcf.get_collection(client, "OptimizationDataset", opt_dset_name)
 
-    smol_dset = qcf.get_collection(client, "OptimizationDataset", smol_dset_name)
-    odset_dict = {}
-    for bchmk_struct_name, odset_name in bchmk_dset_names.items():
-        odset_dict[bchmk_struct_name] = qcf.get_collection(
-            client, "OptimizationDataset", odset_name,
-        )
-
-    # Adsorbate atom count: pull from the small-molecule collection (same
-    # pattern as geom_benchmark.py:347-353 for the BSSE-test CP path).
-    smol_entry = smol_dset.get_entry(smol_name)
-    if smol_entry is None:
-        smol_entry = smol_dset.get_entry(smol_name.upper())
-    n_adsorbate_atoms = len(smol_entry.initial_molecule.symbols)
-    logger.info(f"Adsorbate atom count: {n_adsorbate_atoms}\n")
+    # Every benchmark entry pulls from the same dataset. Same {name → dataset}
+    # shape as before so downstream orchestration doesn't need to change.
+    odset_dict = {name: opt_dset for name in bchmk_structs}
 
     # Same five functional groups as geom_benchmark — the displacements
     # are evaluated at every functional in this list.
@@ -109,7 +95,7 @@ def run(config: NmSamplingConfig, client: FractalClient) -> None:
         config=config, client=client, odset_dict=odset_dict,
         all_dft_functionals=all_dft_functionals,
         dft_geom_functionals=dft_geom_functionals,
-        n_adsorbate_atoms=n_adsorbate_atoms,
+        fragment_atom_indices=fragments,
         res_folder=data_folder, logger=logger,
     )
 
