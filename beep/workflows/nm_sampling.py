@@ -59,14 +59,19 @@ def run(config: NmSamplingConfig, client: FractalClient) -> None:
     logger.info(welcome_msg)
 
     bchmk_structs = config.benchmark_structures
-    fragments = [list(f) for f in config.fragments]
-    n_atoms_expected = sum(len(f) for f in fragments)
+    fragments = {
+        name: [list(f) for f in partition]
+        for name, partition in config.fragments.items()
+    }
 
     padded_log(logger, "Starting BEEP NM-sampling benchmark", padding_char=gear)
     logger.info(f"Optimization dataset: {opt_dset_name}")
     logger.info(f"Benchmark structures: {bchmk_structs}")
-    logger.info(f"Fragments ({len(fragments)}): {fragments}  "
-                 f"(total {n_atoms_expected} atoms)")
+    logger.info("Fragments (per structure):")
+    for name in bchmk_structs:
+        p = fragments[name]
+        n_atoms = sum(len(f) for f in p)
+        logger.info(f"  {name}: {len(p)} fragments ({n_atoms} atoms) → {p}")
     logger.info(f"Geometry LOT: {config.geometry_opt_lot}")
     logger.info(f"Hessian LOT:  {config.hessian_lot}")
     logger.info(f"Reference grad LOT: {config.reference_grad_lot}\n")
@@ -95,7 +100,7 @@ def run(config: NmSamplingConfig, client: FractalClient) -> None:
         config=config, client=client, odset_dict=odset_dict,
         all_dft_functionals=all_dft_functionals,
         dft_geom_functionals=dft_geom_functionals,
-        fragment_atom_indices=fragments,
+        fragments_per_struct=fragments,
         res_folder=data_folder, logger=logger,
     )
 

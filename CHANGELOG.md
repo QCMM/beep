@@ -22,9 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - **New required** `opt_dataset: str` — the OptimizationDataset containing
     every entry in `benchmark_structures`. Entry names are now free-form
     labels; no rsplit / dataset-name-in-entry-name convention.
-  - **New required** `fragments: List[List[int]]` — 0-indexed atom-index
-    lists per fragment. Every atom must appear in exactly one fragment;
-    disjointness is validated at load time.
+  - **New required** `fragments: Dict[str, List[List[int]]]` — per-
+    benchmark-structure partition, keys must exactly cover
+    `benchmark_structures`. Each value is a list of 0-indexed atom-index
+    lists (matches `qcel.Molecule.fragments` shape); every atom must
+    appear in exactly one fragment. Per-structure partitions are
+    required because collapsing multiple monomers into a single rigid
+    block mislabels intra-block rearrangements (the same failure mode
+    the N-fragment classifier fixes at the physics layer). Use one
+    fragment per monomer.
   - **Removed**: `molecule`, `small_molecule_collection`,
     `surface_model_collection`. None of them influenced the computation
     once the fragment partition is explicit; the old adsorbate-atom-count

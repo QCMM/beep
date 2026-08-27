@@ -76,16 +76,19 @@ class NmSamplingConfig(BaseModel):
             "All entries must have the same atom-count layout matching ``fragments``."
         ),
     )
-    fragments: List[List[int]] = Field(
+    fragments: Dict[str, List[List[int]]] = Field(
         ...,
         description=(
-            "Per-fragment atom-index lists (0-indexed), matching the shape of "
-            "``qcel.Molecule.fragments``. Every atom in the equilibrium geometry "
-            "must appear in exactly one fragment. For the classic BEEP "
-            "cluster+adsorbate case (cluster first, adsorbate last) use "
-            "e.g. ``[[0,1,2,3,4,5], [6,7,8]]`` for a 6-atom cluster with a "
-            "3-atom adsorbate. Single-fragment partitions are allowed "
-            "(f_inter is forced to 0 → only the frequency cut classifies)."
+            "Per-benchmark-structure fragment partition. Keys must cover every "
+            "entry in ``benchmark_structures`` exactly; each value is a list of "
+            "0-indexed atom-index lists matching the shape of "
+            "``qcel.Molecule.fragments``. Every atom must appear in exactly one "
+            "fragment. Use one fragment per monomer — collapsing multiple "
+            "monomers into a single rigid block will label intra-block "
+            "rearrangements as bending/stretching (wrong), because they are "
+            "not rigid-body motion of the collapsed block. Example (water "
+            "trimer, 9 atoms, three monomers): "
+            "``{\"h2o_3\": [[0,1,2], [3,4,5], [6,7,8]]}``."
         ),
     )
     geometry_opt_lot: str = Field(
@@ -208,17 +211,38 @@ class NmSamplingConfig(BaseModel):
     def _validate_fragments(self):
         if not self.fragments:
             raise ValueError("fragments must be non-empty.")
-        seen = set()
-        for i, frag in enumerate(self.fragments):
-            if not frag:
-                raise ValueError(f"fragments[{i}] is empty.")
-            for a in frag:
-                if a < 0:
-                    raise ValueError(f"fragments[{i}] contains negative atom index {a}.")
-                if a in seen:
+        expected = set(self.benchmark_structures)
+        missing = expected - set(self.fragments.keys())
+        extra = set(self.fragments.keys()) - expected
+        if missing:
+            raise ValueError(
+                f"fragments is missing entries for benchmark structure(s): "
+                f"{sorted(missing)}."
+            )
+        if extra:
+            raise ValueError(
+                f"fragments has entries for structure(s) not in "
+                f"benchmark_structures: {sorted(extra)}."
+            )
+        for struct_name, partition in self.fragments.items():
+            if not partition:
+                raise ValueError(f"fragments[{struct_name!r}] is empty.")
+            seen: set = set()
+            for i, frag in enumerate(partition):
+                if not frag:
                     raise ValueError(
-                        f"atom index {a} appears in more than one fragment — "
-                        "fragments must be disjoint."
+                        f"fragments[{struct_name!r}][{i}] is empty."
                     )
-                seen.add(a)
+                for a in frag:
+                    if a < 0:
+                        raise ValueError(
+                            f"fragments[{struct_name!r}][{i}] contains negative "
+                            f"atom index {a}."
+                        )
+                    if a in seen:
+                        raise ValueError(
+                            f"atom index {a} appears in more than one fragment "
+                            f"for {struct_name!r} — fragments must be disjoint."
+                        )
+                    seen.add(a)
         return self

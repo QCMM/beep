@@ -121,7 +121,7 @@ def submit_system_hessians(
 
 def collect_system_normal_modes(
     client, ref_mols: Dict[str, Molecule], hessian_lot: str,
-    fragment_atom_indices: Sequence[Sequence[int]],
+    fragments_per_struct: Dict[str, Sequence[Sequence[int]]],
     inter_threshold: float, bend_max_cm: float,
     logger: logging.Logger,
 ) -> Dict[str, dict]:
@@ -156,7 +156,14 @@ def collect_system_normal_modes(
 
         masses = np.asarray(mol_from_record.masses)
         positions = np.asarray(mol_from_record.geometry).reshape(-1, 3)
-        # Consistency check: partition must match the record's atom count.
+        # Look up the per-structure fragment partition and consistency-check.
+        try:
+            fragment_atom_indices = fragments_per_struct[struct_name]
+        except KeyError:
+            logger.warning(
+                f"  {struct_name}: no fragment partition supplied — skipping."
+            )
+            continue
         n_atoms_record = len(mol_from_record.symbols)
         n_atoms_partition = sum(len(f) for f in fragment_atom_indices)
         if n_atoms_partition != n_atoms_record:
@@ -536,8 +543,8 @@ def compute_per_method_nm_metrics(
 def run_nm_sampling(
     *, config, client, odset_dict: dict,
     all_dft_functionals: List[str], dft_geom_functionals: dict,
-    fragment_atom_indices: Sequence[Sequence[int]], res_folder: Path,
-    logger: logging.Logger,
+    fragments_per_struct: Dict[str, Sequence[Sequence[int]]],
+    res_folder: Path, logger: logging.Logger,
 ):
     """Top-level driver for the normal-mode sampling benchmark.
 
@@ -583,7 +590,7 @@ def run_nm_sampling(
     padded_log(logger, "Normal-mode classification")
     mode_data = collect_system_normal_modes(
         client, ref_mols, config.hessian_lot,
-        fragment_atom_indices=fragment_atom_indices,
+        fragments_per_struct=fragments_per_struct,
         inter_threshold=config.inter_threshold,
         bend_max_cm=config.bend_max_cm,
         logger=logger,
@@ -616,7 +623,7 @@ def run_nm_sampling(
             frequencies_cm=data["frequencies_cm"],
             modes_cart=data["modes_cart"],
             classes=data["classes"],
-            fragment_atom_indices=fragment_atom_indices,
+            fragment_atom_indices=fragments_per_struct[sysname],
             level_of_theory=config.hessian_lot,
         )
     logger.info(
