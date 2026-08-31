@@ -423,3 +423,23 @@ def test_default_tric_with_freezing_is_accepted():
     from beep.models.sampling_periodic import SamplingPeriodicConfig
     cfg = SamplingPeriodicConfig(**_periodic_config_kwargs(freeze_below_z_ang=4.0))
     assert cfg.freeze_below_z_ang == 4.0
+
+
+def test_overlay_xyz_tolerates_overlapping_copies(tmp_path):
+    """Regression: the coverage overlay is slab + every accepted adsorbate copy, so
+    near-coincident copies from adjacent grid nodes are normal. Routing it through
+    qcelemental's Molecule raised 'Following atoms are too close' and aborted the whole
+    sampling run over a cosmetic artifact."""
+    from beep.core.periodic_sampler import write_overlay_xyz
+    symbols = ["O", "H", "H", "C", "O", "C", "O"]
+    geom = np.array([
+        [0, 0, 0], [1.8, 0, 0], [-0.45, 1.76, 0],
+        [0, 0, 6.0], [0, 0, 8.1],
+        [0.07, 0, 6.0], [0.07, 0, 8.1],      # 0.07 bohr from the previous copy
+    ], dtype=float).flatten()
+    out = tmp_path / "overlay.xyz"
+    write_overlay_xyz(out, symbols, geom)
+    lines = out.read_text().splitlines()
+    assert int(lines[0]) == len(symbols)
+    assert len(lines) == len(symbols) + 2
+    assert lines[2].split()[0] == "O"
