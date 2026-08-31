@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — 0.16.0.dev
 
+### Fixed
+
+- **`sampling_periodic`: every frozen-slab optimization died on submission.**
+  `build_freeze_constraint_string` emitted geomeTRIC's *classic text* constraints
+  block (`"$freeze\nxyz 1-3\n"`), but the JSON API that QCEngine drives
+  (`geometric.run_json`) expects the *structured* form and renders that text
+  itself — so it called `.items()` on a `str` and raised
+  `AttributeError: 'str' object has no attribute 'items'` before the first
+  gradient. Every `sampling_periodic` run with `freeze_below_z_ang` /
+  `freeze_atoms` set (i.e. every realistic slab run) failed 100% at step zero.
+  Replaced by `build_freeze_constraints`, returning
+  `{"freeze": [{"type": "xyz", "indices": [...]}]}`. Indices stay **0-based**:
+  geomeTRIC's `commadash` does the 0->1 shift and range compression itself
+  (`[0,1,2] -> "1-3"`), so the frozen atom set is unchanged — only the handoff
+  format is fixed. User-supplied `constraints` are now merged as dicts, and a
+  string raises a clear `ValueError` instead of the geomeTRIC `AttributeError`.
+  New regression test feeds our output through geomeTRIC's own
+  `make_constraints_string` and requires the classic block back.
+  (Removed the now-unused `_atom_index_ranges` helper.)
+
+- **`sampling_periodic`: `coordsys: "cart"` is incompatible with slab freezing.**
+  geomeTRIC raises `RuntimeError: Do not use constraints with Cartesian
+  coordinates`, so the combination could never run — yet
+  `examples/sampling_periodic.json` shipped `{"coordsys": "cart"}` alongside
+  `freeze_below_z_ang`, and the config docstring recommended cart for large
+  slabs. The example now leaves `coordsys` at geomeTRIC's default `tric`, the
+  field description no longer recommends cart (it is also numerically
+  unreliable on large slabs), and a config validator rejects the combination at
+  load time with an actionable message instead of failing mid-run.
+
+- **`be_comp_periodic`: periodic D3 was routed to a non-periodic harness.**
+  `DISPERSION_PROGRAMS` maps `-d3bj` to QCEngine's legacy `dftd3` harness, which
+  wraps the standalone executable and has no periodic support: handed
+  `keywords['cell']`/`['pbc']` it ignores them and returns *cluster* dispersion
+  for a slab, with no error. Added `PERIODIC_DISPERSION_PROGRAMS` /
+  `periodic_dispersion_program()` mapping `dftd3 -> s-dftd3` (the python-API
+  harness that honours cell/pbc; `-d4` already routed to the python-API
+  `dftd4`), applied in `be_comp_periodic` to the periodic *and* gas-phase specs
+  so the `BE = complex - surface - gas` difference cancels within one harness.
+  Scoped to the periodic path on purpose: cluster workflows keep `dftd3`, so
+  their existing dispersion specs and records stay valid.
+
 ### Changed
 
 - **`nm_sampling` generalised from 2 fragments to N (BREAKING config change).**

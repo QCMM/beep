@@ -33,7 +33,7 @@
     },
 
     "sampling_opt_keywords": {
-        "coordsys": "cart"
+        "maxiter": 250
     },
 
     "freeze_below_z_ang": 4.0,

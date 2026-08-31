@@ -1142,6 +1142,22 @@ DISPERSION_PROGRAMS: Tuple[Tuple[str, str], ...] = (
 )
 DISPERSION_SUFFIXES: Tuple[str, ...] = tuple(s for s, _ in DISPERSION_PROGRAMS)
 
+# Periodic override: QCEngine ships two D3 harnesses. ``dftd3`` is the legacy
+# executable wrapper and has NO periodic support -- handed cell/pbc it ignores
+# them and silently returns cluster dispersion for a slab. ``s-dftd3`` is the
+# python-API harness that honours ``keywords['cell']`` / ``['pbc']``. D4 already
+# routes to the python-API ``dftd4``, so it needs no override. Applied only on
+# the periodic path: cluster workflows keep ``dftd3`` so their existing
+# dispersion specs and records stay valid.
+PERIODIC_DISPERSION_PROGRAMS: Dict[str, str] = {"dftd3": "s-dftd3"}
+
+
+def periodic_dispersion_program(program: Optional[str]) -> Optional[str]:
+    """Map a dispersion program name onto its periodic-capable equivalent."""
+    if program is None:
+        return None
+    return PERIODIC_DISPERSION_PROGRAMS.get(program, program)
+
 
 def _split_dispersion(method: str) -> Tuple[str, Optional[str], Optional[str]]:
     """Split ``method`` into (bare_functional, full_dispersion_method, disp_program).

@@ -15,7 +15,7 @@ from beep.core.periodic_sampler import (
     ANG2BOHR,
     BOHR2ANG,
     all_atoms_ok,
-    build_freeze_constraint_string,
+    build_freeze_constraints,
     build_grid,
     find_cavity_z,
     frozen_atom_indices,
@@ -26,7 +26,6 @@ from beep.core.periodic_sampler import (
     recenter_adsorbate_com,
     strip_adsorbate,
     wrap_into_cell,
-    _atom_index_ranges,
     _cell_diag_bohr,
     generate_candidate,
 )
@@ -176,20 +175,37 @@ def test_all_atoms_ok_flags_overlap():
 # Freeze constraints for geomeTRIC
 # ---------------------------------------------------------------------------
 
-def test_atom_index_ranges_compresses_runs():
-    assert _atom_index_ranges([0, 1, 2, 3, 5, 7, 8, 9]) == "1-4,6,8-10"
+def test_build_freeze_constraints_json_form():
+    """geomeTRIC's JSON API takes the structured form, not the rendered text."""
+    assert build_freeze_constraints([0, 1, 2]) == {
+        "freeze": [{"type": "xyz", "indices": [0, 1, 2]}]
+    }
+    assert build_freeze_constraints([]) is None
 
 
-def test_atom_index_ranges_deduplicates_and_sorts():
-    # input is 0-indexed; helper emits 1-indexed for geomeTRIC's constraints format
-    # {5,5,1,3,2} → dedup+shift → {2,3,4,6} → "2-4,6"
-    assert _atom_index_ranges([5, 5, 1, 3, 2]) == "2-4,6"
+def test_build_freeze_constraints_deduplicates_and_sorts():
+    assert build_freeze_constraints([5, 5, 1, 3, 2]) == {
+        "freeze": [{"type": "xyz", "indices": [1, 2, 3, 5]}]
+    }
 
 
-def test_build_freeze_constraint_string_format():
-    s = build_freeze_constraint_string([0, 1, 2])
-    assert s == "$freeze\nxyz 1-3\n"
-    assert build_freeze_constraint_string([]) is None
+def test_build_freeze_constraints_indices_stay_zero_based():
+    """geomeTRIC does the 0->1 shift itself; shifting here would freeze the wrong atoms."""
+    out = build_freeze_constraints([0, 4])
+    assert out["freeze"][0]["indices"] == [0, 4]
+
+
+def test_build_freeze_constraints_accepted_by_geometric():
+    """Regression guard for the crash that killed every frozen-slab periodic opt:
+    geomeTRIC's run_json called .items() on a pre-rendered '$freeze ...' string and
+    raised AttributeError before the first gradient. Feed our output to geomeTRIC's
+    own renderer and require the classic block back."""
+    run_json = pytest.importorskip("geometric.run_json")
+    rendered = run_json.make_constraints_string(
+        build_freeze_constraints([0, 1, 2, 5, 7, 8])
+    )
+    assert "$freeze" in rendered
+    assert "xyz 1-3,6,8-9" in rendered   # 0-based in, 1-based rendered by geomeTRIC
 
 
 def test_frozen_atom_indices_from_z_threshold():
@@ -370,3 +386,40 @@ def test_recenter_adsorbate_com_shifts_only_periodic_axes():
     # second surface atom at (5,5) → (8,8)
     assert out[1, 0] == pytest.approx(8.0)
     assert out[1, 1] == pytest.approx(8.0)
+
+
+# ---------------------------------------------------------------------------
+# Config validation: cart coordsys is incompatible with slab freezing
+# ---------------------------------------------------------------------------
+
+def _periodic_config_kwargs(**over):
+    base = dict(
+        workflow="sampling_periodic",
+        molecule="CO",
+        surface_collection="npasw500",
+        sampling_level_of_theory={"mace_model": "/tmp/model.model"},
+    )
+    base.update(over)
+    return base
+
+
+def test_cart_coordsys_rejected_when_freezing():
+    """geomeTRIC raises 'Do not use constraints with Cartesian coordinates', and cart
+    is numerically unreliable on large slabs -- catch it at config load, not mid-run."""
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+    with pytest.raises(ValueError, match="cannot be combined with slab freezing"):
+        SamplingPeriodicConfig(**_periodic_config_kwargs(
+            sampling_opt_keywords={"coordsys": "cart"}, freeze_below_z_ang=4.0))
+
+
+def test_cart_coordsys_allowed_without_freezing():
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+    cfg = SamplingPeriodicConfig(**_periodic_config_kwargs(
+        sampling_opt_keywords={"coordsys": "cart"}))
+    assert cfg.sampling_opt_keywords["coordsys"] == "cart"
+
+
+def test_default_tric_with_freezing_is_accepted():
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+    cfg = SamplingPeriodicConfig(**_periodic_config_kwargs(freeze_below_z_ang=4.0))
+    assert cfg.freeze_below_z_ang == 4.0

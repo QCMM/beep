@@ -23,7 +23,7 @@ from ..models.be_comp_periodic import BeCompPeriodicConfig
 from ..models.base import safe_config_dump
 from ..core.logging_utils import beep_banner
 from ..adapters import qcfractal_adapter as qcf
-from ..adapters.qcfractal_adapter import _split_dispersion
+from ..adapters.qcfractal_adapter import _split_dispersion, periodic_dispersion_program
 
 bcheck = "✔"
 POLL_FREQUENCY_SEC = 120
@@ -75,6 +75,11 @@ def _build_be_specs(
     kw = keywords_periodic if periodic else keywords_gas
     elec_alias = electronic_lot.alias  # MACE file stem
     _bare, _disp_method, disp_program = _split_dispersion(be_dispersion)
+    # Route D3 to the periodic-capable harness. The legacy ``dftd3`` executable
+    # wrapper silently ignores cell/pbc, so a slab would get cluster dispersion
+    # with no error. Applied to the gas-phase specs too, so that the
+    # BE = complex - surface - gas difference cancels within one harness.
+    disp_program = periodic_dispersion_program(disp_program)
     disp_suffix = be_dispersion[len(_bare):]
 
     elec_spec = qcf.add_energy_spec(

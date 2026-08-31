@@ -23,7 +23,7 @@ from ..core.logging_utils import beep_banner
 from ..adapters import qcfractal_adapter as qcf
 from ..core.periodic_sampler import (
     ANG2BOHR,
-    build_freeze_constraint_string,
+    build_freeze_constraints,
     frozen_atom_indices,
     run_periodic_sampling,
     strip_adsorbate,
@@ -103,17 +103,27 @@ def _build_sampling_spec(
     opt_keywords = {"maxiter": 125}
     if base_opt_keywords:
         opt_keywords.update(base_opt_keywords)
-    freeze_str = build_freeze_constraint_string(freeze_indices_0based)
-    if freeze_str is not None:
+    freeze_constraints = build_freeze_constraints(freeze_indices_0based)
+    if freeze_constraints is not None:
         existing = opt_keywords.get("constraints")
         if existing:
+            if not isinstance(existing, dict):
+                raise ValueError(
+                    "sampling_opt_keywords['constraints'] must be geomeTRIC's JSON "
+                    "form, e.g. {'freeze': [{'type': 'xyz', 'indices': [0, 1]}]}; got "
+                    f"{type(existing).__name__}. The classic '$freeze / xyz 1-3' text "
+                    "block is only accepted by geomeTRIC's file interface, not by the "
+                    "JSON API that QCEngine drives."
+                )
             logger.info(
                 "  freeze constraint requested but 'constraints' already set in "
-                "sampling_opt_keywords — appending freeze block to user-supplied constraints."
+                "sampling_opt_keywords — merging freeze block into user-supplied constraints."
             )
-            opt_keywords["constraints"] = existing.rstrip() + "\n" + freeze_str
+            merged = {k: list(v) for k, v in existing.items()}
+            merged.setdefault("freeze", []).extend(freeze_constraints["freeze"])
+            opt_keywords["constraints"] = merged
         else:
-            opt_keywords["constraints"] = freeze_str
+            opt_keywords["constraints"] = freeze_constraints
         logger.info(f"  freezing {len(freeze_indices_0based)} atoms during optimization")
 
     spec = {

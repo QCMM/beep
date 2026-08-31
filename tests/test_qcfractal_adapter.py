@@ -565,6 +565,28 @@ def test_split_dispersion(method, expected):
 
 
 @pytest.mark.parametrize(
+    "program, expected",
+    [
+        ("dftd3", "s-dftd3"),   # legacy executable harness has no pbc support
+        ("dftd4", "dftd4"),     # already the python-API harness
+        ("s-dftd3", "s-dftd3"), # idempotent
+        (None, None),
+    ],
+)
+def test_periodic_dispersion_program(program, expected):
+    """Periodic runs must not use QCEngine's legacy 'dftd3' harness: it ignores
+    keywords['cell']/['pbc'] and would silently return cluster dispersion for a slab."""
+    from beep.adapters.qcfractal_adapter import periodic_dispersion_program
+    assert periodic_dispersion_program(program) == expected
+
+
+def test_periodic_dispersion_leaves_cluster_routing_untouched():
+    """The cluster path keeps 'dftd3' so existing dispersion specs/records stay valid."""
+    from beep.adapters.qcfractal_adapter import _split_dispersion
+    assert _split_dispersion("mpwb1k-d3bj")[2] == "dftd3"
+
+
+@pytest.mark.parametrize(
     "method, mult, program, expected",
     [
         # psi4: method passes through (psi4 parses dispersion suffixes itself)

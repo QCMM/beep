@@ -83,8 +83,10 @@ class SamplingPeriodicConfig(BaseModel):
         None,
         description=(
             "Extra geomeTRIC keywords; merged over the built-in {'maxiter': 125}. "
-            "For large slabs use {'coordsys': 'cart'} to avoid the O(N^2-N^3) "
-            "Wilson/G-matrix cost of the default 'tric'."
+            "Leave 'coordsys' at geomeTRIC's default 'tric': 'cart' is rejected by "
+            "geomeTRIC whenever slab freezing is on ('Do not use constraints with "
+            "Cartesian coordinates'), and on large slabs it converges to visibly "
+            "wrong geometries."
         ),
     )
 
@@ -132,5 +134,15 @@ class SamplingPeriodicConfig(BaseModel):
         if not 0.0 <= self.grid_noise_frac <= 0.5:
             raise ValueError(
                 f"grid_noise_frac must be in [0, 0.5] (got {self.grid_noise_frac})."
+            )
+        coordsys = (self.sampling_opt_keywords or {}).get("coordsys")
+        freezing = self.freeze_below_z_ang is not None or self.freeze_atoms is not None
+        if freezing and coordsys is not None and str(coordsys).lower() == "cart":
+            raise ValueError(
+                "sampling_opt_keywords {'coordsys': 'cart'} cannot be combined with slab "
+                "freezing (freeze_below_z_ang / freeze_atoms): geomeTRIC raises "
+                "'Do not use constraints with Cartesian coordinates'. Drop 'coordsys' to "
+                "use the default 'tric', which is also the numerically reliable choice on "
+                "large slabs."
             )
         return self

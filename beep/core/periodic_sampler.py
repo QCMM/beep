@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import random
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import qcelemental as qcel
@@ -180,30 +180,27 @@ def all_atoms_ok(
 # Freeze constraints for geomeTRIC
 # ---------------------------------------------------------------------------
 
-def _atom_index_ranges(indices_0based: Sequence[int]) -> str:
-    """Compress a sorted 0-indexed list to a geomeTRIC 1-based range spec (`1-4,7,9-10`)."""
-    ones = sorted(set(int(i) + 1 for i in indices_0based))
-    parts: List[str] = []
-    start = end = ones[0]
-    for i in ones[1:]:
-        if i == end + 1:
-            end = i
-        else:
-            parts.append(f"{start}-{end}" if start != end else str(start))
-            start = end = i
-    parts.append(f"{start}-{end}" if start != end else str(start))
-    return ",".join(parts)
+def build_freeze_constraints(indices_0based: Sequence[int]) -> Optional[Dict[str, Any]]:
+    """Return a geomeTRIC ``constraints`` dict freezing the given 0-indexed atoms.
 
+    geomeTRIC's JSON API (``geometric.run_json``, the path QCEngine drives) takes
+    the *structured* constraints form::
 
-def build_freeze_constraint_string(indices_0based: Sequence[int]) -> Optional[str]:
-    """Return a geomeTRIC ``constraints`` block freezing the given 0-indexed atoms.
+        {"freeze": [{"type": "xyz", "indices": [0, 1, 2]}]}
 
-    geomeTRIC uses 1-based indices in its constraints file format; this helper
-    converts and range-compresses. Returns ``None`` if the list is empty.
+    and renders the classic ``$freeze / xyz 1-3`` text itself. Handing it the
+    pre-rendered text instead makes it raise
+    ``AttributeError: 'str' object has no attribute 'items'`` before the first
+    gradient, so every frozen-slab optimization dies on submission.
+
+    Indices stay **0-based** here: geomeTRIC's ``commadash`` does the 0->1 shift
+    and the range compression (``[0,1,2] -> "1-3"``). Returns ``None`` if the
+    list is empty.
     """
     if not indices_0based:
         return None
-    return f"$freeze\nxyz {_atom_index_ranges(indices_0based)}\n"
+    ordered = sorted(set(int(i) for i in indices_0based))
+    return {"freeze": [{"type": "xyz", "indices": ordered}]}
 
 
 def frozen_atom_indices(
