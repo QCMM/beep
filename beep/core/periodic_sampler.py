@@ -203,6 +203,19 @@ def build_freeze_constraints(indices_0based: Sequence[int]) -> Optional[Dict[str
     return {"freeze": [{"type": "xyz", "indices": ordered}]}
 
 
+def write_overlay_xyz(path, symbols: Sequence[str], geom_bohr: np.ndarray) -> None:
+    """Write the sampling-coverage overlay (slab + all accepted adsorbate copies).
+
+    Plain XYZ writer: the overlay intentionally contains overlapping copies, so it
+    must not be routed through qcelemental's physical-geometry validation.
+    """
+    geom = np.asarray(geom_bohr, dtype=float).reshape(-1, 3) * BOHR2ANG
+    with open(path, "w") as fh:
+        fh.write(f"{len(symbols)}\nsampling coverage overlay (slab + accepted adsorbate copies)\n")
+        for sym, (x, y, z) in zip(symbols, geom):
+            fh.write(f"{sym} {x:.6f} {y:.6f} {z:.6f}\n")
+
+
 def frozen_atom_indices(
     surface_geom_bohr: np.ndarray,
     freeze_below_z_ang: Optional[float],
@@ -447,12 +460,18 @@ def run_periodic_sampling(
     else:
         debug_symbols = list(surface.symbols)
         debug_geom = surface_geom.flatten()
-    debug_mol = qcel.models.Molecule(
-        symbols=debug_symbols, geometry=debug_geom, fix_com=False, fix_orientation=False,
-    )
+    # NOTE: deliberately NOT a qcel Molecule. This is a visualisation OVERLAY (the slab
+    # plus every accepted adsorbate copy at its pre-centering placement), not a physical
+    # system: independent grid nodes routinely drop copies a fraction of an Angstrom
+    # apart, which trips qcelemental's "atoms are too close" validator and used to abort
+    # the entire sampling run over a cosmetic artifact. qcelemental exposes no way to
+    # relax that check (``validate=False`` skips schema-filling and then breaks
+    # ``to_file``; ``nonphysical=True`` only covers masses/charges), so the overlay is
+    # returned as raw arrays and written by :func:`write_overlay_xyz`.
+    overlay = (debug_symbols, debug_geom)
 
     logger.info(
         f"Periodic sampler: generated {len(candidates)} valid candidates "
         f"out of {n_x * n_y} grid nodes."
     )
-    return candidates, debug_mol
+    return candidates, overlay

@@ -26,6 +26,7 @@ from ..core.periodic_sampler import (
     build_freeze_constraints,
     frozen_atom_indices,
     run_periodic_sampling,
+    write_overlay_xyz,
     strip_adsorbate,
 )
 from ..core.sampling import filter_binding_sites
@@ -217,7 +218,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
         qcf.add_opt_specification(ds_opt, spec, overwrite=False)
 
         # Generate candidates
-        candidates, debug_mol = run_periodic_sampling(
+        candidates, overlay = run_periodic_sampling(
             surface=surface,
             adsorbate=adsorbate,
             cell_ang=cell_ang,
@@ -236,7 +237,10 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
         # Aggregate xyz (slab + every accepted adsorbate copy in its ORIGINAL
         # placement, so the sampling coverage is visible) — always written.
         aggregate_path = data_folder / f"all_sampled_sites_{slab_name}.xyz"
-        debug_mol.to_file(str(aggregate_path), "xyz")
+        try:
+            write_overlay_xyz(aggregate_path, *overlay)
+        except Exception as exc:  # visualisation only — never abort sampling for it
+            logger.warning(f"  could not write {aggregate_path.name}: {exc}")
         # Per-candidate centered xyz — only when explicitly asked for.
         if config.store_initial_structures:
             debug_dir = data_folder / "site_finder" / smol_name / slab_name
