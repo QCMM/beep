@@ -92,6 +92,7 @@ def _build_sampling_spec(
     freeze_indices_0based,
     base_opt_keywords,
     logger,
+    opt_program="geometric",
 ):
     """Construct the OptimizationDataset spec dict for a periodic MACE run."""
     # QC spec keywords: cell + pbc for the MACE harness (see QCEngine patch)
@@ -130,7 +131,7 @@ def _build_sampling_spec(
     spec = {
         "name": lot.lot_name,
         "description": f"Periodic sampling with {lot.display}",
-        "optimization_spec": {"program": "geometric", "keywords": opt_keywords},
+        "optimization_spec": {"program": opt_program, "keywords": opt_keywords},
         "qc_spec": {
             "driver": "gradient",
             "method": lot.qc_method,
@@ -213,7 +214,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
         # Register spec + submit
         spec = _build_sampling_spec(
             lot, cell_ang, config.pbc, freeze_list,
-            config.sampling_opt_keywords, logger,
+            config.sampling_opt_keywords, logger, opt_program=config.sampling_opt_program,
         )
         qcf.add_opt_specification(ds_opt, spec, overwrite=False)
 

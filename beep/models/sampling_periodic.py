@@ -90,6 +90,20 @@ class SamplingPeriodicConfig(BaseModel):
         ),
     )
 
+    # Optimization engine
+    sampling_opt_program: str = Field(
+        "geometric",
+        description=(
+            "QCEngine optimization procedure driving the geometry relaxations. "
+            "'geometric' uses internal coordinates: better convergence per step, but its "
+            "Wilson-B / G-matrix work is O(N^2-N^3) and dominates for large slabs (~200 s "
+            "per step at 1500 atoms, against a ~1 s MLP gradient). 'ase' uses preconditioned "
+            "Cartesian optimizers at ~0.1 s per step and handles frozen atoms as a force "
+            "mask. Prefer 'ase' for periodic slabs and other large systems; 'geometric' "
+            "remains better for expensive gradients on normal-sized systems."
+        ),
+    )
+
     # Slab freezing
     freeze_below_z_ang: Optional[float] = Field(
         None,
@@ -137,7 +151,12 @@ class SamplingPeriodicConfig(BaseModel):
             )
         coordsys = (self.sampling_opt_keywords or {}).get("coordsys")
         freezing = self.freeze_below_z_ang is not None or self.freeze_atoms is not None
-        if freezing and coordsys is not None and str(coordsys).lower() == "cart":
+        if (
+            self.sampling_opt_program == "geometric"
+            and freezing
+            and coordsys is not None
+            and str(coordsys).lower() == "cart"
+        ):
             raise ValueError(
                 "sampling_opt_keywords {'coordsys': 'cart'} cannot be combined with slab "
                 "freezing (freeze_below_z_ang / freeze_atoms): geomeTRIC raises "
