@@ -443,3 +443,30 @@ def test_overlay_xyz_tolerates_overlapping_copies(tmp_path):
     assert int(lines[0]) == len(symbols)
     assert len(lines) == len(symbols) + 2
     assert lines[2].split()[0] == "O"
+
+
+def test_opt_program_defaults_to_geometric():
+    """Existing cluster behaviour must not change silently."""
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+    cfg = SamplingPeriodicConfig(**_periodic_config_kwargs())
+    assert cfg.sampling_opt_program == "geometric"
+
+
+def test_opt_program_can_select_ase():
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+    cfg = SamplingPeriodicConfig(**_periodic_config_kwargs(sampling_opt_program="ase"))
+    assert cfg.sampling_opt_program == "ase"
+
+
+def test_cart_freeze_restriction_is_geometric_only():
+    """geomeTRIC refuses constraints in Cartesian coordinates; ASE has no such limit,
+    so the validator must not block a cart/freeze combination under 'ase'."""
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+    cfg = SamplingPeriodicConfig(**_periodic_config_kwargs(
+        sampling_opt_program="ase", sampling_opt_keywords={"coordsys": "cart"},
+        freeze_below_z_ang=4.0))
+    assert cfg.freeze_below_z_ang == 4.0
+    with pytest.raises(ValueError, match="cannot be combined with slab freezing"):
+        SamplingPeriodicConfig(**_periodic_config_kwargs(
+            sampling_opt_program="geometric", sampling_opt_keywords={"coordsys": "cart"},
+            freeze_below_z_ang=4.0))
