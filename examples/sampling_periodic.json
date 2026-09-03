@@ -1,7 +1,7 @@
 {
     "workflow": "sampling_periodic",
     "server": {
-        "address": "http://qcf-astrochem",
+        "address": "localhost:7777",
         "username": "user",
         "password": "changeme",
         "verify": false
@@ -10,7 +10,7 @@
     "molecule": "CO",
     "small_molecule_collection": "Small_molecules",
     "atoms_collection": "atoms",
-    "surface_collection": "co_w500_slabs",
+    "surface_collection": "my_slab_collection",
     "surface_clusters": [],
 
     "cell": [[30.0, 0.0, 0.0], [0.0, 30.0, 0.0], [0.0, 0.0, 60.0]],
@@ -29,7 +29,7 @@
     "random_seed": 42,
 
     "sampling_level_of_theory": {
-        "mace_model": "/path/to/models/mace-polar-ft0.model"
+        "mace_model": "/path/to/models/my-mace-model.model"
     },
 
     "sampling_opt_keywords": {

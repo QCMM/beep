@@ -51,6 +51,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`geom_benchmark` is now entry-based (BREAKING config change),
+  mirroring the `nm_sampling` generalisation.** The workflow benchmarks
+  exactly the entries listed in `benchmark_structures`, all living in a
+  single new required `opt_dataset` OptimizationDataset. All
+  adsorbate/surface special-casing is gone:
+  - **Removed fields**: `molecule`, `small_molecule_collection`,
+    `surface_model_collection`, `atoms_collection`, `bsse_test` (and the
+    `BSSETestConfig` model).
+  - **Removed behavior**: the implicit adsorbate-monomer reference
+    optimization, the bare-surface benchmarking derived from entry-name
+    parsing, the atom-adsorbate fallback, the global adsorbate
+    multiplicity gate (each stored molecule carries its own
+    charge/multiplicity), and the entire direct-Slurm counterpoise BSSE
+    test (~250 lines of non-QCFractal-native code:
+    `_write_cp_python_script`, `_write_slurm_script`, `_submit_cp_jobs`,
+    `_wait_for_cp_jobs`, `_collect_cp_results`).
+  - **To benchmark a monomer or bare surface alongside the complexes**,
+    add it as another entry in `opt_dataset` — every entry is on equal
+    footing.
+  - Entry names are free-form; the `rsplit("_", 1)`
+    dataset-name-in-entry-name convention no longer applies.
+  - Output folder + log/config names derive from `opt_dataset` instead
+    of `molecule`; the trajectory-analysis plots are named after the
+    dataset as well.
+  - `trajectory_analysis` remains optional (default `True`,
+    `false` = legacy eq-geometry-RMSD-only run).
+  - Net: `workflows/geom_benchmark.py` shrinks from 846 to 386 lines.
+
 - **`nm_sampling` generalised from 2 fragments to N (BREAKING config change).**
   The mode classifier previously hardcoded "last `n_adsorbate_atoms` = adsorbate,
   rest = cluster" — silently mislabelling intermolecular modes of any non-last

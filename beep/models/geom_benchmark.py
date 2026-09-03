@@ -1,44 +1,37 @@
-"""Geometry benchmark workflow config — maps to launch_geom_benchmark.py argparse flags."""
+"""Geometry benchmark workflow config — entry-based, single OptimizationDataset."""
 from typing import Optional, Literal, List, Dict
 from pydantic import BaseModel, Field, field_validator
-from .base import ServerConfig, lowercase_list
-
-
-class BSSETestConfig(BaseModel):
-    """Configuration for BSSE/dispersion test via direct Slurm CP jobs."""
-    functional: List[str] = Field(["pbe0"], description="Test functional(s) (default: ['pbe0'])")
-    basis_sets: List[str] = Field(
-        ["def2-svp", "def2-svpd", "def2-tzvpd"],
-        description="Basis sets to test",
-    )
-    dispersion: List[str] = Field(
-        ["", "d3bj", "d4"],
-        description="Dispersion corrections for uncorrected optimizations (empty string = bare functional)",
-    )
-    cp_dispersion: Optional[List[str]] = Field(
-        None,
-        description="Dispersion corrections for CP-corrected optimizations. Defaults to same as dispersion. D4 is not supported with CP in Psi4.",
-    )
-    partition: str = Field(..., description="Slurm partition for CP jobs")
-    cores: int = Field(6, description="Number of CPU cores per CP job")
-    memory: str = Field("12GB", description="Memory per CP job")
-    walltime: str = Field("24:00:00", description="Slurm walltime for CP jobs")
-
-    _lower_functional = field_validator("functional")(lowercase_list)
-    _lower_basis_sets = field_validator("basis_sets")(lowercase_list)
-    _lower_dispersion = field_validator("dispersion")(lowercase_list)
-    _lower_cp_dispersion = field_validator("cp_dispersion")(lowercase_list)
+from .base import ServerConfig
 
 
 class GeomBenchmarkConfig(BaseModel):
-    """Configuration for the geometry benchmark workflow."""
+    """Configuration for the geometry benchmark workflow.
+
+    Entry-based: every geometry to benchmark is an entry in a single
+    ``opt_dataset`` (OptimizationDataset). Each listed entry is optimized
+    at the reference LOT and at every DFT functional in the curated
+    lists, then compared by RMSD (and optionally per-step force RMSD
+    along the reference trajectory). There is no adsorbate/surface
+    special-casing — to benchmark a monomer or bare surface alongside
+    the complexes, add it as another entry in ``opt_dataset``.
+    """
     workflow: Literal["geom_benchmark"] = Field(..., description="Must be 'geom_benchmark'")
     server: ServerConfig = Field(ServerConfig(), description="QCFractal server connection settings")
-    molecule: str = Field(..., description="Name of the target molecule")
-    benchmark_structures: List[str] = Field(..., description="List of benchmark structure identifiers")
-    small_molecule_collection: str = Field("Small_molecules", description="Name of the small molecule collection")
-    surface_model_collection: str = Field("small water", description="Name of the surface model collection")
-    atoms_collection: str = Field("atoms", description="Name of the SinglepointDataset containing atomic species (used when the adsorbate is a single atom)")
+    opt_dataset: str = Field(
+        ...,
+        description=(
+            "Name of the OptimizationDataset containing every entry in "
+            "``benchmark_structures``. Entry names are free-form labels."
+        ),
+    )
+    benchmark_structures: List[str] = Field(
+        ...,
+        description=(
+            "Entry names within ``opt_dataset`` to benchmark. Each stored "
+            "molecule carries its own charge/multiplicity — no global "
+            "adsorbate multiplicity is assumed."
+        ),
+    )
     reference_geometry_level_of_theory: List[str] = Field(
         ["ccsd(t)", "aug-cc-pvtz", "psi4"],
         description="Reference geometry level of theory [method, basis, program]",
@@ -52,7 +45,6 @@ class GeomBenchmarkConfig(BaseModel):
     dft_optimization_keyword: Optional[int] = Field(None, description="QCFractal keyword ID for DFT optimizations")
     tag_dft_geometry: Optional[str] = Field(None, description="Queue tag for DFT geometry tasks")
     use_initial_reference_geometry: bool = Field(False, description="Use initial (unoptimized) reference geometry")
-    bsse_test: Optional[BSSETestConfig] = Field(None, description="Optional BSSE/dispersion test on a single functional")
     trajectory_analysis: bool = Field(
         True,
         description=(

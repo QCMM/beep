@@ -174,7 +174,7 @@ def test_sampling_opt_keywords_merge_semantics():
 def test_geom_benchmark_lowercases_reference_method_and_basis():
     cfg = GeomBenchmarkConfig(
         workflow="geom_benchmark",
-        molecule="H2O",
+        opt_dataset="mix-h2o-h2s",
         benchmark_structures=["W22_01"],
         reference_geometry_level_of_theory=["CCSD(T)", "AUG-CC-PVTZ", "psi4"],
     )
