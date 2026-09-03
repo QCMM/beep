@@ -404,20 +404,32 @@ def wait_for_nm_completion(
         complete = incomplete = error = 0
         to_reset: List[int] = []
         for ds_sp in sp_dsets.values():
-            for entry_name in ds_sp.entry_names:
-                for spec_key in all_spec_names:
-                    record = ds_sp.get_record(entry_name, spec_key)
-                    if record is None:
-                        continue
-                    if is_complete(record.status):
-                        complete += 1
-                    elif is_incomplete(record.status):
-                        incomplete += 1
-                    elif is_error(record.status):
-                        if reset_counts.get(record.id, 0) < max_resets:
-                            to_reset.append(record.id)
-                        else:
-                            error += 1              # retries exhausted -> give up
+            # One aggregated /status request per dataset instead of one
+            # get_record() HTTP round-trip per (entry × spec) leaf — at
+            # benchmark scale (~2600 leaves) the per-record sweep was >10 min
+            # of pure latency with no output, indistinguishable from a hang.
+            spec_status = ds_sp.status()
+            n_err = 0
+            for spec_key in all_spec_names:
+                for status_val, n in spec_status.get(spec_key, {}).items():
+                    if is_complete(status_val):
+                        complete += n
+                    elif is_incomplete(status_val):
+                        incomplete += n
+                    elif is_error(status_val):
+                        n_err += n
+            if n_err == 0:
+                continue
+            # Errors present: fetch only those records (batched server-side)
+            # — the retry bookkeeping needs their ids.
+            for _entry, _spec, record in ds_sp.iterate_records(
+                specification_names=list(all_spec_names),
+                status=qcf.RecordStatusEnum.error,
+            ):
+                if reset_counts.get(record.id, 0) < max_resets:
+                    to_reset.append(record.id)
+                else:
+                    error += 1              # retries exhausted -> give up
         # Recover transient failures before deciding we are done.
         if to_reset:
             # A single record can appear via more than one (entry, spec) if two
