@@ -197,7 +197,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
         logger.info(f"  Slab {c+1}/{len(slabs)}: {slab_name}")
         logger.info("=" * 80 + "\n")
 
-        surface = qcf.fetch_initial_molecule(ds_surf, slab_name, lot.lot_name)
+        surface = qcf.fetch_entry_initial_molecule(ds_surf, slab_name)
         cell_ang = _resolve_cell(config, surface)
 
         # Build the OptimizationDataset for this slab's sampling run
