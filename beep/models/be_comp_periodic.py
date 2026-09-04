@@ -37,6 +37,16 @@ class BeCompPeriodicConfig(BaseModel):
             "the range-separated 'left half' of the BE. Must be an MLP."
         ),
     )
+    opt_level_of_theory: str = Field(
+        ...,
+        description=(
+            "Name of the optimization specification holding the geometries to "
+            "evaluate, i.e. the LOT sampling_periodic ran with (e.g. "
+            "'lmft-co-d-v0'). In a range-separated setup this differs from "
+            "be_electronic_lot: geometries come from the dispersion-inclusive "
+            "model, the BE from the electronic model plus explicit dispersion."
+        ),
+    )
     be_dispersion: str = Field(
         ...,
         description=(

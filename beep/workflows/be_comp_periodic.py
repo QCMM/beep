@@ -121,15 +121,19 @@ def _submit_and_collect(
     return pids
 
 
-def _resolve_cell(config: BeCompPeriodicConfig, surface_extras) -> list:
-    """Config-level `cell` wins; else fall back to surface Molecule.extras['cell']."""
+def _resolve_cell(config: BeCompPeriodicConfig, surface_extras, record_cell=None) -> list:
+    """Config-level `cell` wins, then the cell the geometries were optimized
+    under, then surface Molecule.extras['cell']."""
     if config.cell is not None:
         return config.cell
+    if record_cell is not None:
+        return record_cell
     extras_cell = (surface_extras or {}).get("cell")
     if extras_cell is None:
         raise ValueError(
-            "be_comp_periodic: no cell available. Either set 'cell' in the workflow "
-            "config or store it on each slab's molecule.extras['cell']."
+            "be_comp_periodic: no cell available. Set 'cell' in the workflow config, "
+            "or store it on each slab's molecule.extras['cell']; it is normally read "
+            "back from the optimization spec sampling_periodic registered."
         )
     return extras_cell
 
@@ -154,6 +158,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
     logger.info(config_summary_msg(config))
 
     elec_lot = config.be_electronic_lot
+    opt_lot = config.opt_level_of_theory
 
     # --- Gas-phase adsorbate reference (once) ---
     logger.info("\n--- gas-phase adsorbate reference ---")
@@ -207,10 +212,10 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
         # Pull the final optimized molecules for each; use surface.extras for cell fallback
         # (any complete surface record works — they all sit on the same slab).
         surface_final = qcf.fetch_opt_molecules(
-            ds_surface, common, elec_lot.lot_name, status="COMPLETE",
+            ds_surface, common, opt_lot, status="COMPLETE",
         )
         complex_final = qcf.fetch_opt_molecules(
-            ds_complex, common, elec_lot.lot_name, status="COMPLETE",
+            ds_complex, common, opt_lot, status="COMPLETE",
         )
         surface_final_map = dict(surface_final)
         complex_final_map = dict(complex_final)
@@ -222,7 +227,8 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
 
         # Cell: config-level or from any slab record's extras
         sample_mol = surface_final_map[complete_common[0]]
-        cell_ang = _resolve_cell(config, sample_mol.extras)
+        record_cell, _ = qcf.fetch_opt_cell(ds_surface, complete_common[0], opt_lot)
+        cell_ang = _resolve_cell(config, sample_mol.extras, record_cell)
         keywords_periodic = {
             "cell": [list(row) for row in cell_ang],
             "pbc": list(config.pbc),
