@@ -51,6 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Removed `BeHessConfig.dispersion_tag`** (added in 0.15.0 alongside
+  `mace_dispersion`). It routed the analytic dispersion single-points to
+  a separate queue tag from the MLP energies, but QCFractal already
+  matches tasks to managers on *program availability* at claim time: a
+  GPU manager without `dftd4`/`s-dftd3` in its environment never claims
+  dispersion jobs, and a CPU manager without `mace` never claims MLP
+  jobs — so a single `energy_tag` routes both spec families correctly
+  and the extra knob solved a problem that doesn't exist with disjoint
+  worker environments. Configs that set `dispersion_tag` must drop the
+  field; dispersion submissions now always use `energy_tag`.
+
 - **`geom_benchmark` is now entry-based (BREAKING config change),
   mirroring the `nm_sampling` generalisation.** The workflow benchmarks
   exactly the entries listed in `benchmark_structures`, all living in a

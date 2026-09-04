@@ -193,7 +193,6 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
             job_ids = qcf.compute_be_mace_energies(
                 client, rdset_base, config.mace_models, config.energy_tag,
                 logger=logger, mace_dispersion=config.mace_dispersion,
-                dispersion_tag=config.dispersion_tag,
             )
             all_ids.extend(job_ids)
         logger.info(f"Finished processing {rdset_name}\n\n\n")

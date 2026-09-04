@@ -40,16 +40,6 @@ class BeHessConfig(BaseModel):
     hessian_clusters: List[str] = Field([], description="Cluster names for Hessian calculations")
     program: str = Field("psi4", description="QC program to use")
     energy_tag: Optional[str] = Field(None, description="Queue tag for energy computation tasks")
-    dispersion_tag: Optional[str] = Field(
-        None,
-        description=(
-            "Queue tag for the analytic dispersion single-points when "
-            "'mace_dispersion' is set. Defaults to 'energy_tag'. Use a "
-            "separate tag to route dispersion (dftd4/s-dftd3, CPU-only) to a "
-            "CPU manager while the electronic MLP energies run on a GPU "
-            "manager under 'energy_tag'."
-        ),
-    )
     hessian_tag: Optional[str] = Field(None, description="Queue tag for Hessian computation tasks")
 
     _lower_lot = field_validator("level_of_theory")(lowercase_list)
