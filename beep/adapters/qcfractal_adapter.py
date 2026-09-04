@@ -436,6 +436,22 @@ def fetch_opt_molecules(ds_opt, entry_list: List[str], opt_lot: str,
     return mol_list
 
 
+def fetch_opt_energies(ds_opt, entry_list: List[str], opt_lot: str,
+                       status: str = "COMPLETE") -> Dict[str, float]:
+    """Final energies from an optimization dataset, keyed by entry name.
+
+    Used by the periodic duplicate filter to keep the lowest-energy member of each
+    group of equivalent sites rather than whichever was encountered first.
+    """
+    target_status = RecordStatusEnum(status.lower())
+    energies: Dict[str, float] = {}
+    for n in entry_list:
+        record = ds_opt.get_record(n, opt_lot, force_refetch=True)
+        if record is not None and record.status == target_status and record.energies:
+            energies[n] = float(record.energies[-1])
+    return energies
+
+
 # ---------------------------------------------------------------------------
 # Job submission
 # ---------------------------------------------------------------------------
@@ -1370,7 +1386,6 @@ def compute_be_mace_energies(
     tag: str,
     logger: logging.Logger,
     mace_dispersion: Optional[str] = None,
-    dispersion_tag: Optional[str] = None,
 ) -> List[int]:
     """
     Submit MACE MLP energy computations for BE calculations.
@@ -1400,14 +1415,17 @@ def compute_be_mace_energies(
     # functional params from the prefix) named "<alias><suffix>" so the read
     # side (fetch_reaction_values) sums electronic + dispersion into the
     # composite MLP+dispersion BE, mirroring the DFT-D separated pair.
+    # Both spec families share one tag: QCFractal matches tasks to managers on
+    # program availability, so a GPU manager without dftd4/s-dftd3 in its env
+    # never claims dispersion jobs (and a CPU manager without mace never
+    # claims MLP jobs) — no separate routing tag needed.
     disp_program = disp_suffix = None
-    disp_tag = dispersion_tag or tag
     if mace_dispersion:
         _bare, _disp_method, disp_program = _split_dispersion(mace_dispersion)
         disp_suffix = mace_dispersion[len(_bare):]
         logger.info(
             f"Range separation: pairing MLPs with {mace_dispersion} "
-            f"({disp_program}, spec '<model>{disp_suffix}', tag: {disp_tag})\n"
+            f"({disp_program}, spec '<model>{disp_suffix}')\n"
         )
 
     all_submitted = 0
@@ -1432,7 +1450,7 @@ def compute_be_mace_energies(
                 disp_result = submit_energies(
                     client, rdset_base_name,
                     method=mace_dispersion, basis=None, program=disp_program,
-                    stoich=stoich, tag=disp_tag, keywords=None,
+                    stoich=stoich, tag=tag, keywords=None,
                     spec_name=f"{alias}{disp_suffix}",
                 )
                 model_submitted += disp_result.n_inserted

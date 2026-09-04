@@ -470,3 +470,88 @@ def test_cart_freeze_restriction_is_geometric_only():
         SamplingPeriodicConfig(**_periodic_config_kwargs(
             sampling_opt_program="geometric", sampling_opt_keywords={"coordsys": "cart"},
             freeze_below_z_ang=4.0))
+
+
+# ---------------------------------------------------------------------------
+# Periodic duplicate-site filter
+# ---------------------------------------------------------------------------
+
+def _ads(symbols, positions_ang, n_slab=0):
+    """Molecule with n_slab dummy slab atoms first, adsorbate last (BEEP convention)."""
+    import qcelemental as qcel
+    B = 1.8897259886
+    pos = [[10.0, 10.0, 0.0]] * n_slab + list(positions_ang)
+    return qcel.models.Molecule(
+        symbols=["He"] * n_slab + list(symbols),
+        geometry=(np.array(pos) * B).flatten(),
+        fix_com=False, fix_orientation=False, validate=False,
+    )
+
+
+CELL = [[31.0, 0, 0], [0, 31.0, 0], [0, 0, 60.0]]
+PBC = [True, True, False]
+
+
+def test_periodic_filter_catches_wraparound_duplicates():
+    """The cluster filter has no cell: an adsorbate at x=0.3 and one at x=30.8 in a
+    31 A cell are 0.5 A apart, but it measures 30.5 A and keeps both."""
+    from beep.core.periodic_sampler import filter_periodic_sites
+
+    a = ("a", _ads(["C", "O"], [[0.3, 5.0, 12.0], [0.3, 5.0, 13.13]]))
+    b = ("b", _ads(["C", "O"], [[30.8, 5.0, 12.0], [30.8, 5.0, 13.13]]))
+    unique = filter_periodic_sites([a, b], CELL, PBC, 2, com_tol_ang=1.0)
+    assert len(unique) == 1, "wrap-around duplicate should collapse to one site"
+
+
+def test_periodic_filter_keeps_distinct_positions():
+    from beep.core.periodic_sampler import filter_periodic_sites
+
+    a = ("a", _ads(["C", "O"], [[5.0, 5.0, 12.0], [5.0, 5.0, 13.13]]))
+    b = ("b", _ads(["C", "O"], [[15.0, 5.0, 12.0], [15.0, 5.0, 13.13]]))
+    assert len(filter_periodic_sites([a, b], CELL, PBC, 2, com_tol_ang=1.0)) == 2
+
+
+def test_periodic_filter_separates_binding_modes_at_one_position():
+    """C-down and O-down CO at the same spot are different modes, not duplicates."""
+    from beep.core.periodic_sampler import filter_periodic_sites
+
+    c_down = ("c", _ads(["C", "O"], [[5.0, 5.0, 12.0], [5.0, 5.0, 13.13]]))
+    o_down = ("o", _ads(["C", "O"], [[5.0, 5.0, 13.13], [5.0, 5.0, 12.0]]))
+    assert len(filter_periodic_sites([c_down, o_down], CELL, PBC, 2,
+                                     com_tol_ang=1.0, orient_tol_ang=0.3)) == 2
+    # and with the orientation test disabled they merge
+    assert len(filter_periodic_sites([c_down, o_down], CELL, PBC, 2,
+                                     com_tol_ang=1.0, orient_tol_ang=None)) == 1
+
+
+def test_periodic_filter_is_permutation_invariant():
+    """Relabelling identical atoms must not create a new site (the failure that makes
+    a 'longest interatomic vector' axis unusable for CH4/CH3)."""
+    from beep.core.periodic_sampler import filter_periodic_sites
+
+    t = 1.09 / np.sqrt(3)
+    hs = [[t * 1.6, 0, t], [-t * 0.8, t * 1.4, t], [-t * 0.8, -t * 1.4, t], [0, 0, -1.09]]
+    base = [[0, 0, 0]] + hs
+    perm = [[0, 0, 0]] + [hs[3], hs[0], hs[2], hs[1]]
+    a = ("a", _ads(["C"] + ["H"] * 4, [[5 + x, 5 + y, 12 + z] for x, y, z in base]))
+    b = ("b", _ads(["C"] + ["H"] * 4, [[5 + x, 5 + y, 12 + z] for x, y, z in perm]))
+    assert len(filter_periodic_sites([a, b], CELL, PBC, 5,
+                                     com_tol_ang=0.4, orient_tol_ang=0.3)) == 1
+
+
+def test_periodic_filter_keeps_lowest_energy_representative():
+    from beep.core.periodic_sampler import filter_periodic_sites
+
+    a = ("high", _ads(["C", "O"], [[5.0, 5.0, 12.0], [5.0, 5.0, 13.13]]))
+    b = ("low", _ads(["C", "O"], [[5.1, 5.0, 12.0], [5.1, 5.0, 13.13]]))
+    unique = filter_periodic_sites([a, b], CELL, PBC, 2, com_tol_ang=1.0,
+                                   energies={"high": -10.0, "low": -11.0})
+    assert [n for n, _ in unique] == ["low"]
+
+
+def test_site_filter_config_defaults_to_periodic():
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+
+    cfg = SamplingPeriodicConfig(**_periodic_config_kwargs())
+    assert cfg.site_filter == "periodic"
+    assert cfg.orientation_tol_ang == 0.3

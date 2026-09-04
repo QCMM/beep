@@ -236,6 +236,124 @@ def frozen_atom_indices(
 
 
 # ---------------------------------------------------------------------------
+# Duplicate filtering (periodic)
+# ---------------------------------------------------------------------------
+
+def _adsorbate_com_and_profile(mol, n_adsorbate_atoms: int) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+    """Adsorbate COM, and an element-resolved sorted height profile about it.
+
+    The profile is, per element, the z-displacements of that element's atoms from the
+    adsorbate COM, sorted. z is the surface normal, so this measures orientation
+    *relative to the surface* -- the physically meaningful axis for adsorption.
+
+    Chosen over a principal axis because an axis is ill-defined for the molecules this
+    workflow targets: CH4 is a spherical top (all moments of inertia equal, axes
+    arbitrary) yet its orientation matters; a "longest interatomic vector" flips between
+    symmetry-equivalent atom pairs in CH4/CH3; and CH3OH's methyl torsion moves it
+    without changing the binding mode. Sorting within each element makes the profile
+    permutation-invariant, so identical atoms swapping never registers as a new mode,
+    while C-down vs O-down CO, or face- vs vertex-down CH4, still do.
+
+    Invariant to azimuthal rotation about z by construction -- acceptable here because on
+    an amorphous surface a different azimuth almost always comes with a different COM.
+    """
+    geom = np.asarray(mol.geometry, dtype=float).reshape(-1, 3)[-n_adsorbate_atoms:]
+    masses = np.asarray(mol.masses, dtype=float)[-n_adsorbate_atoms:]
+    symbols = [str(s) for s in mol.symbols][-n_adsorbate_atoms:]
+    com = (geom * masses[:, None]).sum(axis=0) / masses.sum()
+    profile: Dict[str, np.ndarray] = {}
+    for el in sorted(set(symbols)):
+        idx = [i for i, s in enumerate(symbols) if s == el]
+        profile[el] = np.sort(geom[idx, 2] - com[2])
+    return com, profile
+
+
+def _profile_distance(pa: Dict[str, np.ndarray], pb: Dict[str, np.ndarray]) -> float:
+    """RMS difference between two height profiles, in bohr (elementwise, sorted)."""
+    if set(pa) != set(pb):
+        return float("inf")
+    diffs = np.concatenate([pa[el] - pb[el] for el in sorted(pa)])
+    return float(np.sqrt((diffs ** 2).mean()))
+
+
+def filter_periodic_sites(
+    named_molecules,
+    cell_ang,
+    pbc,
+    n_adsorbate_atoms: int,
+    com_tol_ang: float,
+    orient_tol_ang: Optional[float] = 0.3,
+    energies: Optional[Dict[str, float]] = None,
+    logger=None,
+):
+    """Deduplicate binding sites by adsorbate position under the minimum-image convention.
+
+    Replaces the cluster filter for periodic slabs, for two reasons.
+
+    **Correctness.** ``filter_binding_sites`` has no notion of a cell: an adsorbate at
+    x = 0.3 A and one at x = 30.8 A in a 31 A cell are half an Angstrom apart physically,
+    but it measures 30.5 A and keeps both. Every wrap-around duplicate survives.
+
+    **Cost.** It Kabsch-aligns whole structures, measured at ~13.7 s per pair at 1502
+    atoms -- hours per slab, with the GPUs idle meanwhile. That work is wasted here: the
+    slab is frozen (identical across structures by construction) and the mobile layers
+    relax only slightly, so what distinguishes two sites is where the adsorbate sits.
+
+    Sites are duplicates when their adsorbate COMs coincide within ``com_tol_ang`` AND,
+    when ``orient_tol_ang`` is set, their height profiles agree within that RMS distance.
+    The orientation test is what keeps C-down and O-down CO at the same position apart --
+    physically distinct modes that a COM-only comparison would merge. Pass
+    ``orient_tol_ang=None`` to compare positions alone.
+
+    The representative kept for each duplicate group is the lowest-energy member when
+    ``energies`` is supplied, otherwise the first encountered.
+    """
+    if not named_molecules:
+        return []
+    cell = np.asarray(cell_ang, dtype=float)
+    inv_cell = np.linalg.inv(cell)
+    periodic = np.asarray(pbc, dtype=bool)
+
+    coms, profiles, names = [], [], []
+    for name, mol in named_molecules:
+        com, profile = _adsorbate_com_and_profile(mol, n_adsorbate_atoms)
+        coms.append(com * BOHR2ANG)
+        profiles.append(profile)
+        names.append(name)
+    coms = np.asarray(coms)
+
+    order = list(range(len(names)))
+    if energies:
+        order.sort(key=lambda k: energies.get(names[k], float("inf")))
+
+    kept: List[int] = []
+    frac = coms @ inv_cell
+    for k in order:
+        dup = False
+        for m in kept:
+            df = frac[k] - frac[m]
+            df[periodic] -= np.round(df[periodic])          # minimum image
+            if np.linalg.norm(df @ cell) > com_tol_ang:
+                continue
+            if orient_tol_ang is not None:
+                if _profile_distance(profiles[k], profiles[m]) * BOHR2ANG > orient_tol_ang:
+                    continue                                # same spot, different mode
+            dup = True
+            break
+        if not dup:
+            kept.append(k)
+
+    keep = {names[k] for k in kept}
+    if logger is not None:
+        logger.info(
+            f"  periodic filter: {len(keep)} unique of {len(names)} "
+            f"(COM tol {com_tol_ang} A"
+            + (f", height-profile tol {orient_tol_ang} A)" if orient_tol_ang else ")")
+        )
+    return [(n, m) for n, m in named_molecules if n in keep]
+
+
+# ---------------------------------------------------------------------------
 # Candidate generation
 # ---------------------------------------------------------------------------
 

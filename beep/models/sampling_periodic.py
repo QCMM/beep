@@ -90,6 +90,30 @@ class SamplingPeriodicConfig(BaseModel):
         ),
     )
 
+    # Duplicate-site filtering
+    site_filter: str = Field(
+        "periodic",
+        description=(
+            "Duplicate-site filter. 'periodic' compares adsorbate position under the "
+            "minimum-image convention plus an element-resolved height profile: correct "
+            "for a cell (the cluster filter has no notion of one, so it keeps every "
+            "wrap-around duplicate) and ~0.15 s for 120 structures against hours, since "
+            "it does not Kabsch-align 1500-atom slabs whose frozen layers are identical "
+            "by construction. 'cluster' uses the original filter_binding_sites."
+        ),
+    )
+    orientation_tol_ang: Optional[float] = Field(
+        0.3,
+        description=(
+            "Height-profile tolerance (Angstrom) for the periodic filter. Two sites at "
+            "the same position count as one only if their per-element sorted heights "
+            "above the adsorbate COM agree within this. Keeps physically distinct modes "
+            "apart (C-down vs O-down CO ~1.1 A; face- vs vertex-down CH4 ~0.8 A) while "
+            "ignoring non-modes (atom relabelling, methyl torsion: exactly 0). "
+            "Set null to compare positions only."
+        ),
+    )
+
     # Optimization engine
     sampling_opt_program: str = Field(
         "geometric",

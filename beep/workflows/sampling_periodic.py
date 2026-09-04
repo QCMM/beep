@@ -25,6 +25,7 @@ from ..core.periodic_sampler import (
     ANG2BOHR,
     build_freeze_constraints,
     frozen_atom_indices,
+    filter_periodic_sites,
     run_periodic_sampling,
     write_overlay_xyz,
     strip_adsorbate,
@@ -287,11 +288,23 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
             f"{len(added_names) - n_complete} in other states."
         )
 
-        unique = filter_binding_sites(
-            opt_molecules, [], cut_off_val=config.rmsd_value,
-            rmsd_symm=config.rmsd_symmetry, ligand_size=len(adsorbate.symbols),
-            logger=logger, grid=0.5, nb_radius=4, dm_tau=1e-3,
-        )
+        if config.site_filter == "periodic":
+            # energies let the filter keep the lowest-energy member of each duplicate
+            # group rather than whichever happened to be encountered first
+            energies = qcf.fetch_opt_energies(ds_opt, added_names, lot.lot_name)
+            unique = filter_periodic_sites(
+                opt_molecules, cell_ang, config.pbc,
+                n_adsorbate_atoms=len(adsorbate.symbols),
+                com_tol_ang=config.rmsd_value,
+                orient_tol_ang=config.orientation_tol_ang,
+                energies=energies, logger=logger,
+            )
+        else:
+            unique = filter_binding_sites(
+                opt_molecules, [], cut_off_val=config.rmsd_value,
+                rmsd_symm=config.rmsd_symmetry, ligand_size=len(adsorbate.symbols),
+                logger=logger, grid=0.5, nb_radius=4, dm_tau=1e-3,
+            )
         n_unique = len(unique)
 
         # Write per-slab unique-sites list to data/
