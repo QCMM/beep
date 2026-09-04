@@ -421,6 +421,31 @@ def fetch_initial_molecule(ds_opt, entry_name: str, opt_lot: str) -> Molecule:
     return fetch_opt_record(ds_opt, entry_name, opt_lot).initial_molecule
 
 
+def fetch_opt_cell(ds_opt, entry_name: str, opt_lot: str):
+    """The periodic cell an optimization was run under, from its QC spec keywords.
+
+    sampling_periodic passes ``cell``/``pbc`` through the singlepoint keywords of
+    the optimization specification, and QCFractal does not propagate molecule
+    extras into the optimized output geometry. Reading the cell back from the
+    record is therefore the only source that is guaranteed to match the geometry
+    being evaluated. Returns ``(cell, pbc)``, either of which may be None.
+    """
+    record = fetch_opt_record(ds_opt, entry_name, opt_lot)
+    keywords = dict(record.specification.qc_specification.keywords or {})
+    return keywords.get("cell"), keywords.get("pbc")
+
+
+def fetch_entry_initial_molecule(ds_opt, entry_name: str) -> Molecule:
+    """Initial molecule of an OptimizationDataset *entry*, independent of any spec.
+
+    The input geometry of an entry is a property of the entry, not of a
+    calculation run on it, so retrieving it must not require a matching
+    optimization specification to exist. Used to read bare slabs out of a
+    surface collection whose registered specs belong to a different adsorbate.
+    """
+    return ds_opt.get_entry(entry_name).initial_molecule
+
+
 def fetch_opt_molecules(ds_opt, entry_list: List[str], opt_lot: str,
                         status: str = "COMPLETE") -> List[Tuple[str, Molecule]]:
     """
