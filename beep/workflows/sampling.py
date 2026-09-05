@@ -176,15 +176,14 @@ def run_sampling(
         ]
 
         logger.info(
-            "Number of existing entries: {}   {}".format(
-                len(shell_old_entries), " ".join(shell_old_entries)
-            )
+            f"Candidate entry name slots: {len(entry_name_list)} "
+            f"({len(shell_old_entries)} already in dataset, "
+            f"{len(shell_new_entries)} available)"
         )
-        logger.info(
-            "Number of new entries: {}   {}".format(
-                len(shell_new_entries), " ".join(shell_new_entries)
+        if shell_old_entries:
+            logger.debug(
+                "Existing entries: " + " ".join(shell_old_entries)
             )
-        )
 
         n_smpl_mol -= len(shell_new_entries)
 
@@ -215,8 +214,8 @@ def run_sampling(
             )
 
             logger.info(
-                f"Adding entries for {len(molecules)} new molecules to the "
-                f"{sampling_opt_dset.name} OptimizationDataset "
+                f"Sampler produced {len(molecules)} valid placements → "
+                f"adding {len(molecules)} entries to {sampling_opt_dset.name}"
             )
             for i, m in enumerate(molecules):
                 n_smpl_mol += 1
