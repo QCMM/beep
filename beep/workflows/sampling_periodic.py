@@ -12,6 +12,7 @@ Bottom-layer freezing goes through geomeTRIC's constraints keyword.
 from __future__ import annotations
 
 import logging
+import numpy as np
 import random
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from ..models.base import safe_config_dump
 from ..core.logging_utils import beep_banner
 from ..adapters import qcfractal_adapter as qcf
 from ..core.periodic_sampler import (
+    pad_nonperiodic_axes,
     ANG2BOHR,
     build_freeze_constraints,
     frozen_atom_indices,
@@ -31,6 +33,8 @@ from ..core.periodic_sampler import (
     strip_adsorbate,
 )
 from ..core.sampling import filter_binding_sites
+
+BOHR2ANG = 0.529177210903
 
 bcheck = "✔"
 POLL_FREQUENCY_SEC = 120
@@ -199,6 +203,18 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
 
         surface = qcf.fetch_entry_initial_molecule(ds_surf, slab_name)
         cell_ang = _resolve_cell(config, surface)
+        # Pad non-periodic axes so the slab cannot wrap into itself. The stored
+        # convention is X x X x X/2, thinner than the slab, and the dispersion
+        # backends fold coordinates along every axis regardless of the pbc mask.
+        # Padding costs nothing and leaves the in-plane lattice untouched.
+        surface_geom_ang = np.asarray(
+            surface.geometry, dtype=float
+        ).reshape(-1, 3) * BOHR2ANG
+        cell_ang = pad_nonperiodic_axes(cell_ang, config.pbc, surface_geom_ang)
+        logger.info(
+            "  cell (non-periodic axes padded): "
+            f"{[round(cell_ang[i][i], 2) for i in range(3)]} Angstrom"
+        )
 
         # Build the OptimizationDataset for this slab's sampling run
         opt_dset_name = f"{smol_name}_{slab_name}"

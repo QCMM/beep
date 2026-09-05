@@ -71,6 +71,54 @@ def wrap_into_cell(
 # Grid construction
 # ---------------------------------------------------------------------------
 
+# Vacuum added along non-periodic axes, in Angstrom. Dispersion backends
+# (s-dftd3, dftd4) wrap coordinates into the cell along EVERY axis, including
+# ones flagged non-periodic, so a slab thicker than its own box folds into
+# itself. Padding by more than twice the dispersion cutoff (~32 A) makes that
+# wrap a no-op.
+DEFAULT_VACUUM_ANG = 80.0
+
+
+def pad_nonperiodic_axes(
+    cell_ang: Sequence[Sequence[float]],
+    pbc: Sequence[bool],
+    geometry_ang: np.ndarray,
+    vacuum_ang: float = DEFAULT_VACUUM_ANG,
+) -> List[List[float]]:
+    """Add vacuum along non-periodic axes so the system cannot wrap into itself.
+
+    The ASW500 slabs are stored with a cell of X x X x X/2 = 31.06 x 31.06 x
+    15.53 A while the slab spans 18.15 A in z, i.e. the slab is thicker than its
+    own box. Backends fold coordinates into the box regardless of the pbc mask,
+    which moved adsorbates from above the surface to inside the slab (measured:
+    an adsorbate at z = 16.90 A folded to z = 1.37 A, leaving it 0.66 A from a
+    water oxygen) and added a near-constant -2 to -3 kcal/mol to every binding
+    energy.
+
+    Each non-periodic axis is lengthened to the system's extent along it plus
+    ``vacuum_ang``. Periodic axes are never touched, so the in-plane lattice that
+    defines the surface is preserved exactly.
+    """
+    cell = np.asarray(cell_ang, dtype=float).copy()
+    geom = np.asarray(geometry_ang, dtype=float).reshape(-1, 3)
+    for axis in range(3):
+        if bool(pbc[axis]):
+            continue
+        vec = cell[axis]
+        norm = float(np.linalg.norm(vec))
+        if norm == 0.0:
+            vec = np.zeros(3)
+            vec[axis] = 1.0
+            norm = 1.0
+        direction = vec / norm
+        proj = geom @ direction
+        extent = float(proj.max() - proj.min()) if len(geom) else 0.0
+        needed = extent + vacuum_ang
+        if norm < needed:
+            cell[axis] = direction * needed
+    return [list(row) for row in cell]
+
+
 def build_grid(
     cell_diag_bohr: np.ndarray,
     step_size_bohr: float,

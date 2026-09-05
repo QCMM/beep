@@ -14,6 +14,11 @@ Submits everything, waits for completion. Assembly happens in
 from __future__ import annotations
 
 import logging
+
+import numpy as np
+from beep.core.periodic_sampler import pad_nonperiodic_axes
+
+BOHR2ANG = 0.529177210903
 from pathlib import Path
 from typing import List, Tuple
 
@@ -229,10 +234,24 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
         sample_mol = surface_final_map[complete_common[0]]
         record_cell, _ = qcf.fetch_opt_cell(ds_surface, complete_common[0], opt_lot)
         cell_ang = _resolve_cell(config, sample_mol.extras, record_cell)
+        # Pad non-periodic axes. The cell recorded by sampling_periodic can be
+        # thinner than the slab (X x X x X/2 against an 18 A slab), and the
+        # dispersion backends wrap along every axis regardless of the pbc mask,
+        # which folds the adsorbate into the slab. Padding here also repairs the
+        # BE for geometries optimized before this was understood, without
+        # re-running the optimizations, whose MACE energies were unaffected.
+        complex_geom = np.asarray(
+            complex_final_map[complete_common[0]].geometry, dtype=float
+        ).reshape(-1, 3) * BOHR2ANG
+        cell_ang = pad_nonperiodic_axes(cell_ang, config.pbc, complex_geom)
         keywords_periodic = {
             "cell": [list(row) for row in cell_ang],
             "pbc": list(config.pbc),
         }
+        logger.info(
+            f"  cell for SPs (non-periodic axes padded): "
+            f"{[round(cell_ang[i][i], 2) for i in range(3)]} Angstrom"
+        )
         logger.info(
             f"  {len(complete_common)}/{len(common)} sites COMPLETE in both datasets"
         )
