@@ -95,6 +95,7 @@ def run_sampling(
     sampling_shell: float,
     sampling_condition: str,
     logger,
+    sampling_method: str = "adaptive",
     sampling_opt_keywords=None,
 ):
     """
@@ -210,6 +211,7 @@ def run_sampling(
                 sampling_shell=shell,
                 max_structures=max_structures,
                 debug=True,
+                method=sampling_method,
                 condition=sampling_condition,
             )
 
@@ -367,6 +369,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         "rmsd_val": config.rmsd_value,
         "sampling_shell": config.sampling_shell,
         "sampling_condition": config.sampling_condition,
+        "sampling_method": config.sampling_method,
         "opt_lot": opt_lot,
         "logger": logger,
         "sampling_opt_keywords": config.sampling_opt_keywords,

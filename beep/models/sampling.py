@@ -14,6 +14,13 @@ class SamplingConfig(BaseModel):
     atoms_collection: str = Field("atoms", description="Name of the SinglepointDataset containing atomic species")
     sampling_shell: float = Field(2.0, description="Radius of the sampling shell in Angstrom")
     sampling_condition: str = Field("normal", description="Sampling density: sparse|normal|fine|hyperfine")
+    sampling_method: Literal["adaptive", "sphere"] = Field(
+        "adaptive",
+        description=(
+            "Binding-site placement scheme: 'adaptive' (surface-anchored, "
+            "default) or 'sphere' (legacy spherical-shell sampler)."
+        ),
+    )
     sampling_level_of_theory: LevelOfTheory = Field(..., description="Level of theory for initial sampling optimizations")
     refinement_level_of_theory: LevelOfTheory = Field(..., description="Level of theory for refinement optimizations")
     rmsd_value: float = Field(0.40, description="RMSD threshold in Angstrom for filtering duplicate structures")

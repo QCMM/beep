@@ -249,7 +249,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **Adaptive surface-anchored binding-site sampler** (now the default;
-  `method="sphere"` kept as a fallback). Replaces the spherical-shell scheme,
+  the legacy sampler selectable via the new config field
+  `SamplingConfig.sampling_method: "adaptive" | "sphere"`, default
+  `"adaptive"`). Replaces the spherical-shell scheme,
   which placed candidates on a single averaged-radius sphere and so floated over
   concavities and undersampled large clusters. The new sampler is
   composition-agnostic (per-element vdW radii only — water, CO2, methanol and
