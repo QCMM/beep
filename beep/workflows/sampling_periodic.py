@@ -213,7 +213,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
         cell_ang = pad_nonperiodic_axes(cell_ang, config.pbc, surface_geom_ang)
         logger.info(
             "  cell (non-periodic axes padded): "
-            f"{[round(cell_ang[i][i], 2) for i in range(3)]} Angstrom"
+            f"{[round(float(cell_ang[i][i]), 2) for i in range(3)]} Angstrom"
         )
 
         # Build the OptimizationDataset for this slab's sampling run

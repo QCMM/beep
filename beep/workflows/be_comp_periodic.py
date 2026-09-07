@@ -250,7 +250,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
         }
         logger.info(
             f"  cell for SPs (non-periodic axes padded): "
-            f"{[round(cell_ang[i][i], 2) for i in range(3)]} Angstrom"
+            f"{[round(float(cell_ang[i][i]), 2) for i in range(3)]} Angstrom"
         )
         logger.info(
             f"  {len(complete_common)}/{len(common)} sites COMPLETE in both datasets"
