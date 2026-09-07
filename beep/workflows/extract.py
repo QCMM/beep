@@ -87,8 +87,12 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
             logger.info(f"ReactionDataset {name_be} exists but seems to be empty, please check.")
             continue
 
-        all_columns = df_be.columns if not df_be.empty else df.columns
-        df = df.reindex(columns=all_columns)
+        # Column union across clusters happens naturally via pd.concat's outer
+        # join: a method computed only for some clusters keeps its column, with
+        # NaN rows for the clusters that lack it (downstream means are skipna).
+        # Do NOT reindex onto the accumulated columns — that projects away any
+        # method the first-iterated cluster didn't have, silently and
+        # iteration-order-dependently.
         df = df.reset_index().rename(columns={"index": "OriginalIndex"})
         df_be = pd.concat(
             [df_be, df.dropna(axis=1, how="all")], axis=0, ignore_index=True

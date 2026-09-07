@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`extract`: methods present only in later clusters no longer vanish
+  from the report.** `concatenate_frames` reindexed every subsequent
+  cluster's frame onto the columns accumulated from the first-iterated
+  cluster, silently projecting away any method that cluster lacked — so
+  a functional (or MACE model) added mid-campaign disappeared from the
+  extraction whenever a method-poor cluster happened to iterate first,
+  making results dependent on cluster iteration order. The reindex is
+  gone; `pd.concat`'s outer join takes the column union, and clusters
+  lacking a method carry NaN rows (downstream means are skipna).
+  Regression test covers both iteration orders.
+
 - **`sampling_periodic`: every frozen-slab optimization died on submission.**
   `build_freeze_constraint_string` emitted geomeTRIC's *classic text* constraints
   block (`"$freeze\nxyz 1-3\n"`), but the JSON API that QCEngine drives

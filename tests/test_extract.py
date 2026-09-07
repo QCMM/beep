@@ -172,3 +172,54 @@ def test_concatenate_frames_drops_dft_bare_dispersion(mock_fetch, mock_exists):
     assert "mpwb1k-d3bj/def2-tzvpd" in df.columns   # composite kept
     assert "mpwb1k-d3bj" not in df.columns           # bare dispersion dropped
     assert "mpwb1k/def2-tzvpd" not in df.columns     # bare electronic dropped
+
+
+@pytest.mark.parametrize("cluster_order", [
+    ["W12_1", "W12_2"],   # method-poor cluster first (the pre-fix failure order)
+    ["W12_2", "W12_1"],   # method-rich cluster first
+])
+@patch("beep.workflows.extract.qcf.check_collection_exists", return_value=True)
+@patch("beep.workflows.extract.qcf.fetch_reaction_values")
+def test_concatenate_frames_unions_method_columns_across_clusters(
+    mock_fetch, mock_exists, cluster_order,
+):
+    """Regression: methods present only in later clusters must survive.
+
+    Pre-fix, each subsequent cluster's frame was reindexed onto the columns
+    accumulated from the first cluster, so a method computed only for a
+    later cluster (e.g. B3LYP added mid-campaign) vanished from the report,
+    and the outcome depended on cluster iteration order. pd.concat's outer
+    join takes the column union; clusters lacking a method carry NaN rows.
+    """
+    from beep.workflows.extract import concatenate_frames
+
+    frames = {
+        # W12_1: PBE only
+        "be_CO_W12_1_PBE-D3BJ_DEF2-SVP": pd.DataFrame(
+            {"pbe-d3bj/def2-svp": [-10.0, -11.0]},
+            index=["CO_W12_1_0001", "CO_W12_1_0002"]),
+        # W12_2: PBE + B3LYP
+        "be_CO_W12_2_PBE-D3BJ_DEF2-SVP": pd.DataFrame(
+            {"pbe-d3bj/def2-svp": [-12.0],
+             "b3lyp-d3bj/def2-svp": [-13.0]},
+            index=["CO_W12_2_0001"]),
+    }
+    mock_fetch.side_effect = lambda client, name, stoich: frames[name]
+
+    ds_w = MagicMock()
+    ds_w.entry_names = cluster_order
+    df, ok = concatenate_frames(
+        MagicMock(), "CO", ds_w, "pbe-d3bj_def2-svp",
+        be_range=(-0.1, -25.0), stoichiometry="bsse")
+
+    assert ok
+    # The union must hold regardless of iteration order
+    assert "pbe-d3bj/def2-svp" in df.columns
+    assert "b3lyp-d3bj/def2-svp" in df.columns, (
+        f"B3LYP column lost with cluster order {cluster_order}"
+    )
+    # All three sites survive; the PBE-only cluster carries NaN for B3LYP
+    assert len(df) == 3
+    assert df.loc["CO_W12_2_0001", "b3lyp-d3bj/def2-svp"] == pytest.approx(-13.0)
+    assert df.loc[["CO_W12_1_0001", "CO_W12_1_0002"],
+                  "b3lyp-d3bj/def2-svp"].isna().all()
