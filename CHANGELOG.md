@@ -144,6 +144,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Commit-authorship policy + CI enforcement** (`CONTRIBUTING.md`,
+  `.github/workflows/attribution.yaml`,
+  `.github/scripts/check_ai_attribution.py`). The authors of a commit have
+  to be people: AI assistants may be used freely and disclosed freely
+  (`Made-with:` trailers, message-body mentions), but must not appear as
+  commit author, committer, or `Co-authored-by:` trailer. A pull-request-only
+  CI job checks the commits each PR adds (merged history is never
+  retro-failed); detection keys on vendor email addresses, bot accounts, and
+  assistant product names, never on a bare first name. Adapted from the
+  equivalent policy in the stvogt/mace fork. BEEP's first CI workflow.
+
 - **New workflow `be_assemble_periodic`** — extraction workflow closing the
   periodic BE pipeline. Reads the paired MACE-electronic + explicit-dispersion
   single-point energies submitted by `be_comp_periodic` (from the
