@@ -258,7 +258,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
 
         # Register + submit on complex SP dataset
         ds_complex_sp = qcf.get_or_create_singlepoint_dataset(
-            client, f"{complex_dset_name}_be_sp",
+            client, f"{complex_dset_name}_be_sp{config.sp_dataset_suffix}",
         )
         specs_complex, _, _ = _build_be_specs(
             ds_complex_sp, elec_lot, config.be_dispersion,
@@ -279,7 +279,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
 
         # Register + submit on bare-surface SP dataset
         ds_surface_sp = qcf.get_or_create_singlepoint_dataset(
-            client, f"{surface_dset_name}_be_sp",
+            client, f"{surface_dset_name}_be_sp{config.sp_dataset_suffix}",
         )
         specs_surface, _, _ = _build_be_specs(
             ds_surface_sp, elec_lot, config.be_dispersion,

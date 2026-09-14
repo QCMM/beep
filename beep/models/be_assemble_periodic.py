@@ -48,6 +48,16 @@ class BeAssemblePeriodicConfig(BaseModel):
     )
 
     # Output
+    sp_dataset_suffix: str = Field(
+        "",
+        description=(
+            "Suffix appended to the per-slab BE SinglepointDataset names "
+            "('<mol>_<slab>_be_sp<suffix>' and '<mol>_<slab>_surface_be_sp<suffix>'). "
+            "Entries are keyed by site name, so geometries from a different "
+            "opt_level_of_theory must go to their own datasets (e.g. '_v1'). "
+            "Default '' keeps the historical names."
+        ),
+    )
     output_prefix: str = Field(
         "be_periodic",
         description="Prefix for output CSV filenames (`<prefix>_<slab>.csv`, `<prefix>_summary.csv`).",

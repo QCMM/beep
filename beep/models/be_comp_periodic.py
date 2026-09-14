@@ -47,6 +47,16 @@ class BeCompPeriodicConfig(BaseModel):
             "model, the BE from the electronic model plus explicit dispersion."
         ),
     )
+    sp_dataset_suffix: str = Field(
+        "",
+        description=(
+            "Suffix appended to the per-slab BE SinglepointDataset names "
+            "('<mol>_<slab>_be_sp<suffix>' and '<mol>_<slab>_surface_be_sp<suffix>'). "
+            "Entries are keyed by site name, so geometries from a different "
+            "opt_level_of_theory must go to their own datasets (e.g. '_v1'). "
+            "Default '' keeps the historical names."
+        ),
+    )
     be_dispersion: str = Field(
         ...,
         description=(

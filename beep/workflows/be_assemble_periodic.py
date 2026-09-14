@@ -127,8 +127,8 @@ def run(config: BeAssemblePeriodicConfig, client: FractalClient) -> None:
         logger.info(f"  Slab: {slab_name}")
         logger.info("=" * 80)
 
-        complex_dset_name = f"{smol_name}_{slab_name}_be_sp"
-        surface_dset_name = f"{smol_name}_{slab_name}_surface_be_sp"
+        complex_dset_name = f"{smol_name}_{slab_name}_be_sp{config.sp_dataset_suffix}"
+        surface_dset_name = f"{smol_name}_{slab_name}_surface_be_sp{config.sp_dataset_suffix}"
         try:
             ds_complex = qcf.get_collection(client, "singlepoint", complex_dset_name)
             ds_surface = qcf.get_collection(client, "singlepoint", surface_dset_name)
