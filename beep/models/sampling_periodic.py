@@ -156,6 +156,19 @@ class SamplingPeriodicConfig(BaseModel):
     store_initial_structures: bool = Field(
         False, description="Write pre-optimization xyz files under data/site_finder/ for debugging"
     )
+    bare_surface_references: bool = Field(
+        True,
+        description=(
+            "Optimize one bare-surface reference per unique site (the adsorbate "
+            "stripped from the relaxed complex) into '<mol>_<slab>_surface'. "
+            "They are needed only for binding energies: an active-learning round "
+            "that consumes the sampling trajectories can set this to false and "
+            "skip roughly half of the optimizations. be_comp_periodic processes "
+            "only sites present in both datasets, so the references can be added "
+            "later by re-running sampling with the flag back on (sampling is "
+            "deterministic under random_seed and reuses existing entries)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_mace_and_pbc_shape(self):

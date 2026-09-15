@@ -70,6 +70,7 @@ def config_summary_msg(config: SamplingPeriodicConfig) -> str:
         f"  Cavity z-scan:        step {config.cavity_z_scan_step_ang} A, window ±{config.cavity_z_scan_window_ang} A",
         f"  RMSD threshold:       {config.rmsd_value} A",
         f"  Freeze:               {freeze_desc}",
+        f"  Bare-surface refs:    {'yes' if config.bare_surface_references else 'no (skipped)'}",
         f"  Random seed:          {config.random_seed}",
         separator,
         "",
@@ -332,55 +333,61 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
             "\n".join(report_lines) + "\n"
         )
 
-        # --- Bare-surface companion: one MLP opt per unique confirmed site ---
-        # Same LOT, same freeze policy, same cell/pbc as the complex opt.
-        # Strip the adsorbate from each unique optimized complex; the
-        # remaining surface positions carry the site-specific deformation.
-        # Re-optimising from that state gives a physically clean bare-surface
-        # reference for the BE (each site gets its own reference; no shared
-        # bare slab). Entry names match the sampling entries exactly (1:1).
-        n_surface_atoms = len(surface.symbols)
-        surface_dset_name = f"{opt_dset_name}_surface"
-        ds_surface = qcf.get_or_create_opt_dataset(client, surface_dset_name)
-        qcf.add_opt_specification(ds_surface, spec, overwrite=False)
+        if not config.bare_surface_references:
+            # Binding energies need these; a sampling run that only feeds an
+            # active-learning round does not, and they are half the optimizations.
+            n_surface_complete = 0
+            logger.info("  bare-surface references skipped (bare_surface_references = false)")
+        else:
+            # --- Bare-surface companion: one MLP opt per unique confirmed site ---
+            # Same LOT, same freeze policy, same cell/pbc as the complex opt.
+            # Strip the adsorbate from each unique optimized complex; the
+            # remaining surface positions carry the site-specific deformation.
+            # Re-optimising from that state gives a physically clean bare-surface
+            # reference for the BE (each site gets its own reference; no shared
+            # bare slab). Entry names match the sampling entries exactly (1:1).
+            n_surface_atoms = len(surface.symbols)
+            surface_dset_name = f"{opt_dset_name}_surface"
+            ds_surface = qcf.get_or_create_opt_dataset(client, surface_dset_name)
+            qcf.add_opt_specification(ds_surface, spec, overwrite=False)
 
-        surface_added = []
-        existing_surface = set(ds_surface.entry_names)
-        for entry_name, complex_mol in unique:
-            if entry_name in existing_surface:
-                surface_added.append(entry_name)
-                continue
-            bare = strip_adsorbate(complex_mol, n_surface_atoms)
-            try:
-                qcf.add_opt_entry(ds_surface, entry_name, bare)
-                surface_added.append(entry_name)
-            except KeyError as e:
-                logger.info(f"  bare-surface add: {e}")
+            surface_added = []
+            existing_surface = set(ds_surface.entry_names)
+            for entry_name, complex_mol in unique:
+                if entry_name in existing_surface:
+                    surface_added.append(entry_name)
+                    continue
+                bare = strip_adsorbate(complex_mol, n_surface_atoms)
+                try:
+                    qcf.add_opt_entry(ds_surface, entry_name, bare)
+                    surface_added.append(entry_name)
+                except KeyError as e:
+                    logger.info(f"  bare-surface add: {e}")
 
-        if surface_added:
-            comp_rec = qcf.submit_optimizations(
-                ds_surface, lot.lot_name, tag=config.sampling_tag, subset=surface_added,
+            if surface_added:
+                comp_rec = qcf.submit_optimizations(
+                    ds_surface, lot.lot_name, tag=config.sampling_tag, subset=surface_added,
+                )
+                logger.info(
+                    f"  Bare-surface submitted: {comp_rec.n_inserted} new, "
+                    f"{comp_rec.n_existing} already computed."
+                )
+
+            surface_pids = qcf.get_job_ids(ds_surface, surface_added, lot.lot_name)
+            if surface_pids:
+                logger.info(
+                    f"  Optimizing {len(surface_pids)} bare-surface references "
+                    f"(tag='{config.sampling_tag}')"
+                )
+                qcf.wait_for_completion(client, surface_pids, POLL_FREQUENCY_SEC, logger)
+
+            surface_complete = qcf.fetch_opt_molecules(
+                ds_surface, surface_added, lot.lot_name, status="COMPLETE",
             )
+            n_surface_complete = len(surface_complete)
             logger.info(
-                f"  Bare-surface submitted: {comp_rec.n_inserted} new, "
-                f"{comp_rec.n_existing} already computed."
+                f"  Bare-surface: {n_surface_complete}/{len(surface_added)} COMPLETE."
             )
-
-        surface_pids = qcf.get_job_ids(ds_surface, surface_added, lot.lot_name)
-        if surface_pids:
-            logger.info(
-                f"  Optimizing {len(surface_pids)} bare-surface references "
-                f"(tag='{config.sampling_tag}')"
-            )
-            qcf.wait_for_completion(client, surface_pids, POLL_FREQUENCY_SEC, logger)
-
-        surface_complete = qcf.fetch_opt_molecules(
-            ds_surface, surface_added, lot.lot_name, status="COMPLETE",
-        )
-        n_surface_complete = len(surface_complete)
-        logger.info(
-            f"  Bare-surface: {n_surface_complete}/{len(surface_added)} COMPLETE."
-        )
 
         logger.info(
             f"\n  {bcheck} Slab {slab_name}: {n_complete} complex opts, "
