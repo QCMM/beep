@@ -1,4 +1,5 @@
 """Energy benchmark workflow — refactored from workflows/launch_energy_benchmark.py."""
+import re
 import json
 import time
 import logging
@@ -208,10 +209,42 @@ def get_energy_record(ds, struct, method, basis):
     return record
 
 
+_CARDINAL = {"d": 2, "t": 3, "q": 4, "5": 5}
+
+
+def basis_cardinal(basis: str) -> int:
+    """Cardinal number X of a correlation-consistent basis set.
+
+    Handles the plain (cc-pVXZ, aug-cc-pVXZ) and tight-d (cc-pV(X+d)Z,
+    aug-cc-pV(X+d)Z) families, which share the same X and are extrapolated
+    with the same formulas.
+    """
+    m = re.search(r"pv\(?([dtq5])", basis.lower())
+    if m is None:
+        raise ValueError(f"Cannot determine the cardinal number of basis '{basis}'")
+    return _CARDINAL[m.group(1)]
+
+
 def get_cbs_energy(ds, struct, cbs_lot_list):
     columns = ["SCF", "MP2", "CCSD", "CCSD(T)"]
-    index = ["aug-cc-pVDZ", "aug-cc-pVTZ", "aug-cc-pVQZ", "CBS"]
-    cbs_lot_df = pd.DataFrame(index=index, columns=columns)
+    # One row per distinct basis, ordered by cardinal number, plus the CBS row.
+    # The basis strings are taken verbatim from cbs_lot_list so that the
+    # default aug-cc-pVXZ family and the tight-d aug-cc-pV(X+d)Z family are
+    # both supported; the extrapolation picks bases by cardinal number.
+    bases = []
+    for lot in cbs_lot_list:
+        basis = lot.split("_")[1]
+        if basis not in bases:
+            bases.append(basis)
+    bases.sort(key=basis_cardinal)
+    by_zeta = {basis_cardinal(b): b for b in bases}
+    for zeta in (2, 3, 4):
+        if zeta not in by_zeta:
+            raise ValueError(
+                f"CBS extrapolation needs D, T and Q bases; cardinal {zeta} "
+                f"missing from {bases}"
+            )
+    cbs_lot_df = pd.DataFrame(index=bases + ["CBS"], columns=columns)
 
     for lot in cbs_lot_list:
         method, basis = lot.split("_")
@@ -234,26 +267,27 @@ def get_cbs_energy(ds, struct, cbs_lot_list):
     cbs_lot_df["CCSD(T)"] -= cbs_lot_df["CCSD"]
     cbs_lot_df["CCSD"] -= cbs_lot_df["MP2"]
 
+    b2, b3, b4 = by_zeta[2], by_zeta[3], by_zeta[4]
     cbs_lot_df.at["CBS", "SCF"] = scf_xtpl_helgaker_3(
         "scf_dtq_xtpl", 2,
-        cbs_lot_df.at["aug-cc-pVDZ", "SCF"], 3,
-        cbs_lot_df.at["aug-cc-pVTZ", "SCF"], 4,
-        cbs_lot_df.at["aug-cc-pVQZ", "SCF"],
+        cbs_lot_df.at[b2, "SCF"], 3,
+        cbs_lot_df.at[b3, "SCF"], 4,
+        cbs_lot_df.at[b4, "SCF"],
     )
     cbs_lot_df.at["CBS", "MP2"] = corl_xtpl_helgaker_2(
         "mp2_tq", 3,
-        cbs_lot_df.at["aug-cc-pVTZ", "MP2"], 4,
-        cbs_lot_df.at["aug-cc-pVQZ", "MP2"],
+        cbs_lot_df.at[b3, "MP2"], 4,
+        cbs_lot_df.at[b4, "MP2"],
     )
     cbs_lot_df.at["CBS", "CCSD"] = corl_xtpl_helgaker_2(
         "ccsd_dt", 2,
-        cbs_lot_df.at["aug-cc-pVDZ", "CCSD"], 3,
-        cbs_lot_df.at["aug-cc-pVTZ", "CCSD"],
+        cbs_lot_df.at[b2, "CCSD"], 3,
+        cbs_lot_df.at[b3, "CCSD"],
     )
     cbs_lot_df.at["CBS", "CCSD(T)"] = corl_xtpl_helgaker_2(
         "ccsd(t)_dt", 2,
-        cbs_lot_df.at["aug-cc-pVDZ", "CCSD(T)"], 3,
-        cbs_lot_df.at["aug-cc-pVTZ", "CCSD(T)"],
+        cbs_lot_df.at[b2, "CCSD(T)"], 3,
+        cbs_lot_df.at[b3, "CCSD(T)"],
     )
 
     cbs_lot_df["NET"] = cbs_lot_df.sum(axis=1)
@@ -446,7 +480,11 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     padded_log(logger, "CCSD(T)/CBS computations:")
 
-    cbs_list = [
+    # Default CCSD(T)/CBS recipe: SCF D/T/Q (Helgaker 3-point), MP2 T/Q and
+    # CCSD, (T) D/T (Helgaker 2-point). cbs_level_of_theory overrides the
+    # basis family (e.g. aug-cc-pV(X+d)Z for second-row adsorbates) but must
+    # keep the same method/cardinal pattern.
+    cbs_list = config.cbs_level_of_theory or [
         "scf_aug-cc-pVDZ",
         "scf_aug-cc-pVTZ",
         "scf_aug-cc-pVQZ",
