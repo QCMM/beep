@@ -1,5 +1,5 @@
 """Sampling workflow config — maps to launch_sampling.py argparse flags."""
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Dict, Any
 from pydantic import BaseModel, Field
 from .base import ServerConfig, LevelOfTheory
 
@@ -14,6 +14,13 @@ class SamplingConfig(BaseModel):
     atoms_collection: str = Field("atoms", description="Name of the SinglepointDataset containing atomic species")
     sampling_shell: float = Field(2.0, description="Radius of the sampling shell in Angstrom")
     sampling_condition: str = Field("normal", description="Sampling density: sparse|normal|fine|hyperfine")
+    sampling_method: Literal["adaptive", "sphere"] = Field(
+        "adaptive",
+        description=(
+            "Binding-site placement scheme: 'adaptive' (surface-anchored, "
+            "default) or 'sphere' (legacy spherical-shell sampler)."
+        ),
+    )
     sampling_level_of_theory: LevelOfTheory = Field(..., description="Level of theory for initial sampling optimizations")
     refinement_level_of_theory: LevelOfTheory = Field(..., description="Level of theory for refinement optimizations")
     rmsd_value: float = Field(0.40, description="RMSD threshold in Angstrom for filtering duplicate structures")
@@ -24,3 +31,19 @@ class SamplingConfig(BaseModel):
     total_binding_sites: int = Field(220, description="Total number of binding sites to generate")
     sampling_clusters: List[str] = Field([], description="Subset of clusters to sample (empty = all clusters in surface model collection)")
     keyword_id: Optional[int] = Field(None, description="QCFractal keyword ID for custom options")
+    sampling_opt_keywords: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Extra geomeTRIC keywords for the sampling optimizations "
+            "(e.g. {'coordsys': 'cart'}); merged over the default {'maxiter': 125}. "
+            "Use 'cart' on large surfaces where the O(N^2-N^3) Wilson/G-matrix cost "
+            "of 'tric' dominates each step."
+        ),
+    )
+    refinement_opt_keywords: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Extra geomeTRIC keywords for the refinement optimizations "
+            "(e.g. {'coordsys': 'cart', 'maxiter': 200}). Empty by default."
+        ),
+    )

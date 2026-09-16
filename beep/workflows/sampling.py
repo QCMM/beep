@@ -25,15 +25,14 @@ def config_summary_msg(config):
     separator = "-" * 88
     s_lot = config.sampling_level_of_theory
     r_lot = config.refinement_level_of_theory
-    s_basis = s_lot.basis or "N/A"
     lines = [
         "",
         separator,
         f"  Molecule:             {config.molecule}",
         f"  Surface model:        {config.surface_model_collection}",
         f"  Small molecule coll:  {config.small_molecule_collection}",
-        f"  Sampling LOT:         {s_lot.method}/{s_basis} ({s_lot.program})",
-        f"  Refinement LOT:       {r_lot.method}/{r_lot.basis} ({r_lot.program})",
+        f"  Sampling LOT:         {s_lot.display}",
+        f"  Refinement LOT:       {r_lot.display}",
         f"  Sampling shell:       {config.sampling_shell} Angstrom",
         f"  Sampling condition:   {config.sampling_condition}",
         f"  RMSD cutoff:          {config.rmsd_value}",
@@ -46,11 +45,16 @@ def config_summary_msg(config):
 
 
 def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
-                       qc_keyword, ds_opt, logger, rtag="refinement"):
+                       qc_keyword, ds_opt, logger, rtag="refinement",
+                       lot_display=None, refinement_opt_keywords=None):
+    lot_display = lot_display or f"{rmethod}/{rbasis}/{program}"
     spec = {
         "name": ropt_lot_name,
-        "description": f"Geometric + {rmethod}/{rbasis}/{program}",
-        "optimization_spec": {"program": "geometric", "keywords": None},
+        "description": f"Geometric + {lot_display}",
+        "optimization_spec": {
+            "program": "geometric",
+            "keywords": refinement_opt_keywords or None,
+        },
         "qc_spec": {
             "driver": "gradient",
             "method": rmethod,
@@ -65,7 +69,7 @@ def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
 
     logger.info(
         f"\nRefinement optimization initiated with specification '{ropt_lot_name}' \n"
-        f"using {rmethod}/{rbasis} in {program}. \n"
+        f"using {lot_display}. \n"
         f"Description: {spec['description']}. \n"
         f"Tag applied: '{rtag}'\n"
         f"Optimizations submitted: {c}. {bcheck} \n"
@@ -91,11 +95,13 @@ def run_sampling(
     sampling_shell: float,
     sampling_condition: str,
     logger,
+    sampling_method: str = "adaptive",
+    sampling_opt_keywords=None,
 ):
     """
     Run the full sampling loop: generate structures, optimize, filter by RMSD.
     """
-    from ..core.sampling import generate_shell_list, filter_binding_sites
+    from ..core.sampling import filter_binding_sites
     from ..core.molecule_sampler import random_molecule_sampler as mol_sample
 
     FREQUENCY = 120
@@ -103,10 +109,22 @@ def run_sampling(
     binding_site_num = 0
     n_smpl_mol = 0
 
-    max_structures = int(
-        max(3, (len(cluster.symbols) / ATOMS_PER_CLUSTER_MOL) // 3)
+    shell_list = [sampling_shell]  # adaptive: one conformal pass; the level sets density
+
+    # Candidate count is driven by the sampling level: a fraction of the accessible
+    # surface anchors times orientations per anchor (see SAMPLING_LEVELS). This
+    # replaces the old n_water//3 heuristic, which badly undersampled large clusters
+    # (W200: 66 vs ~371 real anchors), and the multi-shell height passes (now
+    # redundant -- adsorption height is sampled per anchor in one pass).
+    from ..core.molecule_sampler import adaptive_shift_vectors, SAMPLING_LEVELS
+    frac, n_orient, _jit = SAMPLING_LEVELS.get(
+        sampling_condition, SAMPLING_LEVELS["normal"]
     )
-    shell_list = generate_shell_list(sampling_shell, sampling_condition)
+    try:
+        n_anchors = len(adaptive_shift_vectors(cluster, target_mol, sampling_shell))
+        max_structures = max(3, int(-(-(frac * n_anchors) // 1)) * n_orient)  # ceil * orient
+    except Exception:  # degenerate/mocked geometry -> fall back to the size heuristic
+        max_structures = int(max(3, (len(cluster.symbols) / ATOMS_PER_CLUSTER_MOL) // 3))
 
     logger.info(
         f"Entering the sampling procedure, will generate a total of "
@@ -119,10 +137,11 @@ def run_sampling(
             method = method.split("-")[0]
 
     # Build specification dict for the adapter
+    _smpl_opt_kw = {"maxiter": 125, **(sampling_opt_keywords or {})}
     spec = {
         "name": opt_lot,
         "description": "Geometric Optimization",
-        "optimization_spec": {"program": "geometric", "keywords": {"maxiter": 125}},
+        "optimization_spec": {"program": "geometric", "keywords": _smpl_opt_kw},
         "qc_spec": {
             "driver": "gradient",
             "method": method,
@@ -158,15 +177,14 @@ def run_sampling(
         ]
 
         logger.info(
-            "Number of existing entries: {}   {}".format(
-                len(shell_old_entries), " ".join(shell_old_entries)
-            )
+            f"Candidate entry name slots: {len(entry_name_list)} "
+            f"({len(shell_old_entries)} already in dataset, "
+            f"{len(shell_new_entries)} available)"
         )
-        logger.info(
-            "Number of new entries: {}   {}".format(
-                len(shell_new_entries), " ".join(shell_new_entries)
+        if shell_old_entries:
+            logger.debug(
+                "Existing entries: " + " ".join(shell_old_entries)
             )
-        )
 
         n_smpl_mol -= len(shell_new_entries)
 
@@ -193,11 +211,13 @@ def run_sampling(
                 sampling_shell=shell,
                 max_structures=max_structures,
                 debug=True,
+                method=sampling_method,
+                condition=sampling_condition,
             )
 
             logger.info(
-                f"Adding entries for {len(molecules)} new molecules to the "
-                f"{sampling_opt_dset.name} OptimizationDataset "
+                f"Sampler produced {len(molecules)} valid placements → "
+                f"adding {len(molecules)} entries to {sampling_opt_dset.name}"
             )
             for i, m in enumerate(molecules):
                 n_smpl_mol += 1
@@ -321,20 +341,19 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
     logger.info(welcome_msg)
 
-    method = config.sampling_level_of_theory.method
-    basis = config.sampling_level_of_theory.basis
-    program = config.sampling_level_of_theory.program
-    rmethod = config.refinement_level_of_theory.method
-    rbasis = config.refinement_level_of_theory.basis
-    rprogram = config.refinement_level_of_theory.program
+    s_lot = config.sampling_level_of_theory
+    r_lot = config.refinement_level_of_theory
+    method = s_lot.qc_method
+    basis = s_lot.qc_basis
+    program = s_lot.qc_program
+    rmethod = r_lot.qc_method
+    rbasis = r_lot.qc_basis
+    rprogram = r_lot.qc_program
 
     qc_keyword = config.keyword_id
 
-    if basis:
-        opt_lot = (method + "_" + basis).lower()
-    else:
-        opt_lot = method.lower()
-    ropt_lot = (rmethod + "_" + rbasis).lower()
+    opt_lot = s_lot.lot_name
+    ropt_lot = r_lot.lot_name
 
     # --- Configuration summary ---
     logger.info(config_summary_msg(config))
@@ -350,8 +369,10 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         "rmsd_val": config.rmsd_value,
         "sampling_shell": config.sampling_shell,
         "sampling_condition": config.sampling_condition,
+        "sampling_method": config.sampling_method,
         "opt_lot": opt_lot,
         "logger": logger,
+        "sampling_opt_keywords": config.sampling_opt_keywords,
     }
 
     # --- Validate collections ---
@@ -428,6 +449,8 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         process_refinement(
             client, ropt_lot, rmethod, rbasis, rprogram,
             qc_keyword, ds_ref, logger, config.refinement_tag,
+            lot_display=r_lot.display,
+            refinement_opt_keywords=config.refinement_opt_keywords,
         )
 
         ds_ref = qcf.get_or_create_opt_dataset(client, ref_opt_dset_name)

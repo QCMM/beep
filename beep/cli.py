@@ -8,7 +8,7 @@ Usage:
 
 The JSON file must contain a "workflow" key that selects which workflow to run.
 Valid workflow values: sampling, be_hess, extract, pre_exp, geom_benchmark,
-energy_benchmark, nm_sampling, sapt
+energy_benchmark, nm_sampling, sapt, mbe, mbe_extract
 """
 import argparse
 import json
@@ -18,6 +18,9 @@ from pathlib import Path
 
 from .models import (
     SamplingConfig,
+    SamplingPeriodicConfig,
+    BeCompPeriodicConfig,
+    BeAssemblePeriodicConfig,
     BeHessConfig,
     ExtractConfig,
     PreExpConfig,
@@ -25,11 +28,16 @@ from .models import (
     EnergyBenchmarkConfig,
     NmSamplingConfig,
     SaptConfig,
+    MbeConfig,
+    MbeExtractConfig,
 )
 from .adapters.qcfractal_adapter import connect
 
 WORKFLOW_MODELS = {
     "sampling": SamplingConfig,
+    "sampling_periodic": SamplingPeriodicConfig,
+    "be_comp_periodic": BeCompPeriodicConfig,
+    "be_assemble_periodic": BeAssemblePeriodicConfig,
     "be_hess": BeHessConfig,
     "extract": ExtractConfig,
     "pre_exp": PreExpConfig,
@@ -37,6 +45,8 @@ WORKFLOW_MODELS = {
     "energy_benchmark": EnergyBenchmarkConfig,
     "nm_sampling": NmSamplingConfig,
     "sapt": SaptConfig,
+    "mbe": MbeConfig,
+    "mbe_extract": MbeExtractConfig,
 }
 
 
@@ -149,6 +159,12 @@ def main():
     # Import and dispatch to the appropriate workflow
     if workflow == "sampling":
         from .workflows.sampling import run
+    elif workflow == "sampling_periodic":
+        from .workflows.sampling_periodic import run
+    elif workflow == "be_comp_periodic":
+        from .workflows.be_comp_periodic import run
+    elif workflow == "be_assemble_periodic":
+        from .workflows.be_assemble_periodic import run
     elif workflow == "be_hess":
         from .workflows.be_hess import run
     elif workflow == "extract":
@@ -163,6 +179,10 @@ def main():
         from .workflows.nm_sampling import run
     elif workflow == "sapt":
         from .workflows.sapt import run
+    elif workflow == "mbe":
+        from .workflows.mbe import run
+    elif workflow == "mbe_extract":
+        from .workflows.mbe_extract import run
 
     run(config, client)
 

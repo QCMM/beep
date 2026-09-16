@@ -5,7 +5,452 @@ All notable changes to BEEP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 0.14.0.dev
+## [Unreleased] — 0.16.0.dev
+
+### Fixed
+
+- **`extract`: methods present only in later clusters no longer vanish
+  from the report.** `concatenate_frames` reindexed every subsequent
+  cluster's frame onto the columns accumulated from the first-iterated
+  cluster, silently projecting away any method that cluster lacked — so
+  a functional (or MACE model) added mid-campaign disappeared from the
+  extraction whenever a method-poor cluster happened to iterate first,
+  making results dependent on cluster iteration order. The reindex is
+  gone; `pd.concat`'s outer join takes the column union, and clusters
+  lacking a method carry NaN rows (downstream means are skipna).
+  Regression test covers both iteration orders.
+
+- **`sampling_periodic`: every frozen-slab optimization died on submission.**
+  `build_freeze_constraint_string` emitted geomeTRIC's *classic text* constraints
+  block (`"$freeze\nxyz 1-3\n"`), but the JSON API that QCEngine drives
+  (`geometric.run_json`) expects the *structured* form and renders that text
+  itself — so it called `.items()` on a `str` and raised
+  `AttributeError: 'str' object has no attribute 'items'` before the first
+  gradient. Every `sampling_periodic` run with `freeze_below_z_ang` /
+  `freeze_atoms` set (i.e. every realistic slab run) failed 100% at step zero.
+  Replaced by `build_freeze_constraints`, returning
+  `{"freeze": [{"type": "xyz", "indices": [...]}]}`. Indices stay **0-based**:
+  geomeTRIC's `commadash` does the 0->1 shift and range compression itself
+  (`[0,1,2] -> "1-3"`), so the frozen atom set is unchanged — only the handoff
+  format is fixed. User-supplied `constraints` are now merged as dicts, and a
+  string raises a clear `ValueError` instead of the geomeTRIC `AttributeError`.
+  New regression test feeds our output through geomeTRIC's own
+  `make_constraints_string` and requires the classic block back.
+  (Removed the now-unused `_atom_index_ranges` helper.)
+
+- **`sampling_periodic`: `coordsys: "cart"` is incompatible with slab freezing.**
+  geomeTRIC raises `RuntimeError: Do not use constraints with Cartesian
+  coordinates`, so the combination could never run — yet
+  `examples/sampling_periodic.json` shipped `{"coordsys": "cart"}` alongside
+  `freeze_below_z_ang`, and the config docstring recommended cart for large
+  slabs. The example now leaves `coordsys` at geomeTRIC's default `tric`, the
+  field description no longer recommends cart (it is also numerically
+  unreliable on large slabs), and a config validator rejects the combination at
+  load time with an actionable message instead of failing mid-run.
+
+- **`be_comp_periodic`: periodic D3 was routed to a non-periodic harness.**
+  `DISPERSION_PROGRAMS` maps `-d3bj` to QCEngine's legacy `dftd3` harness, which
+  wraps the standalone executable and has no periodic support: handed
+  `keywords['cell']`/`['pbc']` it ignores them and returns *cluster* dispersion
+  for a slab, with no error. Added `PERIODIC_DISPERSION_PROGRAMS` /
+  `periodic_dispersion_program()` mapping `dftd3 -> s-dftd3` (the python-API
+  harness that honours cell/pbc; `-d4` already routed to the python-API
+  `dftd4`), applied in `be_comp_periodic` to the periodic *and* gas-phase specs
+  so the `BE = complex - surface - gas` difference cancels within one harness.
+  Scoped to the periodic path on purpose: cluster workflows keep `dftd3`, so
+  their existing dispersion specs and records stay valid.
+
+### Changed
+
+- **Removed `BeHessConfig.dispersion_tag`** (added in 0.15.0 alongside
+  `mace_dispersion`). It routed the analytic dispersion single-points to
+  a separate queue tag from the MLP energies, but QCFractal already
+  matches tasks to managers on *program availability* at claim time: a
+  GPU manager without `dftd4`/`s-dftd3` in its environment never claims
+  dispersion jobs, and a CPU manager without `mace` never claims MLP
+  jobs — so a single `energy_tag` routes both spec families correctly
+  and the extra knob solved a problem that doesn't exist with disjoint
+  worker environments. Configs that set `dispersion_tag` must drop the
+  field; dispersion submissions now always use `energy_tag`.
+
+- **`geom_benchmark` is now entry-based (BREAKING config change),
+  mirroring the `nm_sampling` generalisation.** The workflow benchmarks
+  exactly the entries listed in `benchmark_structures`, all living in a
+  single new required `opt_dataset` OptimizationDataset. All
+  adsorbate/surface special-casing is gone:
+  - **Removed fields**: `molecule`, `small_molecule_collection`,
+    `surface_model_collection`, `atoms_collection`, `bsse_test` (and the
+    `BSSETestConfig` model).
+  - **Removed behavior**: the implicit adsorbate-monomer reference
+    optimization, the bare-surface benchmarking derived from entry-name
+    parsing, the atom-adsorbate fallback, the global adsorbate
+    multiplicity gate (each stored molecule carries its own
+    charge/multiplicity), and the entire direct-Slurm counterpoise BSSE
+    test (~250 lines of non-QCFractal-native code:
+    `_write_cp_python_script`, `_write_slurm_script`, `_submit_cp_jobs`,
+    `_wait_for_cp_jobs`, `_collect_cp_results`).
+  - **To benchmark a monomer or bare surface alongside the complexes**,
+    add it as another entry in `opt_dataset` — every entry is on equal
+    footing.
+  - Entry names are free-form; the `rsplit("_", 1)`
+    dataset-name-in-entry-name convention no longer applies.
+  - Output folder + log/config names derive from `opt_dataset` instead
+    of `molecule`; the trajectory-analysis plots are named after the
+    dataset as well.
+  - `trajectory_analysis` remains optional (default `True`,
+    `false` = legacy eq-geometry-RMSD-only run).
+  - Net: `workflows/geom_benchmark.py` shrinks from 846 to 386 lines.
+
+- **`nm_sampling` generalised from 2 fragments to N (BREAKING config change).**
+  The mode classifier previously hardcoded "last `n_adsorbate_atoms` = adsorbate,
+  rest = cluster" — silently mislabelling intermolecular modes of any non-last
+  fragment as bending on N-mer systems (N>2). It now takes an explicit
+  `fragments: List[List[int]]` partition (matches `qcel.Molecule.fragments`
+  shape) and sums the per-fragment rigid-body-motion projection over every
+  fragment. The N=2 case (`fragments=[[cluster], [adsorbate]]`) reproduces
+  the old behavior exactly.
+
+  Config changes (breaking, no deprecation alias):
+  - **New required** `opt_dataset: str` — the OptimizationDataset containing
+    every entry in `benchmark_structures`. Entry names are now free-form
+    labels; no rsplit / dataset-name-in-entry-name convention.
+  - **New required** `fragments: Dict[str, List[List[int]]]` — per-
+    benchmark-structure partition, keys must exactly cover
+    `benchmark_structures`. Each value is a list of 0-indexed atom-index
+    lists (matches `qcel.Molecule.fragments` shape); every atom must
+    appear in exactly one fragment. Per-structure partitions are
+    required because collapsing multiple monomers into a single rigid
+    block mislabels intra-block rearrangements (the same failure mode
+    the N-fragment classifier fixes at the physics layer). Use one
+    fragment per monomer.
+  - **Removed**: `molecule`, `small_molecule_collection`,
+    `surface_model_collection`. None of them influenced the computation
+    once the fragment partition is explicit; the old adsorbate-atom-count
+    lookup that motivated them is gone, and output naming derives from
+    `opt_dataset` instead of `molecule`.
+
+  Migration for existing configs (BEEP-1 cluster+adsorbate case): add
+  `opt_dataset` (was implicit via `benchmark_structures` name mangling),
+  add `fragments: [[0..n_cluster-1], [n_cluster..n_total-1]]`, remove the
+  three old fields. `nm_sampling` output folder is now `<opt_dataset>/`
+  instead of `<molecule>/`. Existing OptimizationDatasets on the server
+  don't need to change — the partition is applied in-memory during
+  classification, not stored on the molecules.
+
+  New tests: trimer classifier fixture verifying all three intermolecular
+  modes (translate fragment A / B / C) come out labelled correctly, and
+  intramolecular-stretch-and-bend of a mid-position fragment classified
+  by frequency as before.
+
+### Added
+
+- **Commit-authorship policy + CI enforcement** (`CONTRIBUTING.md`,
+  `.github/workflows/attribution.yaml`,
+  `.github/scripts/check_ai_attribution.py`). The authors of a commit have
+  to be people: AI assistants may be used freely and disclosed freely
+  (`Made-with:` trailers, message-body mentions), but must not appear as
+  commit author, committer, or `Co-authored-by:` trailer. A pull-request-only
+  CI job checks the commits each PR adds (merged history is never
+  retro-failed); detection keys on vendor email addresses, bot accounts, and
+  assistant product names, never on a bare first name. Adapted from the
+  equivalent policy in the stvogt/mace fork. BEEP's first CI workflow.
+
+- **New workflow `be_assemble_periodic`** — extraction workflow closing the
+  periodic BE pipeline. Reads the paired MACE-electronic + explicit-dispersion
+  single-point energies submitted by `be_comp_periodic` (from the
+  `<smol>_<slab>_be_sp`, `<smol>_<slab>_surface_be_sp`, and `<smol>_gas_be_sp`
+  SinglepointDatasets), sums electronic + dispersion per record to composite
+  BE-LOT totals, and computes per site
+  `BE = E(complex) - E(bare_site) - E(adsorbate_gas)` shifted by a
+  configurable `zpve_correction_kcal_mol` (scalar per adsorbate; kept as
+  config so no periodic Hessians are ever needed). Only sites COMPLETE in
+  all three record sets yield a BE; missing/errored records are logged and
+  skipped. Writes `<molecule>/data/<prefix>_<slab>.csv` per slab (with
+  intermediate hartree energies for auditability) and a
+  `<prefix>_summary.csv` across all slabs.
+
+- **New workflow `be_comp_periodic`** — submission workflow for periodic
+  binding energies on `sampling_periodic` outputs. Range-separated: pairs
+  an MLP electronic spec with an explicit dispersion spec, using the
+  QCEngine MACE + `dftd3`/`dftd4` harness patches that read
+  `cell`/`pbc` from spec keywords. Per slab, registers the two paired
+  specs on:
+  - `<smol>_<slab>_be_sp` — SPs on optimized complex geometries
+  - `<smol>_<slab>_surface_be_sp` — SPs on per-site bare-surface geometries
+  Once (shared across runs), same paired specs on `<smol>_gas_be_sp`
+  (non-periodic — no cell/pbc in the gas-phase adsorbate SPs). Submits all,
+  waits for completion. Only entries that appear COMPLETE in both the
+  complex and bare-surface datasets from `sampling_periodic` are BE-
+  evaluated, guaranteeing a per-site reference is always available for the
+  downstream difference. Assembly of the per-site BE = E(complex) −
+  E(bare_site) − E(adsorbate_gas), plus per-adsorbate ZPVE correction,
+  happens in the paired `be_assemble_periodic` workflow. Config
+  requires an MLP `be_electronic_lot` and a dispersion string
+  (`mpwb1k-d4`, `b3lyp-d3bj`, etc.) — the dispersion program is inferred
+  from the suffix by the existing `_split_dispersion` helper. New adapter
+  helper `add_energy_spec` (sister of `add_gradient_spec`) added.
+
+- **New workflow `sampling_periodic`** — grid-based binding-site sampling
+  on periodic slabs, MLP-only (MACE). Complements the cluster-based
+  `sampling` workflow. Single-pass optimization (no separate refinement
+  stage): for each slab in a `surface_collection`, generates one adsorbate
+  candidate per node on a PBC-aware xy grid, submits an MLP optimization
+  per candidate, and reports per-slab unique binding sites via RMSD
+  filtering.
+
+  Ported from gbovolenta's `sampling_grid_noise_*.py` monoliths with the
+  following changes to what shipped there:
+  - **PBC-aware placement**: minimum-image nearest-atom search, wraps
+    adsorbate atoms back into the cell after placement, and covers the
+    full periodic footprint (no dead 1 Å borders — the monoliths' grid
+    started at 1 Å from each edge to avoid boundary artefacts that PBC
+    now handles correctly).
+  - **Improved cavity strategy**: widened `cavity_z_scan_window_ang`
+    (default 1.0 Å, was implicit 0.5 Å), scans the full z-range and
+    picks the *best-fit* z rather than the first hit, and gracefully
+    skips a grid node when no z qualifies (the monoliths would inherit
+    a stale `z_shift` from a previous iteration).
+  - **Sanity check over every adsorbate atom** (not just one), with an
+    explicit `sanity_max_iter` cap on the retry loop so an impossible
+    site is skipped cleanly instead of looping forever.
+  - **Seeded RNG (`random_seed`)** for reproducibility.
+  - **`freeze_below_z_ang` / `freeze_atoms`** — freeze bottom slab layers
+    during optimization via geomeTRIC's `constraints` keyword (compressed
+    to `$freeze / xyz i-j,k` ranges). Explicit atom list overrides the z
+    threshold. Neither set = fully relaxed.
+  - **Cell resolution**: config-level `cell` overrides; falls back to
+    per-slab `surface.extras['cell']` if unset. `pbc` defaults to a 2D
+    slab `[True, True, False]`.
+  - **Adsorbate auto-centering in xy**: every generated candidate is slid
+    (unconditional, unwarrantied) so the adsorbate COM sits at the periodic
+    cell center. Pure PBC gauge shift — energy, gradient, Hessian invariant
+    — but makes visualisation and human inspection dramatically cleaner
+    (no boundary-straddling adsorbates). Z is left untouched so
+    `freeze_below_z_ang` still picks the same atoms and the vacuum gap is
+    preserved.
+  - **Aggregate `all_sampled_sites_<slab>.xyz`** always written under
+    `data/`, showing the slab plus every accepted adsorbate copy in its
+    *pre-centering* placement — matching the monoliths'
+    `all_sampled_sites.xyz` output and preserving spatial coverage for
+    visual inspection. Per-candidate xyz files remain gated behind
+    `store_initial_structures=true`.
+  - **Per-site bare-surface companion opts** — for every unique confirmed
+    binding site (after the RMSD filter), the adsorbate is stripped from
+    the optimized complex and the remaining surface is re-optimized under
+    the same LOT + freeze policy + cell/pbc. Results land in a sibling
+    OptimizationDataset `<smol>_<slab>_surface` with entry names matching
+    the sampling entries (1:1). Point: recover the site-specific slab
+    deformation energy on amorphous ice — using a shared bare-slab
+    reference for every site drops that ~5-20 meV contribution. Cheap
+    with an MLP, prohibitive with DFT. Feeds the future
+    `be_comp_periodic` / `be_assemble_periodic` workflows.
+
+  Requires the QCEngine MACE-harness patch that reads
+  `keywords['cell']` / `keywords['pbc']` from the QC specification; the
+  cell + pbc are threaded through those keywords per submission so
+  QCFractal caches remain correct (different cells hash to different
+  specs). See `examples/sampling_periodic.json` and
+  `beep --schema sampling_periodic` for all fields.
+
+- **User-settable geomeTRIC keywords in `sampling`.** Both stages of the
+  sampling workflow now expose the geomeTRIC `optimization_spec.keywords`
+  dict to the config: `SamplingConfig.sampling_opt_keywords` and
+  `SamplingConfig.refinement_opt_keywords`. Fully backward-compatible:
+  both fields default to `None`, and the workflow's prior defaults are
+  preserved unchanged — sampling stays at `{"maxiter": 125}` (geomeTRIC's
+  own default `coordsys: tric` continues to apply), refinement stays at
+  `keywords: None`. When set, sampling-stage keywords are *merged over*
+  the built-in `{"maxiter": 125}` (user's `maxiter` wins if given, other
+  keys added alongside); refinement-stage keywords replace the empty
+  default. Motivating case: on large surfaces (W200 ≈ 600 atoms) the
+  `tric` coordinate system incurs an O(N^2-N^3) Wilson/G-matrix cost per
+  step and dominates wall time; setting `sampling_opt_keywords:
+  {"coordsys": "cart"}` in the config now switches to Cartesian
+  coordinates without a source edit.
+
+### Changed
+
+- **Adaptive surface-anchored binding-site sampler** (now the default;
+  the legacy sampler selectable via the new config field
+  `SamplingConfig.sampling_method: "adaptive" | "sphere"`, default
+  `"adaptive"`). Replaces the spherical-shell scheme,
+  which placed candidates on a single averaged-radius sphere and so floated over
+  concavities and undersampled large clusters. The new sampler is
+  composition-agnostic (per-element vdW radii only — water, CO2, methanol and
+  mixed ices work with no O/H-bond assumptions), probes a fan of directions per
+  accessible surface atom and seats each candidate at vdW *contact* with the
+  surface (nearest-atom ≈ contact distance) rather than floating it a fixed gap
+  above, then ranks placements by coordination so multi-atom hollow/bridge sites
+  are kept preferentially over single-atom caps — coverage is curvature-unbiased
+  and reaches into pockets, and it runs unchanged from a water trimer to W200.
+  `sampling_condition`
+  now sets thoroughness as coverage → orientations → off-atom jitter
+  (`sparse` = 1/6 of anchors, `normal` = 1/2, `fine` = all, `hyperfine` = all +
+  2 orientations + ~1 Å lateral jitter into hollow/bridge sites) instead of the
+  redundant multi-shell height passes, and `max_structures` scales with the
+  accessible-anchor count rather than the old `n_water//3` (W200: ~371 vs 66).
+
+### Fixed
+
+- **`nm_sampling`: `NameError` on the imaginary-mode abort path** — the abort
+  and pre-run messages referenced an undefined `molden_dir`; they now point to
+  `res_folder/normal_modes_<system>.molden` (where the molden files are
+  actually written), so an equilibrium geometry with imaginary frequencies
+  aborts with a useful message instead of crashing.
+
+- **`nm_sampling`: transient gradient failures no longer drop a functional
+  from the report** — `wait_for_nm_completion` now auto-resets errored leaf
+  records up to `max_resets` (default 2) times each before finishing, so
+  transient infrastructure failures (ManagerLost / worker walltime, common on
+  clusters like Aire) recover and the affected functional is kept. Genuine
+  failures (e.g. SCF non-convergence) exhaust their retries and are left in
+  ERROR, so the poll still terminates.
+
+## [0.15.0] — 2026-07-11
+
+### Added
+
+- **Range-separated MACE binding energies (`mace_dispersion`) in `be_hess`.**
+  A MACE model trained on the *electronic* (dispersion-subtracted) energy can
+  now be paired with an analytic dispersion tail so `be_hess` reproduces the
+  full method — mirroring how DFT-D is stored as separated
+  (bare-functional + bare-dispersion) specs. New optional
+  `BeHessConfig.mace_dispersion` field (e.g. `"mpwb1k-d4"`, `"mpwb1k-d3bj"`);
+  when set, `compute_be_mace_energies` submits, per model and stoichiometry, an
+  additional `dftd4`/`s-dftd3` spec named `"<model-stem><suffix>"` with the
+  functional params taken from the prefix (`mpwb1k`), and
+  `fetch_reaction_values` sums the electronic MLP column with its dispersion
+  into the composite `"<model-stem>-d4"` BE (extended to pair basis-free MLP
+  electronic columns, reusing the DFT-D `_split_dispersion` /
+  `DISPERSION_PROGRAMS` single source of truth). This lets a short-range MLP
+  handle the electronic PES (cutoff-adequate) while the exact long-range
+  dispersion — untruncated and transferable to periodic surfaces — is added
+  analytically; the dispersion records persist on the server via the standard
+  `dftd4`/`s-dftd3` harnesses. A companion `BeHessConfig.dispersion_tag`
+  (defaults to `energy_tag`) routes the CPU-only dispersion single-points to a
+  separate queue, so the electronic MLP energies can run on a GPU manager while
+  `dftd4`/`s-dftd3` run on a CPU manager.
+
+- **Atomic (single-atom) adsorbate support in `geom_benchmark`.** The workflow
+  now recognizes an atomic adsorbate the same way `sampling` and `be_hess` do:
+  when the adsorbate is absent from the `small_molecule_collection`
+  OptimizationDataset it is fetched from the `atoms_collection`
+  SinglepointDataset (new `GeomBenchmarkConfig.atoms_collection` field, default
+  `"atoms"`). Because a lone atom has 0 internal DOF (geomeTRIC rejects
+  <2-atom inputs) and has no geometry to compare, the atom monomer is excluded
+  from the optimize+RMSD structure set — only the surfaces and the complexes
+  are benchmarked. Previously the forced monomer optimization errored for every
+  functional, and `compare_rmsd` excludes any functional that errors on any
+  structure, so the erroring monomer silently poisoned the entire ranking
+  (empty result). Multiplicity is read from the atom's stored molecule.
+
+- **Atomic (single-atom) adsorbate support in `energy_benchmark`.** The BE
+  benchmark now handles an atomic adsorbate, mirroring `be_hess`: when the
+  adsorbate is absent from the `small_molecule_collection` OptimizationDataset
+  it is fetched from the `atoms_collection` SinglepointDataset (new
+  `EnergyBenchmarkConfig.atoms_collection` field, default `"atoms"`). Unlike
+  `geom_benchmark` the atom cannot be excluded — its single-point energy is
+  required for the binding-energy stoichiometry (`BE = complex − surface −
+  atom`) and for the CCSD(T)/CBS reference — so the atom molecule is used
+  directly as the small-molecule fragment (no optimized geometry needed) in
+  both the reference-geometry fragment set and `_fetch_be_molecules`. The
+  open-shell CCSD(T)/CBS keywords (`reference uhf`, `qc_module OCC`) are already
+  selected automatically from the adsorbate multiplicity.
+
+- **MACE machine-learning potential support (`mace_model`) in `sampling`,
+  `be_hess`, and `extract`.** A `LevelOfTheory` can now point at a serialized
+  MACE model file via `mace_model`, which mutes `method`/`basis`/`program`:
+  the spec runs through the stock QCEngine `mace` harness (`program: mace`,
+  method = model file path, no basis), and the model file stem (e.g.
+  `mace-polar-ft0` for `.../mace-polar-ft0.model`) names the spec, reaction
+  datasets, dataframe columns, and output files. Committees are one spec per
+  member model on the same datasets.
+  - `BeHessConfig.mace_models` submits MACE BE single points via the new
+    adapter helper `compute_be_mace_energies`. The `bsse` (counterpoise)
+    stoichiometry is skipped for MACE specs — MLPs carry no basis functions
+    and ghost atoms would be treated as real atoms; extract MACE binding
+    energies with `stoichiometry: be_nocp`, `de`, or `ie`.
+  - Constraints (validated): model file paths must be all-lowercase (qcportal
+    lowercases QCSpec methods server-side) and the file stem must not contain
+    underscores (LOT names split on `_`).
+  - `extract` keeps basis-less BE columns (MACE aliases, tight-binding like
+    `gfn2-xtb`); only bare-dispersion bookkeeping columns are dropped.
+    `be_methods` entries may name basis-less methods directly.
+  - Requires `mace-torch` in the compute-manager worker environment; the
+    QCEngine MACE harness needs the `Configuration` compatibility fix for
+    `mace >= 0.3.10` (patched on the `nothung-deploy` QCEngine fork).
+
+- **Many-Body Expansion binding-energy workflows (`mbe` / `mbe_extract`),
+  ported from the standalone `beep-mbe` package (v0.1.0 @ `44a90e6`).** These
+  provide an alternative route to binding energies on the *same* binding sites
+  produced by `sampling` / `be_hess`, re-evaluated at a (typically higher)
+  level of theory via n-body fragmentation on a qcmanybody `ManybodyDataset`
+  plus a monomer `SinglepointDataset`.
+  - `mbe` submits and (optionally) monitors the many-body computations.
+  - `mbe_extract` assembles per-site binding energies (`be_data/total_be.csv`)
+    plus n-body decomposition tables (`decomp__<spec>.csv`,
+    `contrib__<spec>.csv`) and a text report.
+  - `mbe_extract` can optionally apply a **read-only** ZPVE correction borrowed
+    from a prior `be_hess` run on the same sites (`total_be_zpve.csv`); it never
+    submits or mutates the `be_hess` datasets, and sites without a usable
+    Hessian are reported as `NaN`.
+  - New adapter helpers (`get_or_create_manybody_dataset`,
+    `mbe_levels_to_qc_specifications`, `build_manybody_specification`,
+    `wait_for_manybody_completion`, `wait_for_dataset_records`) are strictly
+    additive; the existing `wait_for_completion` used by `sampling` /
+    `geom_benchmark` is unchanged.
+  - Config uses BEEP's Pydantic-v2 schema (nested `server.*`, object-style
+    `levels`); the standalone package's flat JSON format is not supported.
+    See `examples/mbe.json` and `examples/mbe_extract.json`.
+  - `pandas` is now an explicit runtime dependency.
+
+- **MBE truncation-error estimate in `mbe_extract`.** Each site/spec now gets a
+  symmetric error bar on the binding energy from a geometric extrapolation of
+  the uncomputed n-body tail (`bar = |Δn|·r/(1−r)`, `r = |Δn/Δn−1|`), written to
+  `be_data/convergence__<spec>.csv` and rendered as `BE ± bar (converged?)` in
+  the report. The bar is a magnitude only — no signed `BE_∞` — because the sign
+  of the next term is not predictable. 2-body-only runs report `n/a` (no
+  convergence information); a non-shrinking series is flagged not converged. The
+  `converged` flag uses a configurable `convergence_tol` (default 0.05). The
+  existing `total_be` / `decomp` / `contrib` CSVs are unchanged.
+- **ZPVE correction is now a friction-free toggle.** `mbe_extract`'s
+  `zpve.hessian_clusters` is optional; when omitted, the `be_<MOL>_*` datasets
+  are auto-discovered from the server (still strictly read-only). Turning ZPVE
+  on is just `"zpve": {"enabled": true}`.
+- **MBE level validation.** `mbe` now requires contiguous body-order indices
+  (`1..N`, no gaps), matching qcmanybody's expectation. Per-tier levels of
+  theory (a distinct method/basis per body order) and per-site selection
+  (`entries`, omit for all sites of the cluster) are documented in the examples.
+
+- **Multi-program Hessian submissions in `be_hess` (ORCA, Gaussian).** New
+  `hessian_method_and_keywords()` helper in the adapter routes Hessian
+  submissions through a per-program dispersion-keyword table
+  (`DISPERSION_KEYWORD_SPEC`), so DFT-D methods work on ORCA and Gaussian in
+  addition to psi4. The compound method (e.g. `b3lyp-d4`) is split into the
+  bare functional plus the program's native dispersion keyword on the
+  harness's escape-hatch field:
+  - **ORCA**: `simple_input` = `D4` / `D3BJ` / `D3ZERO` for `-d4` / `-d3bj` /
+    `-d3`. Raises on `-d3m` / `-d3mbj` (no native ORCA keyword).
+  - **Gaussian**: `route_input` = `EmpiricalDispersion=GD3BJ` /
+    `EmpiricalDispersion=GD3` for `-d3bj` / `-d3`. Raises on `-d4` /
+    `-d3m` / `-d3mbj` (not in Gaussian).
+
+  psi4-style keywords (`dertype`, `reference`) are dropped for the ORCA and
+  Gaussian paths, since both programs' Hessians are analytic and UKS/UHF
+  follows from the molecule multiplicity. The Hessian physics matches the
+  psi4 workflow: the same Grimme library supplies the dispersion second
+  derivatives, invoked by the target program. Only the BE-*energy* stage
+  keeps dispersion in separate `dftd3` / `dftd4` records; the psi4 path is
+  unchanged.
+
+### Fixed
+
+- Basis-less optimization LOTs (e.g. `gfn2-xtb`, MACE aliases) no longer
+  crash `sampling` (refinement LOT-name concatenation) or `be_hess`
+  (`opt_level_of_theory` method/basis split); reaction-dataset names now
+  omit the basis segment for basis-less LOTs.
+
+## [0.14.0] — 2026-07-07
 
 ### Added
 
@@ -16,6 +461,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   loadable with `np.load(path)` → `{functional_name → array}`. Lets
   users plot their own per-functional histograms of `(F_DFT - F_ref)`
   without re-running the workflow.
+
+- **Atom sampling and atom be_hess no longer crash on missing entries.**
+  `qcportal>=0.63` raises `PortalRequestError` (HTTP 400 "Missing N
+  entries: …") — not `KeyError` — when an entry name isn't in the
+  dataset. Both `sampling.py` and `be_hess.py` caught only `KeyError`
+  on the OptimizationDataset lookup before falling through to the
+  atoms_collection, so single-atom adsorbates (e.g. C, N, O) crashed
+  the workflow instead of being routed to the SinglepointDataset
+  fallback. Fixed at the adapter layer: `fetch_opt_record` and
+  `fetch_atom_molecule` now translate the specific "Missing entries"
+  PortalRequestError into `KeyError` while letting genuine
+  server/network/auth failures propagate, so the workflow's
+  `except KeyError` does the right thing and unrelated transient
+  failures aren't silently misrouted as "atom not found". Five
+  regression tests added.
+
+- **Clearer per-LOT submission log in `be_hess` / `energy_benchmark`.**
+  `compute_be_dft_energies` used to log `Existing N  Submitted M` per
+  LOT, where both `N` and `M` come from `ds.submit()`'s
+  `InsertCountsMetadata` — *newly* linked vs *newly* submitted in this
+  call. On re-runs where every reaction was already linked to the
+  dataset from a prior run, both would correctly be 0, but
+  "Existing 0  Submitted 0" reads as "nothing on the server" rather
+  than "nothing changed." The line now distinguishes the two cases:
+  if both metrics are 0, it logs "all reactions already linked to the
+  dataset (no new submissions)"; otherwise it logs newly-submitted +
+  newly-linked counts explicitly.
 
 - **Refinement summary table in `sampling` workflow.** After refinement
   polling finishes, the workflow now logs a per-cluster breakdown of

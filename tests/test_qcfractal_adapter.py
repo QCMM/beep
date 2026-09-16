@@ -258,8 +258,77 @@ def test_get_zpve_mol_filters_incomplete_records():
 
     # Verify the query was made with status=complete, narrowing to
     # server-side completes before we even client-side filter.
-    kwargs = mock_client.query_singlepoints.call_args.kwargs
+    kwargs = mock_client.query_singlepoints.call_args_list[0].kwargs
     assert kwargs["status"] == RecordStatusEnum.complete
+
+
+def _zpve_mock_client():
+    mock_client = MagicMock()
+    mock_mol = MagicMock()
+    mock_mol.symbols = ["O", "H", "H"]
+    mock_mol.dict.return_value = {"identifiers": {"molecular_formula": "H2O"}}
+    mock_client.get_molecules.return_value = [mock_mol]
+    return mock_client
+
+
+def test_get_zpve_mol_finds_orca_bare_method_hessian():
+    """ORCA Hessians of dispersion LOTs are stored under the bare functional
+    with the dispersion keyword in simple_input; get_zpve_mol must fall back
+    to that query shape when the compound-method query returns nothing.
+
+    The fallback queries every program in DISPERSION_KEYWORD_SPEC that knows
+    the suffix, in insertion order (orca, then gaussian for -d3bj)."""
+    mock_client = _zpve_mock_client()
+
+    orca_record = MagicMock()
+    orca_record.specification.keywords = {"simple_input": "D3BJ"}
+    # calls: compound-method (empty), orca bare-method (hit), gaussian bare-method (empty)
+    mock_client.query_singlepoints.side_effect = [iter([]), iter([orca_record]), iter([])]
+
+    # Interrupt before the vibrational analysis: we only care about record lookup
+    with patch("beep.core.zpve._vibanal_wfn", side_effect=RuntimeError("stop")):
+        with pytest.raises(RuntimeError, match="stop"):
+            get_zpve_mol(mock_client, 12345, "mpwb1k-d3bj_def2-tzvpd")
+
+    calls = mock_client.query_singlepoints.call_args_list
+    assert calls[0].kwargs["method"] == "mpwb1k-d3bj"
+    assert calls[1].kwargs["method"] == "mpwb1k"
+    assert calls[1].kwargs["program"] == "orca"
+    assert calls[2].kwargs["program"] == "gaussian"
+
+
+def test_get_zpve_mol_finds_gaussian_bare_method_hessian():
+    """Gaussian Hessians store the dispersion keyword in route_input
+    (e.g. 'EmpiricalDispersion=GD3BJ'); the token filter must accept the
+    matching record and reject a different-damping one (GD3 vs GD3BJ)."""
+    mock_client = _zpve_mock_client()
+
+    gau_record = MagicMock()
+    gau_record.specification.keywords = {"route_input": "EmpiricalDispersion=GD3BJ SCF=Tight"}
+    wrong_damping = MagicMock()
+    wrong_damping.specification.keywords = {"route_input": "EmpiricalDispersion=GD3"}
+    # calls: compound-method (empty), orca (empty), gaussian (one hit + one filtered out)
+    mock_client.query_singlepoints.side_effect = [iter([]), iter([]), iter([wrong_damping, gau_record])]
+
+    with patch("beep.core.zpve._vibanal_wfn", side_effect=RuntimeError("stop")):
+        with pytest.raises(RuntimeError, match="stop"):
+            get_zpve_mol(mock_client, 12345, "b3lyp-d3bj_def2-svp")
+
+    calls = mock_client.query_singlepoints.call_args_list
+    assert calls[2].kwargs["method"] == "b3lyp"
+    assert calls[2].kwargs["program"] == "gaussian"
+
+
+def test_keyword_token_match():
+    from beep.adapters.qcfractal_adapter import _keyword_token_match
+
+    assert _keyword_token_match("D3BJ", "D3BJ")
+    assert _keyword_token_match("d3bj tightscf", "D3BJ")
+    assert _keyword_token_match("EmpiricalDispersion=GD3BJ SCF=Tight", "EmpiricalDispersion=GD3BJ")
+    # exact-token: GD3 must not match GD3BJ and vice versa
+    assert not _keyword_token_match("EmpiricalDispersion=GD3BJ", "EmpiricalDispersion=GD3")
+    assert not _keyword_token_match("EmpiricalDispersion=GD3", "EmpiricalDispersion=GD3BJ")
+    assert not _keyword_token_match("", "D4")
 
 
 @patch("beep.adapters.qcfractal_adapter.time.sleep", lambda *a, **kw: None)
@@ -576,6 +645,72 @@ def test_split_dispersion(method, expected):
     assert _split_dispersion(method) == expected
 
 
+@pytest.mark.parametrize(
+    "program, expected",
+    [
+        ("dftd3", "s-dftd3"),   # legacy executable harness has no pbc support
+        ("dftd4", "dftd4"),     # already the python-API harness
+        ("s-dftd3", "s-dftd3"), # idempotent
+        (None, None),
+    ],
+)
+def test_periodic_dispersion_program(program, expected):
+    """Periodic runs must not use QCEngine's legacy 'dftd3' harness: it ignores
+    keywords['cell']/['pbc'] and would silently return cluster dispersion for a slab."""
+    from beep.adapters.qcfractal_adapter import periodic_dispersion_program
+    assert periodic_dispersion_program(program) == expected
+
+
+def test_periodic_dispersion_leaves_cluster_routing_untouched():
+    """The cluster path keeps 'dftd3' so existing dispersion specs/records stay valid."""
+    from beep.adapters.qcfractal_adapter import _split_dispersion
+    assert _split_dispersion("mpwb1k-d3bj")[2] == "dftd3"
+
+
+@pytest.mark.parametrize(
+    "method, mult, program, expected",
+    [
+        # psi4: method passes through (psi4 parses dispersion suffixes itself)
+        ("b3lyp-d4", 1, "psi4", ("b3lyp-d4", {"function_kwargs": {"dertype": 1}})),
+        ("mpwb1k-d3bj", 2, "psi4",
+         ("mpwb1k-d3bj", {"function_kwargs": {"dertype": 1}, "reference": "uks"})),
+        ("pbe", 1, "psi4", ("pbe", {"function_kwargs": {"dertype": 1}})),
+        # orca: bare functional + native dispersion keyword via simple_input;
+        # no psi4 keywords, UKS implicit
+        ("b3lyp-d4", 1, "orca", ("b3lyp", {"simple_input": "D4"})),
+        ("mpwb1k-d3bj", 2, "orca", ("mpwb1k", {"simple_input": "D3BJ"})),
+        ("pbe-d3", 1, "orca", ("pbe", {"simple_input": "D3ZERO"})),
+        ("pbe", 1, "orca", ("pbe", {})),
+        ("b3lyp-d4", 1, "ORCA", ("b3lyp", {"simple_input": "D4"})),  # case-insensitive program
+        # gaussian: bare functional + native dispersion keyword via route_input;
+        # no psi4 keywords, UHF/UKS implicit
+        ("b3lyp-d3bj", 1, "gaussian", ("b3lyp", {"route_input": "EmpiricalDispersion=GD3BJ"})),
+        ("pbe-d3", 2, "gaussian", ("pbe", {"route_input": "EmpiricalDispersion=GD3"})),
+        ("pbe", 1, "gaussian", ("pbe", {})),
+        ("b3lyp-d3bj", 1, "Gaussian", ("b3lyp", {"route_input": "EmpiricalDispersion=GD3BJ"})),
+    ],
+)
+def test_hessian_method_and_keywords(method, mult, program, expected):
+    from beep.adapters.qcfractal_adapter import hessian_method_and_keywords
+    assert hessian_method_and_keywords(method, mult, program) == expected
+
+
+@pytest.mark.parametrize(
+    "method, program",
+    [
+        ("b3lyp-d3m", "orca"),
+        ("b3lyp-d3mbj", "orca"),
+        ("b3lyp-d4", "gaussian"),  # G16 has no D4
+        ("b3lyp-d3m", "gaussian"),
+        ("b3lyp-d3mbj", "gaussian"),
+    ],
+)
+def test_hessian_method_and_keywords_unsupported_damping(method, program):
+    from beep.adapters.qcfractal_adapter import hessian_method_and_keywords
+    with pytest.raises(ValueError, match="no native"):
+        hessian_method_and_keywords(method, 1, program)
+
+
 # ---------------------------------------------------------------------------
 # compute_be_dft_energies — dispatch to separated-pair vs integrated form
 # ---------------------------------------------------------------------------
@@ -752,3 +887,84 @@ def test_fetch_reaction_values_skips_integrated_spec(mock_ds_name, caplog):
     import qcelemental as qcel
     expected = (-1.0 - 0.02) * qcel.constants.hartree2kcalmol
     assert df.loc["entry1", "pbe-d3bj/def2-tzvp"] == pytest.approx(expected)
+
+
+# ---------------------------------------------------------------------------
+# fetch_opt_record / fetch_atom_molecule — PortalRequestError translation
+# ---------------------------------------------------------------------------
+
+def test_fetch_opt_record_translates_missing_entry_to_keyerror():
+    """qcportal raises PortalRequestError('Missing N entries: ...') when an
+    entry name isn't in the dataset. The adapter must translate that one
+    specific case to KeyError so workflow code can route to the
+    atoms_collection fallback."""
+    from beep.adapters.qcfractal_adapter import fetch_opt_record, PortalRequestError
+
+    ds = MagicMock()
+    ds.get_record.side_effect = PortalRequestError(
+        "Request failed: Missing 1 entries: H_atom (HTTP status 400)",
+        status_code=400,
+        details={},
+    )
+    with pytest.raises(KeyError, match="not found in dataset"):
+        fetch_opt_record(ds, "H_atom", "hf3c_minix")
+
+
+def test_fetch_opt_record_propagates_other_portal_errors():
+    """Non-'Missing entries' PortalRequestErrors (server 500, network, auth)
+    must propagate unchanged so callers don't mistake transient failures
+    for missing entries."""
+    from beep.adapters.qcfractal_adapter import fetch_opt_record, PortalRequestError
+
+    ds = MagicMock()
+    ds.get_record.side_effect = PortalRequestError(
+        "Internal Server Error (HTTP status 500)",
+        status_code=500,
+        details={},
+    )
+    with pytest.raises(PortalRequestError):
+        fetch_opt_record(ds, "H2O", "hf3c_minix")
+
+
+def test_fetch_opt_record_raises_keyerror_when_record_none():
+    """Existing behaviour preserved: when ds.get_record returns None
+    (entry exists but spec record missing), still raise KeyError."""
+    from beep.adapters.qcfractal_adapter import fetch_opt_record
+
+    ds = MagicMock()
+    ds.get_record.return_value = None
+    with pytest.raises(KeyError, match="No record for entry"):
+        fetch_opt_record(ds, "H2O", "hf3c_minix")
+
+
+def test_fetch_atom_molecule_translates_missing_entry_to_keyerror():
+    """Mirror of fetch_opt_record for fetch_atom_molecule: PortalRequestError
+    on missing atom name must become KeyError so the workflow's outer
+    KeyError handler can surface the original 'not optimized' message."""
+    from beep.adapters.qcfractal_adapter import fetch_atom_molecule, PortalRequestError
+
+    client = MagicMock()
+    ds = MagicMock()
+    ds.get_entry.side_effect = PortalRequestError(
+        "Request failed: Missing 1 entries: Xe (HTTP status 400)",
+        status_code=400,
+        details={},
+    )
+    client.get_dataset.return_value = ds
+    with pytest.raises(KeyError, match="not found in singlepoint dataset"):
+        fetch_atom_molecule(client, "atoms", "Xe")
+
+
+def test_fetch_atom_molecule_propagates_other_portal_errors():
+    from beep.adapters.qcfractal_adapter import fetch_atom_molecule, PortalRequestError
+
+    client = MagicMock()
+    ds = MagicMock()
+    ds.get_entry.side_effect = PortalRequestError(
+        "Unauthorized (HTTP status 401)",
+        status_code=401,
+        details={},
+    )
+    client.get_dataset.return_value = ds
+    with pytest.raises(PortalRequestError):
+        fetch_atom_molecule(client, "atoms", "H")

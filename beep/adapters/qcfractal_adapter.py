@@ -19,8 +19,11 @@ Functions are organized by category:
 """
 import time
 import logging
+from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Any
+from typing import Callable, Sequence  # MBE monitoring helpers (additive)
 from collections import Counter
+from dataclasses import dataclass
 
 from qcportal import PortalClient, PortalRequestError
 from qcportal.record_models import RecordStatusEnum, PriorityEnum
@@ -31,6 +34,9 @@ from qcportal.singlepoint.dataset_models import (
     SinglepointDataset, SinglepointDatasetNewEntry,
 )
 from qcportal.reaction.dataset_models import ReactionDataset
+from qcportal.manybody import (
+    ManybodyDataset, ManybodyKeywords, ManybodySpecification,
+)
 import numpy as np
 from qcportal.reaction.record_models import ReactionSpecification, ReactionKeywords
 from qcelemental.models.molecule import Molecule
@@ -52,13 +58,22 @@ __all__ = [
     "RecordStatusEnum",
     "is_complete", "is_incomplete", "is_error", "status_label",
 ]
+# MBE / manybody exports (additive; see the MBE helper section below).
+__all__ += ["ManybodyDataset", "get_or_create_manybody_dataset",
+            "wait_for_manybody_completion", "wait_for_dataset_records",
+            "ManybodyMonitorResult"]
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-STOICH_TYPES = ("bsse", "be_nocp", "ie", "de")
+STOICH_TYPES = ("bsse", "be_nocp", "ie", "ie_nocp", "de")
+# Stoichiometries saved for MACE (MLP) runs: only ghost-free ones. The
+# counterpoise stoichiometries (``bsse``, ``ie``) use ghost atoms, which a
+# basis-set-free potential cannot evaluate (the harness treats ghosts as real
+# atoms, yielding garbage). ``ie_nocp`` = ``be_nocp - de`` replaces ``ie``.
+MACE_STOICH_TYPES = ("be_nocp", "ie_nocp", "de")
 
 
 _COLLECTION_TYPE_MAP = {
@@ -66,6 +81,7 @@ _COLLECTION_TYPE_MAP = {
     "ReactionDataset": "reaction",
     "Dataset": "singlepoint",
     "SinglepointDataset": "singlepoint",
+    "ManybodyDataset": "manybody",
 }
 
 
@@ -330,9 +346,22 @@ def fetch_atom_molecule(client: PortalClient, atoms_collection: str,
 
     Atoms (single-atom species) are stored in a dedicated SinglepointDataset
     rather than an OptimizationDataset since they cannot be optimized.
+
+    Raises KeyError when ``atom_name`` is not in ``atoms_collection``. Other
+    PortalRequestErrors (server / network / auth failures) propagate
+    unchanged — see ``fetch_opt_record`` for the rationale.
     """
     ds = client.get_dataset("singlepoint", atoms_collection)
-    entry = ds.get_entry(atom_name)
+    try:
+        entry = ds.get_entry(atom_name)
+    except PortalRequestError as e:
+        msg = str(e)
+        if "Missing" in msg and "entries" in msg:
+            raise KeyError(
+                f"Atom '{atom_name}' not found in singlepoint dataset "
+                f"'{atoms_collection}'"
+            ) from e
+        raise
     if entry is None:
         raise KeyError(
             f"Atom '{atom_name}' not found in singlepoint dataset "
@@ -354,9 +383,27 @@ def fetch_molecules(client: PortalClient, mol_ids) -> List[Molecule]:
 def fetch_opt_record(ds_opt, entry_name: str, opt_lot: str):
     """Get the optimization record for an entry.
 
-    Raises KeyError if the entry or record does not exist.
+    Raises KeyError when the entry doesn't exist in the dataset or when
+    the record for the requested specification is missing. Other
+    PortalRequestErrors (server/network/auth failures) propagate
+    unchanged — callers should treat them as transient errors, not as
+    "entry not found".
     """
-    record = ds_opt.get_record(entry_name, opt_lot)
+    try:
+        record = ds_opt.get_record(entry_name, opt_lot)
+    except PortalRequestError as e:
+        # qcportal returns HTTP 400 "Missing N entries: ..." when the
+        # entry name is not in the dataset. Translate that one specific
+        # case to KeyError so callers can distinguish "entry not in
+        # dataset" from "server / network failure". The string match
+        # is fragile to qcportal message changes; revisit if the wording
+        # shifts upstream.
+        msg = str(e)
+        if "Missing" in msg and "entries" in msg:
+            raise KeyError(
+                f"Entry '{entry_name}' not found in dataset"
+            ) from e
+        raise
     if record is None:
         raise KeyError(
             f"No record for entry '{entry_name}' with specification '{opt_lot}'"
@@ -374,6 +421,31 @@ def fetch_initial_molecule(ds_opt, entry_name: str, opt_lot: str) -> Molecule:
     return fetch_opt_record(ds_opt, entry_name, opt_lot).initial_molecule
 
 
+def fetch_opt_cell(ds_opt, entry_name: str, opt_lot: str):
+    """The periodic cell an optimization was run under, from its QC spec keywords.
+
+    sampling_periodic passes ``cell``/``pbc`` through the singlepoint keywords of
+    the optimization specification, and QCFractal does not propagate molecule
+    extras into the optimized output geometry. Reading the cell back from the
+    record is therefore the only source that is guaranteed to match the geometry
+    being evaluated. Returns ``(cell, pbc)``, either of which may be None.
+    """
+    record = fetch_opt_record(ds_opt, entry_name, opt_lot)
+    keywords = dict(record.specification.qc_specification.keywords or {})
+    return keywords.get("cell"), keywords.get("pbc")
+
+
+def fetch_entry_initial_molecule(ds_opt, entry_name: str) -> Molecule:
+    """Initial molecule of an OptimizationDataset *entry*, independent of any spec.
+
+    The input geometry of an entry is a property of the entry, not of a
+    calculation run on it, so retrieving it must not require a matching
+    optimization specification to exist. Used to read bare slabs out of a
+    surface collection whose registered specs belong to a different adsorbate.
+    """
+    return ds_opt.get_entry(entry_name).initial_molecule
+
+
 def fetch_opt_molecules(ds_opt, entry_list: List[str], opt_lot: str,
                         status: str = "COMPLETE") -> List[Tuple[str, Molecule]]:
     """
@@ -387,6 +459,22 @@ def fetch_opt_molecules(ds_opt, entry_list: List[str], opt_lot: str,
         if record is not None and record.status == target_status:
             mol_list.append((n, record.final_molecule))
     return mol_list
+
+
+def fetch_opt_energies(ds_opt, entry_list: List[str], opt_lot: str,
+                       status: str = "COMPLETE") -> Dict[str, float]:
+    """Final energies from an optimization dataset, keyed by entry name.
+
+    Used by the periodic duplicate filter to keep the lowest-energy member of each
+    group of equivalent sites rather than whichever was encountered first.
+    """
+    target_status = RecordStatusEnum(status.lower())
+    energies: Dict[str, float] = {}
+    for n in entry_list:
+        record = ds_opt.get_record(n, opt_lot, force_refetch=True)
+        if record is not None and record.status == target_status and record.energies:
+            energies[n] = float(record.energies[-1])
+    return energies
 
 
 # ---------------------------------------------------------------------------
@@ -458,15 +546,21 @@ def submit_optimizations(ds_opt, opt_lot: str, tag: str, subset=None):
 
 def submit_energies(client: PortalClient, rdset_base_name: str,
                     method: str, basis: Optional[str], program: str,
-                    stoich: str, tag: str, keywords=None):
+                    stoich: str, tag: str, keywords=None,
+                    spec_name: Optional[str] = None):
     """Submit energy computations to a stoichiometry-specific ReactionDataset.
 
     If ``basis`` is ``None`` the spec is named after the method alone (used for
     bare dispersion specs like ``pbe-d3bj`` that have no basis set).
+    ``spec_name`` overrides the derived name — used when ``method`` is not a
+    presentable label (e.g. a MACE model file path, whose spec is named by
+    the model alias instead).
     """
     ds_name = _stoich_dataset_name(rdset_base_name, stoich)
     ds = client.get_dataset("reaction", ds_name)
-    spec_name = (f"{method}_{basis}" if basis else method).lower()
+    if spec_name is None:
+        spec_name = f"{method}_{basis}" if basis else method
+    spec_name = spec_name.lower()
 
     kw_dict = keywords if isinstance(keywords, dict) else {}
     qc_spec = QCSpecification(
@@ -911,23 +1005,37 @@ def fetch_reaction_values(client: PortalClient, rdset_base_name: str,
         if "/" not in c and any(c.endswith(suf) for suf in DISPERSION_SUFFIXES)
     ]
     bare_dft_cols_consumed = set()
+    mlp_composite_cols = set()
     for disp_col in disp_cols:
         for suffix in DISPERSION_SUFFIXES:
             if disp_col.endswith(suffix):
                 bare = disp_col[: -len(suffix)]
                 break
         dft_matches = [c for c in df.columns if c.startswith(bare + "/")]
-        for dft_col in dft_matches:
-            basis_part = dft_col.split("/", 1)[1]
-            composite_col = f"{disp_col}/{basis_part}"
-            df[composite_col] = df[dft_col] + df[disp_col]
-            bare_dft_cols_consumed.add(dft_col)
+        if dft_matches:
+            for dft_col in dft_matches:
+                basis_part = dft_col.split("/", 1)[1]
+                composite_col = f"{disp_col}/{basis_part}"
+                df[composite_col] = df[dft_col] + df[disp_col]
+                bare_dft_cols_consumed.add(dft_col)
+        elif bare in df.columns:
+            # Range-separated MACE model: the electronic MLP column has no
+            # basis (e.g. "h-elec-large"), so there is no "bare/basis" match.
+            # Sum it with its dispersion in place — the dispersion column
+            # itself becomes the composite MLP+dispersion BE (e.g.
+            # "h-elec-large-d4") and the bare electronic column is dropped.
+            df[disp_col] = df[bare] + df[disp_col]
+            bare_dft_cols_consumed.add(bare)
+            mlp_composite_cols.add(disp_col)
 
     # The bare-DFT and bare-dispersion columns are submission/summing
     # artifacts; user-facing output (log tables, saved JSON) should only
     # carry the composite or integrated columns. Drop them now so every
-    # downstream caller sees a clean DataFrame.
-    cols_to_drop = list(bare_dft_cols_consumed) + disp_cols
+    # downstream caller sees a clean DataFrame. MLP composite columns
+    # (dispersion column reused in place) are kept.
+    cols_to_drop = list(bare_dft_cols_consumed) + [
+        c for c in disp_cols if c not in mlp_composite_cols
+    ]
     if cols_to_drop:
         df = df.drop(columns=cols_to_drop, errors="ignore")
 
@@ -1001,10 +1109,15 @@ def create_or_load_reaction_dataset(
     ds_opt,
     opt_stru: Dict[str, object],
     logger: logging.Logger,
+    stoich_types: Tuple[str, ...] = STOICH_TYPES,
 ) -> str:
     """
     Create stoichiometry-specific ReactionDatasets and populate with
     benchmark structures.
+
+    ``stoich_types`` selects which stoichiometry datasets are created and
+    populated (default all of :data:`STOICH_TYPES`; pass
+    :data:`MACE_STOICH_TYPES` for MLP runs to save only the ghost-free ones).
 
     Creates one dataset per stoichiometry type (default, be_nocp, ie, de),
     named ``{rdset_name}_{stoich_type}``.
@@ -1015,7 +1128,7 @@ def create_or_load_reaction_dataset(
     # in place: qcportal 0.63+ ``add_specification`` and ``add_entry`` are
     # idempotent, so a second be_hess run at a different LOT now layers its
     # specs on top of the existing dataset instead of wiping it.
-    for stoich_type in STOICH_TYPES:
+    for stoich_type in stoich_types:
         ds_name = _stoich_dataset_name(rdset_name, stoich_type)
         try:
             client.get_dataset("reaction", ds_name)
@@ -1043,6 +1156,7 @@ def create_or_load_reaction_dataset(
         struct_mol = rr.final_molecule
         logger.info(f"Generating BE stoichiometry for {st}")
         be_stoich = be_stoichiometry(smol_mol, cluster_mol, struct_mol, logger)
+        be_stoich = {k: v for k, v in be_stoich.items() if k in stoich_types}
 
         n_entries += 1
         try:
@@ -1069,6 +1183,22 @@ DISPERSION_PROGRAMS: Tuple[Tuple[str, str], ...] = (
 )
 DISPERSION_SUFFIXES: Tuple[str, ...] = tuple(s for s, _ in DISPERSION_PROGRAMS)
 
+# Periodic override: QCEngine ships two D3 harnesses. ``dftd3`` is the legacy
+# executable wrapper and has NO periodic support -- handed cell/pbc it ignores
+# them and silently returns cluster dispersion for a slab. ``s-dftd3`` is the
+# python-API harness that honours ``keywords['cell']`` / ``['pbc']``. D4 already
+# routes to the python-API ``dftd4``, so it needs no override. Applied only on
+# the periodic path: cluster workflows keep ``dftd3`` so their existing
+# dispersion specs and records stay valid.
+PERIODIC_DISPERSION_PROGRAMS: Dict[str, str] = {"dftd3": "s-dftd3"}
+
+
+def periodic_dispersion_program(program: Optional[str]) -> Optional[str]:
+    """Map a dispersion program name onto its periodic-capable equivalent."""
+    if program is None:
+        return None
+    return PERIODIC_DISPERSION_PROGRAMS.get(program, program)
+
 
 def _split_dispersion(method: str) -> Tuple[str, Optional[str], Optional[str]]:
     """Split ``method`` into (bare_functional, full_dispersion_method, disp_program).
@@ -1088,6 +1218,67 @@ def _has_dispersion_suffix(name: str) -> bool:
     """Return True if ``name`` ends with a known dispersion suffix."""
     m = name.lower()
     return any(m.endswith(s) for s in DISPERSION_SUFFIXES)
+
+
+# psi4/dftd3-style dispersion suffix -> (harness keyword field, native keyword
+# token) per program. Programs listed here store dispersion-corrected Hessians
+# as bare functional + native dispersion keyword; the dict's insertion order is
+# also the query order of the get_zpve_mol fallback (keep it deterministic).
+# Variants absent for a program (ORCA: -d3m/-d3mbj; Gaussian: -d4/-d3m/-d3mbj)
+# raise instead of silently computing with the wrong damping.
+DISPERSION_KEYWORD_SPEC: Dict[str, Tuple[str, Dict[str, str]]] = {
+    "orca": ("simple_input", {"-d4": "D4", "-d3bj": "D3BJ", "-d3": "D3ZERO"}),
+    "gaussian": ("route_input", {"-d3bj": "EmpiricalDispersion=GD3BJ", "-d3": "EmpiricalDispersion=GD3"}),
+}
+
+
+def _keyword_token_match(kw_value: Any, token: str) -> bool:
+    """Case-insensitive exact-token match of ``token`` inside a route/simple
+    keyword string (whitespace-split, so ``GD3`` never matches ``GD3BJ``)."""
+    return token.upper() in str(kw_value).upper().split()
+
+
+def hessian_method_and_keywords(method: str, mult: int, program: str) -> Tuple[str, dict]:
+    """Return the (method, keywords) pair for a Hessian submission on ``program``.
+
+    psi4 (default): the method string is passed through unchanged — psi4
+    parses dispersion suffixes itself, so Hessians include the dispersion
+    derivative contribution — with psi4-style keywords (``dertype 1``,
+    ``reference uks`` for open shells).
+
+    orca / gaussian (any program in ``DISPERSION_KEYWORD_SPEC``): the compound
+    method is split into the bare functional plus the program's native
+    dispersion keyword on the harness's escape-hatch field (e.g. ``b3lyp-d4``
+    -> orca ``simple_input: "D4"``; ``b3lyp-d3bj`` -> gaussian
+    ``route_input: "EmpiricalDispersion=GD3BJ"``), because those harnesses
+    reject psi4-style compound method strings. The Hessian physics matches
+    the psi4 workflow — the same Grimme library supplies the dispersion
+    second derivatives. Only the BE-*energy* stage keeps dispersion in
+    separate dftd3/dftd4 records. The psi4-style keywords are dropped: both
+    programs' Hessians are analytic and UKS/UHF follows from the molecule
+    multiplicity.
+    """
+    spec = DISPERSION_KEYWORD_SPEC.get(program.lower())
+    if spec is not None:
+        field, table = spec
+        bare, disp_method, _ = _split_dispersion(method)
+        if disp_method is None:
+            return bare, {}
+        suffix = disp_method[len(bare):].lower()
+        try:
+            native_kw = table[suffix]
+        except KeyError:
+            raise ValueError(
+                f"Dispersion variant '{suffix}' of method '{method}' has no native "
+                f"{program} keyword ({program} supports {sorted(table)}); "
+                "choose a supported variant or run this level of theory with psi4."
+            )
+        return bare, {field: native_kw}
+
+    kw: dict = {"function_kwargs": {"dertype": 1}}
+    if mult != 1:
+        kw["reference"] = "uks"
+    return method, kw
 
 
 def compute_be_dft_energies(
@@ -1172,18 +1363,35 @@ def compute_be_dft_energies(
 
         all_submitted += lot_submitted
         all_existing += lot_existing
-        logger.info(
-            f"{lot}: Existing {lot_existing}  Submitted {lot_submitted}"
-        )
+        # 0/0 from ds.submit means the reactions for this LOT were already
+        # linked to the dataset from a prior run — neither inserted nor
+        # newly-matched in this call. Make that explicit so users don't
+        # read a misleading "Existing 0  Submitted 0" as a missing submission.
+        if lot_submitted == 0 and lot_existing == 0:
+            logger.info(
+                f"{lot}: all reactions already linked to the dataset "
+                f"(no new submissions)"
+            )
+        else:
+            logger.info(
+                f"{lot}: {lot_submitted} newly submitted, "
+                f"{lot_existing} newly linked (find_existing)"
+            )
 
     logger.info(
         f"\nSubmitted a total of {all_submitted} DFT computations. "
-        f"{all_existing} are already computed."
+        f"{all_existing} are newly linked from existing records."
     )
 
-    # Collect record IDs for monitoring
+    return _collect_reaction_record_ids(client, rdset_base_name)
+
+
+def _collect_reaction_record_ids(client: PortalClient,
+                                 rdset_base_name: str,
+                                 stoich_types: Tuple[str, ...] = STOICH_TYPES) -> List[int]:
+    """Collect record IDs across the given stoichiometry datasets for monitoring."""
     record_ids = []
-    for stoich in STOICH_TYPES:
+    for stoich in stoich_types:
         ds_name = _stoich_dataset_name(rdset_base_name, stoich)
         ds = client.get_dataset("reaction", ds_name)
         for _, _, record in ds.iterate_records(
@@ -1194,6 +1402,104 @@ def compute_be_dft_energies(
                 record_ids.append(record.id)
 
     return record_ids
+
+
+def compute_be_mace_energies(
+    client: PortalClient,
+    rdset_base_name: str,
+    mace_models: List[str],
+    tag: str,
+    logger: logging.Logger,
+    mace_dispersion: Optional[str] = None,
+) -> List[int]:
+    """
+    Submit MACE MLP energy computations for BE calculations.
+
+    Each entry in ``mace_models`` is a path to a serialized MACE model
+    file; the spec (and hence dataframe column) is named by the model
+    file stem (e.g. ``.../mace-polar-ft0.model`` → ``mace-polar-ft0``).
+    Runs through the stock QCEngine MACE harness: ``program='mace'``,
+    method = model file path, ``basis=None``.
+
+    Only the ghost-free stoichiometries in :data:`MACE_STOICH_TYPES`
+    (``be_nocp``, ``ie_nocp``, ``de``) are computed. The counterpoise
+    stoichiometries (``bsse``, ``ie``) are skipped: MLPs carry no basis
+    functions so there is no BSSE to correct, and the harness would treat
+    ghost atoms as real atoms. The ghost-free interaction energy is
+    ``ie_nocp`` (equivalently ``be_nocp - de``).
+    """
+    log_formatted_list(
+        logger, [Path(p).stem for p in mace_models],
+        "Sending MACE energy computations for the following models:",
+        max_rows=1,
+    )
+    logger.info(f"\nSending MACE computations with tag: {tag}\n")
+
+    # Range separation: if a dispersion is paired with the (electronic) MLPs,
+    # each model additionally gets an analytic dispersion spec (dftd4/s-dftd3,
+    # functional params from the prefix) named "<alias><suffix>" so the read
+    # side (fetch_reaction_values) sums electronic + dispersion into the
+    # composite MLP+dispersion BE, mirroring the DFT-D separated pair.
+    # Both spec families share one tag: QCFractal matches tasks to managers on
+    # program availability, so a GPU manager without dftd4/s-dftd3 in its env
+    # never claims dispersion jobs (and a CPU manager without mace never
+    # claims MLP jobs) — no separate routing tag needed.
+    disp_program = disp_suffix = None
+    if mace_dispersion:
+        _bare, _disp_method, disp_program = _split_dispersion(mace_dispersion)
+        disp_suffix = mace_dispersion[len(_bare):]
+        logger.info(
+            f"Range separation: pairing MLPs with {mace_dispersion} "
+            f"({disp_program}, spec '<model>{disp_suffix}')\n"
+        )
+
+    all_submitted = 0
+    all_existing = 0
+    for model_path in mace_models:
+        alias = Path(model_path).stem
+        logger.info(f"Processing MACE model: {alias} ({model_path})")
+
+        model_submitted = 0
+        model_existing = 0
+        for stoich in MACE_STOICH_TYPES:
+            result = submit_energies(
+                client, rdset_base_name,
+                method=model_path, basis=None, program="mace",
+                stoich=stoich, tag=tag, keywords=None,
+                spec_name=alias,
+            )
+            model_submitted += result.n_inserted
+            model_existing += result.n_existing
+
+            if mace_dispersion:
+                disp_result = submit_energies(
+                    client, rdset_base_name,
+                    method=mace_dispersion, basis=None, program=disp_program,
+                    stoich=stoich, tag=tag, keywords=None,
+                    spec_name=f"{alias}{disp_suffix}",
+                )
+                model_submitted += disp_result.n_inserted
+                model_existing += disp_result.n_existing
+
+        all_submitted += model_submitted
+        all_existing += model_existing
+        if model_submitted == 0 and model_existing == 0:
+            logger.info(
+                f"{alias}: all reactions already linked to the dataset "
+                f"(no new submissions)"
+            )
+        else:
+            logger.info(
+                f"{alias}: {model_submitted} newly submitted, "
+                f"{model_existing} newly linked (find_existing)"
+            )
+
+    logger.info(
+        f"\nSubmitted a total of {all_submitted} MACE computations. "
+        f"{all_existing} are newly linked from existing records."
+    )
+
+    return _collect_reaction_record_ids(client, rdset_base_name, MACE_STOICH_TYPES)
 
 
 def compute_hessian(
@@ -1246,11 +1552,9 @@ def compute_hessian(
         max_rows=5,
     )
 
-    logger.info(f"\nWill compute Hessian at {method}/{basis} level of theory")
-    kw = {"function_kwargs": {"dertype": 1}}
-    if mult != 1:
-        kw["reference"] = "uks"
+    method, kw = hessian_method_and_keywords(method, mult, program)
 
+    logger.info(f"\nWill compute Hessian at {method}/{basis} level of theory")
     logger.info(f"\nComputing Hessian at {method}/{basis} level of theory")
     logger.info(f"Using keywords: {kw}")
 
@@ -1343,6 +1647,33 @@ def get_zpve_mol(client: PortalClient, mol, lot_opt: str,
         basis=basis,
         status=RecordStatusEnum.complete,
     ))
+
+    # orca/gaussian Hessians of dispersion-corrected LOTs are stored under the
+    # *bare* functional with the native dispersion keyword on the harness's
+    # escape-hatch field (see hessian_method_and_keywords), so the
+    # compound-method query above cannot see them. Query the bare method per
+    # program (DISPERSION_KEYWORD_SPEC insertion order) and keep only records
+    # whose keyword field carries the matching dispersion token.
+    bare, disp_method, _ = _split_dispersion(method)
+    if disp_method is not None:
+        suffix = disp_method[len(bare):].lower()
+        for prog, (field, table) in DISPERSION_KEYWORD_SPEC.items():
+            native_kw = table.get(suffix)
+            if native_kw is None:
+                continue
+            prog_results = client.query_singlepoints(
+                driver=SinglepointDriver.hessian,
+                molecule_id=mol,
+                method=bare,
+                basis=basis,
+                program=prog,
+                status=RecordStatusEnum.complete,
+            )
+            results.extend(
+                r for r in prog_results
+                if _keyword_token_match(r.specification.keywords.get(field, ""), native_kw)
+            )
+
     # Defensive: even a "complete" record can have None properties if the
     # server is in an inconsistent state (e.g. mid-write). Skip those —
     # `result.return_result` dereferences properties and would crash.
@@ -1471,7 +1802,11 @@ def add_energy_spec(
     keywords: Optional[dict] = None,
     description: str = "",
 ) -> str:
-    """Add an energy ``QCSpecification`` to a ``SinglepointDataset``.
+    """Add an SP energy ``QCSpecification`` to a ``SinglepointDataset``.
+
+    Sister of :func:`add_gradient_spec` for the energy driver - used by
+    ``be_comp_periodic`` to register the BE electronic + dispersion specs
+    on the complex, bare-surface, and gas-phase SinglepointDatasets.
 
     Idempotent: ``add_specification`` silently reports already-existing
     specs. Returns the lowercased specification name actually registered.
@@ -1490,7 +1825,6 @@ def add_energy_spec(
         description=description,
     )
     return name
-
 
 def add_singlepoint_entries(
     ds_sp: SinglepointDataset,
@@ -1653,3 +1987,281 @@ def get_optimization_trajectory(
             "gradient_hartree_per_bohr": grad,
         })
     return steps
+
+
+# ---------------------------------------------------------------------------
+# MBE / manybody helpers
+#
+# Support for the ``mbe`` / ``mbe_extract`` workflows (ported from the
+# standalone beep-mbe package). These are strictly additive: the monitoring
+# functions below carry distinct names (``wait_for_manybody_completion`` /
+# ``wait_for_dataset_records``) and do NOT touch the existing
+# ``wait_for_completion`` used by sampling / geom_benchmark.
+# ---------------------------------------------------------------------------
+
+_MBE_TERMINAL_STATUSES = {"COMPLETE", "ERROR"}
+_MBE_CHILD_STATUS_KEYS = ("WAITING", "RUNNING", "COMPLETE", "ERROR")
+
+
+@dataclass
+class ManybodyMonitorResult:
+    """Structured result of monitoring an MBE ManybodyDataset submission."""
+    start_time: float
+    end_time: float
+    polls: int
+    per_entry_final_status: Dict[str, str]
+    per_entry_children_counts: Dict[str, Dict[str, int]]
+    n_complete: int
+    n_error: int
+    n_missing: int
+    n_other: int
+    errored_entries: List[str]
+    timed_out: bool
+
+
+def get_or_create_manybody_dataset(client: PortalClient, name: str) -> ManybodyDataset:
+    """Get an existing ManybodyDataset or create a new one (idempotent)."""
+    try:
+        return client.get_dataset("manybody", name)
+    except (KeyError, PortalRequestError):
+        return client.add_dataset("manybody", name)
+
+
+def list_reaction_dataset_names(client: PortalClient) -> List[str]:
+    """Read-only list of all ReactionDataset names on the server.
+
+    Used by the MBE ZPVE-borrow auto-discovery to locate ``be_<MOL>_*`` datasets.
+    """
+    return [
+        r["dataset_name"]
+        for r in client.list_datasets()
+        if r.get("dataset_type") == "reaction"
+    ]
+
+
+def mbe_levels_to_qc_specifications(levels, program: str) -> Dict[int, QCSpecification]:
+    """Convert MBE level objects to per-order energy QCSpecifications.
+
+    ``levels`` is any iterable of objects exposing ``.index``, ``.method``,
+    ``.basis`` and ``.keywords`` (e.g. :class:`beep.models.mbe.MbeLevel`).
+    Returns a mapping from MBE order index to a QCSpecification.
+    """
+    qc_levels: Dict[int, QCSpecification] = {}
+    for level in levels:
+        qc_levels[level.index] = QCSpecification(
+            program=program,
+            driver=SinglepointDriver.energy,
+            method=level.method,
+            basis=level.basis,
+            # QCSpecification rejects keywords=None; use an empty dict when the
+            # level carries no keywords.
+            keywords=level.keywords or {},
+        )
+    return qc_levels
+
+
+def build_manybody_specification(
+    levels: Dict[int, QCSpecification], bsse_correction: List[str],
+) -> ManybodySpecification:
+    """Build a qcmanybody ManybodySpecification from per-order QCSpecifications."""
+    return ManybodySpecification(
+        program="qcmanybody",
+        levels=levels,
+        bsse_correction=bsse_correction,
+        keywords=ManybodyKeywords(return_total_data=True),
+    )
+
+
+def _mbe_normalize_status(value) -> str:
+    if value is None:
+        return "MISSING"
+    name = getattr(value, "name", None)
+    if name:
+        return str(name).upper()
+    return str(value).upper()
+
+
+def _mbe_normalize_children_status(children_status) -> Dict[str, int]:
+    counts: Dict[str, int] = {key: 0 for key in _MBE_CHILD_STATUS_KEYS}
+    if not children_status:
+        return counts
+    for key, value in children_status.items():
+        status_key = _mbe_normalize_status(key)
+        if status_key in counts:
+            counts[status_key] += int(value)
+    return counts
+
+
+def _mbe_log_poll_summary(poll_index, entries, statuses, children_counts) -> None:
+    logger = logging.getLogger("beep")
+    logger.info(f"Monitoring poll {poll_index}: {len(entries)} entries")
+    for entry in entries:
+        status = statuses[entry]
+        counts = children_counts[entry]
+        total = sum(counts.values())
+        logger.info(
+            f"entry={entry} status={status} children_total={total} "
+            f"waiting={counts['WAITING']} running={counts['RUNNING']} "
+            f"complete={counts['COMPLETE']} error={counts['ERROR']}"
+        )
+
+
+def _mbe_summarize_final_statuses(per_entry_final_status):
+    n_complete = n_error = n_missing = n_other = 0
+    errored_entries = []
+    for entry, status in per_entry_final_status.items():
+        if status == "COMPLETE":
+            n_complete += 1
+        elif status == "ERROR":
+            n_error += 1
+            errored_entries.append(entry)
+        elif status == "MISSING":
+            n_missing += 1
+        else:
+            n_other += 1
+    return n_complete, n_error, n_missing, n_other, errored_entries
+
+
+def wait_for_manybody_completion(
+    client: PortalClient,
+    dataset_name: str,
+    spec_name: str,
+    entry_names: Sequence[str],
+    poll_interval_s: int = 300,
+    max_wait_s: Optional[int] = None,
+    *,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    time_fn: Callable[[], float] = time.time,
+) -> ManybodyMonitorResult:
+    """Poll ManybodyDataset record statuses until all entries reach terminal states.
+
+    Distinct from :func:`wait_for_completion` (which monitors a flat list of
+    record IDs for the reaction-dataset BE route). ``sleep_fn`` / ``time_fn``
+    are injectable to keep the polling loop deterministic under test.
+    """
+    logger = logging.getLogger("beep")
+    start_time = time_fn()
+    polls = 0
+    timed_out = False
+
+    mb_ds = client.get_dataset("manybody", dataset_name)
+    try:
+        overview = mb_ds.detailed_status()
+    except Exception as exc:
+        logger.debug(f"Dataset detailed_status unavailable: {exc}")
+    else:
+        logger.info(f"Dataset detailed status snapshot: {overview}")
+
+    per_entry_status: Dict[str, str] = {}
+    per_entry_children: Dict[str, Dict[str, int]] = {}
+
+    while True:
+        polls += 1
+        for entry in entry_names:
+            rr = mb_ds.get_record(entry_name=entry, specification_name=spec_name)
+            if rr is None:
+                per_entry_status[entry] = "MISSING"
+                per_entry_children[entry] = {key: 0 for key in _MBE_CHILD_STATUS_KEYS}
+                continue
+            per_entry_status[entry] = _mbe_normalize_status(rr.status)
+            per_entry_children[entry] = _mbe_normalize_children_status(rr.children_status)
+
+        _mbe_log_poll_summary(polls, entry_names, per_entry_status, per_entry_children)
+
+        if all(s in _MBE_TERMINAL_STATUSES for s in per_entry_status.values()):
+            break
+
+        elapsed = time_fn() - start_time
+        if max_wait_s is not None and elapsed >= max_wait_s:
+            timed_out = True
+            logger.warning(
+                f"Monitoring timed out after {elapsed:.1f} seconds (max_wait={max_wait_s})."
+            )
+            break
+
+        sleep_fn(poll_interval_s)
+
+    end_time = time_fn()
+    n_complete, n_error, n_missing, n_other, errored_entries = _mbe_summarize_final_statuses(
+        per_entry_status
+    )
+    logger.info(
+        f"Monitoring complete: complete={n_complete} error={n_error} "
+        f"missing={n_missing} other={n_other}"
+    )
+    if errored_entries:
+        logger.info(f"Errored entries: {', '.join(errored_entries)}")
+
+    return ManybodyMonitorResult(
+        start_time=start_time,
+        end_time=end_time,
+        polls=polls,
+        per_entry_final_status=dict(per_entry_status),
+        per_entry_children_counts=dict(per_entry_children),
+        n_complete=n_complete,
+        n_error=n_error,
+        n_missing=n_missing,
+        n_other=n_other,
+        errored_entries=list(errored_entries),
+        timed_out=timed_out,
+    )
+
+
+def wait_for_dataset_records(
+    ds,
+    entry_names: Sequence[str],
+    specification_names: Sequence[str],
+    poll_interval: int,
+    max_wait: Optional[int],
+    *,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    time_fn: Callable[[], float] = time.time,
+) -> Tuple[Dict[Tuple[str, str], str], bool]:
+    """Poll a dataset's entry/spec record statuses until all are terminal.
+
+    Used for the monomer SinglepointDataset in the MBE workflow. Returns the
+    per-(entry, spec) status map and a timed-out flag.
+    """
+    logger = logging.getLogger("beep")
+    start_time = time_fn()
+    polls = 0
+    timed_out = False
+    per_record_status: Dict[Tuple[str, str], str] = {}
+
+    while True:
+        polls += 1
+        for entry in entry_names:
+            for spec in specification_names:
+                rr = ds.get_record(entry_name=entry, specification_name=spec)
+                per_record_status[(entry, spec)] = _mbe_normalize_status(
+                    rr.status if rr else None
+                )
+
+        counts = Counter(per_record_status.values())
+        known = (
+            counts.get("COMPLETE", 0) + counts.get("ERROR", 0)
+            + counts.get("WAITING", 0) + counts.get("RUNNING", 0)
+            + counts.get("MISSING", 0)
+        )
+        logger.info(
+            f"Dataset poll {polls}: total={len(per_record_status)} "
+            f"complete={counts.get('COMPLETE', 0)} error={counts.get('ERROR', 0)} "
+            f"waiting={counts.get('WAITING', 0)} running={counts.get('RUNNING', 0)} "
+            f"missing={counts.get('MISSING', 0)} other={sum(counts.values()) - known}"
+        )
+
+        if all(s in _MBE_TERMINAL_STATUSES for s in per_record_status.values()):
+            break
+
+        elapsed = time_fn() - start_time
+        if max_wait is not None and elapsed >= max_wait:
+            timed_out = True
+            logger.warning(
+                f"Dataset monitoring timed out after {elapsed:.1f} seconds (max_wait={max_wait})."
+            )
+            break
+
+        sleep_fn(poll_interval)
+
+    logger.info(f"Dataset monitoring complete: total={len(per_record_status)}")
+    return dict(per_record_status), timed_out

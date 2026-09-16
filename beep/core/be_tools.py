@@ -138,6 +138,10 @@ def apply_lin_models(df_be, df_be_zpve, meth_fit_dict, be_methods, basis, mol, b
     # Apply the mean linear model to each method's BE individually
     for bm in be_methods:
         column_name = f"{bm}/{basis}"
+        if column_name not in df_be.columns and bm in df_be.columns:
+            # Basis-free method (MACE model alias, tight-binding): its
+            # column carries no basis segment.
+            column_name = bm
         if column_name in df_be.columns:
             scaled_column_name = f"{column_name}_lin_ZPVE"
             lin_zpve_df[scaled_column_name] = df_be[column_name] * m + n

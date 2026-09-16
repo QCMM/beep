@@ -423,7 +423,7 @@ def run_trajectory_analysis(
         folder_path_plots.mkdir(parents=True, exist_ok=True)
         try:
             trajectory_error_histograms(
-                raw_deltas, mol_name=config.molecule,
+                raw_deltas, mol_name=config.opt_dataset,
                 plot_path=str(folder_path_plots),
                 ranking_df=ranking_df,
             )

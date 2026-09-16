@@ -1,4 +1,5 @@
 """Energy benchmark workflow — refactored from workflows/launch_energy_benchmark.py."""
+import re
 import json
 import time
 import logging
@@ -208,10 +209,42 @@ def get_energy_record(ds, struct, method, basis):
     return record
 
 
+_CARDINAL = {"d": 2, "t": 3, "q": 4, "5": 5}
+
+
+def basis_cardinal(basis: str) -> int:
+    """Cardinal number X of a correlation-consistent basis set.
+
+    Handles the plain (cc-pVXZ, aug-cc-pVXZ) and tight-d (cc-pV(X+d)Z,
+    aug-cc-pV(X+d)Z) families, which share the same X and are extrapolated
+    with the same formulas.
+    """
+    m = re.search(r"pv\(?([dtq5])", basis.lower())
+    if m is None:
+        raise ValueError(f"Cannot determine the cardinal number of basis '{basis}'")
+    return _CARDINAL[m.group(1)]
+
+
 def get_cbs_energy(ds, struct, cbs_lot_list):
     columns = ["SCF", "MP2", "CCSD", "CCSD(T)"]
-    index = ["aug-cc-pVDZ", "aug-cc-pVTZ", "aug-cc-pVQZ", "CBS"]
-    cbs_lot_df = pd.DataFrame(index=index, columns=columns)
+    # One row per distinct basis, ordered by cardinal number, plus the CBS row.
+    # The basis strings are taken verbatim from cbs_lot_list so that the
+    # default aug-cc-pVXZ family and the tight-d aug-cc-pV(X+d)Z family are
+    # both supported; the extrapolation picks bases by cardinal number.
+    bases = []
+    for lot in cbs_lot_list:
+        basis = lot.split("_")[1]
+        if basis not in bases:
+            bases.append(basis)
+    bases.sort(key=basis_cardinal)
+    by_zeta = {basis_cardinal(b): b for b in bases}
+    for zeta in (2, 3, 4):
+        if zeta not in by_zeta:
+            raise ValueError(
+                f"CBS extrapolation needs D, T and Q bases; cardinal {zeta} "
+                f"missing from {bases}"
+            )
+    cbs_lot_df = pd.DataFrame(index=bases + ["CBS"], columns=columns)
 
     for lot in cbs_lot_list:
         method, basis = lot.split("_")
@@ -234,26 +267,27 @@ def get_cbs_energy(ds, struct, cbs_lot_list):
     cbs_lot_df["CCSD(T)"] -= cbs_lot_df["CCSD"]
     cbs_lot_df["CCSD"] -= cbs_lot_df["MP2"]
 
+    b2, b3, b4 = by_zeta[2], by_zeta[3], by_zeta[4]
     cbs_lot_df.at["CBS", "SCF"] = scf_xtpl_helgaker_3(
         "scf_dtq_xtpl", 2,
-        cbs_lot_df.at["aug-cc-pVDZ", "SCF"], 3,
-        cbs_lot_df.at["aug-cc-pVTZ", "SCF"], 4,
-        cbs_lot_df.at["aug-cc-pVQZ", "SCF"],
+        cbs_lot_df.at[b2, "SCF"], 3,
+        cbs_lot_df.at[b3, "SCF"], 4,
+        cbs_lot_df.at[b4, "SCF"],
     )
     cbs_lot_df.at["CBS", "MP2"] = corl_xtpl_helgaker_2(
         "mp2_tq", 3,
-        cbs_lot_df.at["aug-cc-pVTZ", "MP2"], 4,
-        cbs_lot_df.at["aug-cc-pVQZ", "MP2"],
+        cbs_lot_df.at[b3, "MP2"], 4,
+        cbs_lot_df.at[b4, "MP2"],
     )
     cbs_lot_df.at["CBS", "CCSD"] = corl_xtpl_helgaker_2(
         "ccsd_dt", 2,
-        cbs_lot_df.at["aug-cc-pVDZ", "CCSD"], 3,
-        cbs_lot_df.at["aug-cc-pVTZ", "CCSD"],
+        cbs_lot_df.at[b2, "CCSD"], 3,
+        cbs_lot_df.at[b3, "CCSD"],
     )
     cbs_lot_df.at["CBS", "CCSD(T)"] = corl_xtpl_helgaker_2(
         "ccsd(t)_dt", 2,
-        cbs_lot_df.at["aug-cc-pVDZ", "CCSD(T)"], 3,
-        cbs_lot_df.at["aug-cc-pVTZ", "CCSD(T)"],
+        cbs_lot_df.at[b2, "CCSD(T)"], 3,
+        cbs_lot_df.at[b3, "CCSD(T)"],
     )
 
     cbs_lot_df["NET"] = cbs_lot_df.sum(axis=1)
@@ -300,7 +334,8 @@ def get_reference_be_result(bchmk_structs, cbs_col, cbs_list):
 
 
 def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
-                                        bchmk_structs, dft_opt_lot, odset_dict):
+                                        bchmk_structs, dft_opt_lot, odset_dict,
+                                        atom_mol=None):
     logger = logging.getLogger("beep")
     rdset_name = f"bchmk_be_{smol_name}_{surf_dset_name}"
     logger.info(f"Creating a loading ReactionDataset: {rdset_name}\n")
@@ -316,7 +351,7 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
             logger.info(f"Adding entry for {bench_struct} of {lot} geometry")
             try:
                 smol_mol, surf_mol, struc_mol = _fetch_be_molecules(
-                    odset_dict, bench_struct, lot
+                    odset_dict, bench_struct, lot, atom_mol=atom_mol
                 )
                 be_stoich = be_stoichiometry(smol_mol, surf_mol, struc_mol, logger)
             except (TypeError, KeyError) as e:
@@ -336,20 +371,25 @@ def create_or_load_reaction_dataset_eb(client, smol_name, surf_dset_name,
     return rdset_name
 
 
-def _fetch_be_molecules(odset, bench_struct, lot_geom):
+def _fetch_be_molecules(odset, bench_struct, lot_geom, atom_mol=None):
     """Fetch the three molecules needed for BE stoichiometry from optimization datasets.
 
     Returns (smol_mol, surf_mol, struc_mol) — the small molecule, surface model,
-    and full complex, all as optimized geometries.
+    and full complex, all as optimized geometries. When ``atom_mol`` is given
+    (atomic adsorbate) it is used directly as the small molecule, since a single
+    atom has no optimized geometry in the OptimizationDataset.
     """
     dataset_name = bench_struct.rsplit("_", 1)[0]
     mol_name = dataset_name.split("_")[0]
     surf_name = dataset_name.split(f"{mol_name}_", 1)[1]
-    smol_mol = (
-        odset[mol_name.upper()]
-        .get_record(mol_name.upper(), lot_geom)
-        .final_molecule
-    )
+    if atom_mol is not None:
+        smol_mol = atom_mol
+    else:
+        smol_mol = (
+            odset[mol_name.upper()]
+            .get_record(mol_name.upper(), lot_geom)
+            .final_molecule
+        )
     surf_mol = (
         odset[surf_name]
         .get_record(surf_name, lot_geom)
@@ -399,7 +439,16 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     logger.info(f"DFT and SQM  geometry levels of theory: {' '.join(dft_opt_lot)}")
 
     smol_dset = qcf.get_collection(client, "OptimizationDataset", smol_dset_name)
-    mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
+    # Atomic adsorbates live in a SinglepointDataset (atoms_collection), not the
+    # OptimizationDataset, and cannot be optimized. Detect that case and fetch
+    # the atom molecule directly; its single-point energy is still needed for
+    # the BE stoichiometry (BE = complex - surface - atom). Mirrors be_hess.
+    try:
+        mol_mult = qcf.get_molecular_multiplicity(client, smol_dset, smol_name)
+        atom_mol = None
+    except KeyError:
+        atom_mol = qcf.fetch_atom_molecule(client, config.atoms_collection, smol_name)
+        mol_mult = atom_mol.molecular_multiplicity
     logger.info(f"\nThe molecular multiplicity of {smol_name} is {mol_mult}\n\n")
     logger.info(f"Retriving data of the reference equilibrium geometries at {geom_ref_opt_lot}:\n")
 
@@ -418,6 +467,11 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     ref_geom_fmols = {}
     for struct_name, odset in odset_dict.items():
+        if atom_mol is not None and struct_name == smol_name:
+            # Atomic adsorbate: no optimized reference geometry; the atom
+            # molecule itself is the geometry for the CBS reference fragment.
+            ref_geom_fmols[struct_name] = atom_mol
+            continue
         record = odset.get_record(struct_name, geom_ref_opt_lot)
         if config.use_initial_reference_geometry:
             ref_geom_fmols[struct_name] = record.initial_molecule
@@ -426,7 +480,11 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     padded_log(logger, "CCSD(T)/CBS computations:")
 
-    cbs_list = [
+    # Default CCSD(T)/CBS recipe: SCF D/T/Q (Helgaker 3-point), MP2 T/Q and
+    # CCSD, (T) D/T (Helgaker 2-point). cbs_level_of_theory overrides the
+    # basis family (e.g. aug-cc-pV(X+d)Z for second-row adsorbates) but must
+    # keep the same method/cardinal pattern.
+    cbs_list = config.cbs_level_of_theory or [
         "scf_aug-cc-pVDZ",
         "scf_aug-cc-pVTZ",
         "scf_aug-cc-pVQZ",
@@ -458,6 +516,7 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     rdset_base = create_or_load_reaction_dataset_eb(
         client, smol_name, surf_dset_name, bchmk_structs, dft_opt_lot, odset_dict,
+        atom_mol=atom_mol,
     )
 
     dft_func = {

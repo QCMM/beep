@@ -12,6 +12,7 @@ class EnergyBenchmarkConfig(BaseModel):
     benchmark_structures: List[str] = Field(..., description="List of benchmark structure identifiers")
     small_molecule_collection: str = Field("Small_molecules", description="Name of the small molecule collection")
     surface_model_collection: str = Field("small water", description="Name of the surface model collection")
+    atoms_collection: str = Field("atoms", description="Name of the SinglepointDataset containing atomic species (used when the adsorbate is a single atom)")
     opt_level_of_theory: List[str] = Field(..., description="DFT geometry optimization levels of theory (list of method_basis strings, e.g. ['MPWB1K-D3BJ_DEF2-TZVPD'])")
     reference_geometry_level_of_theory: str = Field(
         "ccsd(t)_aug-cc-pvtz",

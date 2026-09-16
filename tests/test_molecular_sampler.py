@@ -166,3 +166,97 @@ def test_random_molecule_sampler(cluster, target_mol, request, caplog):
     debug_mol.to_file(str(TEST_OUTPUT_DIR / ("sampling_mol_" + test_id + ".xyz")), dtype="xyz")
 
 
+
+
+# ---------------------------------------------------------------------------
+# Adaptive surface-anchored sampler: composition-agnostic, cavity-aware, and
+# must work from a water trimer up to large clusters without special-casing.
+# ---------------------------------------------------------------------------
+from beep.core.molecule_sampler import adaptive_shift_vectors
+
+_B2A = qcel.constants.conversion_factor("bohr", "angstrom")
+
+def _min_cross_dist_ang(mol, n_cluster):
+    g = np.asarray(mol.geometry) * _B2A
+    return float(np.linalg.norm(g[:n_cluster, None, :] - g[None, n_cluster:, :], axis=-1).min())
+
+@pytest.mark.parametrize("stem", ["ws3", "ws5", "w22_01"])
+def test_adaptive_sampler_sizes(stem):
+    """Trimer -> W22: returns valid structures, adsorbate not fused to the surface."""
+    cl = Molecule.from_file(str(DATA_DIR / f"{stem}.xyz"))
+    ads = Molecule.from_file(str(DATA_DIR / "sm_h2.xyz"))
+    mols, _ = random_molecule_sampler(cl, ads, 2.0, 20, method="adaptive")
+    assert len(mols) >= 1
+    for m in mols:
+        assert len(m.symbols) == len(cl.symbols) + len(ads.symbols)
+        assert _min_cross_dist_ang(m, len(cl.symbols)) > 1.0     # interface not overlapping
+
+def test_adaptive_density_beats_sphere_formula():
+    """Accessible surface anchors exceed the current n_water//3 candidate count."""
+    cl = Molecule.from_file(str(DATA_DIR / "w22_01.xyz"))
+    ads = Molecule.from_file(str(DATA_DIR / "sm_h2.xyz"))
+    anchors = adaptive_shift_vectors(cl, ads, 2.0, 100000)
+    old = max(3, (len(cl.symbols) // 3) // 3)
+    assert len(anchors) > old
+
+def test_adaptive_composition_agnostic():
+    """A relabelled (non-water) substrate still samples: no O / H-bond assumptions."""
+    cl = Molecule.from_file(str(DATA_DIR / "w22_01.xyz"))
+    ads = Molecule.from_file(str(DATA_DIR / "sm_h2.xyz"))
+    co2 = Molecule(symbols=["C" if s == "O" else "O" for s in cl.symbols],
+                   geometry=cl.geometry, fix_com=False, fix_orientation=False)
+    mols, _ = random_molecule_sampler(co2, ads, 2.0, 20, method="adaptive")
+    assert len(mols) >= 1
+
+def test_sphere_method_still_available():
+    """Backward compatibility: the spherical sampler remains reachable."""
+    cl = Molecule.from_file(str(DATA_DIR / "ws5.xyz"))
+    ads = Molecule.from_file(str(DATA_DIR / "sm_h2.xyz"))
+    mols, _ = random_molecule_sampler(cl, ads, 2.0, 8, method="sphere")
+    assert all(isinstance(m, Molecule) for m in mols)
+
+
+def test_adaptive_sampling_levels_scale():
+    """sparse < normal < fine <= hyperfine as a monotonic thoroughness ladder."""
+    from beep.core.molecule_sampler import SAMPLING_LEVELS
+    cl = Molecule.from_file(str(DATA_DIR / "w22_01.xyz"))
+    ads = Molecule.from_file(str(DATA_DIR / "sm_h2.xyz"))
+    c = {lvl: len(adaptive_shift_vectors(cl, ads, 2.0, *params))
+         for lvl, params in SAMPLING_LEVELS.items()}
+    assert c["sparse"] < c["normal"] < c["fine"] <= c["hyperfine"]
+    assert c["sparse"] <= c["fine"] / 3        # sparse ~ 1/6 coverage
+    assert c["hyperfine"] >= 1.5 * c["fine"]   # extra orientation(s) at the top tier
+
+def test_adaptive_hyperfine_jitter_overlap_free():
+    """Hyperfine (orientations + ~1 A lateral jitter) still yields clash-free structures."""
+    cl = Molecule.from_file(str(DATA_DIR / "w22_01.xyz"))
+    ads = Molecule.from_file(str(DATA_DIR / "sm_h2.xyz"))
+    mols, _ = random_molecule_sampler(cl, ads, 2.0, 10**6,
+                                      method="adaptive", condition="hyperfine")
+    assert len(mols) > 0
+    for m in mols:
+        assert _min_cross_dist_ang(m, len(cl.symbols)) > 1.0
+
+
+def _placement_metrics(mols, n_cluster):
+    """(mean nearest-atom distance, mean coordination) of the adsorbate over a set."""
+    near, coord = [], []
+    for m in mols:
+        g = np.asarray(m.geometry) * _B2A
+        clu, p = g[:n_cluster], g[n_cluster:].mean(0)
+        d = np.linalg.norm(clu - p, axis=1)
+        near.append(d.min())
+        coord.append(int((d < 3.5).sum()))
+    return float(np.mean(near)), float(np.mean(coord))
+
+def test_adaptive_seats_at_contact_not_floating():
+    """Regression guard for the floating-placement bug: adaptive must seat the adsorbate
+    at vdW contact (nearest-atom ~3.2 A) with real neighbours, never a fixed gap above
+    the surface. The pre-fix code placed candidates ~4 A out with ~0.4 mean coordination
+    (many with zero neighbours), which produced weak, poorly sampled binding sites."""
+    cl = Molecule.from_file(str(DATA_DIR / "w22_01.xyz"))
+    ads = Molecule.from_file(str(DATA_DIR / "sm_h2.xyz"))
+    mols, _ = random_molecule_sampler(cl, ads, 2.0, 200, method="adaptive")
+    near, coord = _placement_metrics(mols, len(cl.symbols))
+    assert near < 3.7        # contact-seated, not floating (bug gave ~4.0-4.2 A)
+    assert coord >= 1.5      # real neighbours present (bug gave < 0.6)

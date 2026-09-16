@@ -6,16 +6,20 @@
         "password": null,
         "verify": false
     },
-    "molecule": null,
-    "benchmark_structures": [],
-    "small_molecule_collection": null,
-    "surface_model_collection": null,
+
+    "opt_dataset": "my-benchmark-dataset",
+    "benchmark_structures": ["h2s_3", "h2s_2_h2o_1", "h2s_1_h2o_2", "h2o_3"],
+
     "reference_geometry_level_of_theory": ["ccsd(t)", "aug-cc-pvtz", "psi4"],
     "reference_geometry_keywords": {"scf_type": "df", "cc_type": "df", "freeze_core": "true"},
-    "tag_reference_geometry": null,
-    "dft_optimization_program": null,
+    "tag_reference_geometry": "ref-geom",
+
+    "dft_optimization_program": "psi4",
     "dft_optimization_keyword": null,
-    "tag_dft_geometry": null,
+    "tag_dft_geometry": "dft-geom",
+
     "use_initial_reference_geometry": false,
-    "bsse_test": null
+    "trajectory_analysis": true,
+    "score_weights": {"rmsd_eq": 1.0, "rmsd_force": 1.0},
+    "generate_plots": false
 }

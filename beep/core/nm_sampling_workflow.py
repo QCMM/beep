@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 
@@ -121,7 +121,8 @@ def submit_system_hessians(
 
 def collect_system_normal_modes(
     client, ref_mols: Dict[str, Molecule], hessian_lot: str,
-    n_adsorbate_atoms: int, inter_threshold: float, bend_max_cm: float,
+    fragments_per_struct: Dict[str, Sequence[Sequence[int]]],
+    inter_threshold: float, bend_max_cm: float,
     logger: logging.Logger,
 ) -> Dict[str, dict]:
     """Per system, fetch the Hessian record and classify each normal mode.
@@ -155,13 +156,30 @@ def collect_system_normal_modes(
 
         masses = np.asarray(mol_from_record.masses)
         positions = np.asarray(mol_from_record.geometry).reshape(-1, 3)
+        # Look up the per-structure fragment partition and consistency-check.
+        try:
+            fragment_atom_indices = fragments_per_struct[struct_name]
+        except KeyError:
+            logger.warning(
+                f"  {struct_name}: no fragment partition supplied — skipping."
+            )
+            continue
+        n_atoms_record = len(mol_from_record.symbols)
+        n_atoms_partition = sum(len(f) for f in fragment_atom_indices)
+        if n_atoms_partition != n_atoms_record:
+            logger.warning(
+                f"  {struct_name}: fragment partition covers {n_atoms_partition} "
+                f"atoms but the stored geometry has {n_atoms_record} — skipping."
+            )
+            continue
+
         classes = []
         for i, freq in enumerate(freqs_cm):
             cls = classify_mode(
                 mode_cart=modes_cart[i],
                 masses=masses,
                 positions=positions,
-                n_adsorbate_atoms=n_adsorbate_atoms,
+                fragment_atom_indices=fragment_atom_indices,
                 frequency_cm=float(np.real(freq)),
                 inter_threshold=inter_threshold,
                 bend_max_cm=bend_max_cm,
@@ -260,6 +278,12 @@ def build_displaced_molecules(
             f"  {struct_name}: {len(picks)} mode picks → "
             f"{len(entries)} displaced structures"
         )
+        logger.info(f"    {'#':>3}  {'band':<14}  {'ν (cm⁻¹)':>10}  {'A (Å)':>7}")
+        for mode_idx, amp_A, band in picks:
+            freq = float(np.real(freqs[mode_idx]))
+            logger.info(
+                f"    {mode_idx:>3d}  {band:<14}  {freq:>10.2f}  {amp_A:>7.3f}"
+            )
         out[struct_name] = entries
     return out
 
@@ -361,28 +385,75 @@ def submit_nm_singlepoints(
 # ---------------------------------------------------------------------------
 
 def wait_for_nm_completion(
-    sp_dsets: dict, all_spec_names: List[str], wait_interval: int,
-    logger: logging.Logger,
+    client, sp_dsets: dict, all_spec_names: List[str], wait_interval: int,
+    logger: logging.Logger, max_resets: int = 2,
 ):
     """Poll until every (system × entry × spec) record is terminal.
 
     ``all_spec_names`` should include both the DFT functionals and the
     reference spec name (all lowercase).
+
+    Errored leaf records are auto-reset up to ``max_resets`` times each to
+    recover transient infrastructure failures (e.g. ManagerLost / worker
+    walltime on clusters like Aire), which would otherwise drop a whole
+    functional from the report. Genuine failures (e.g. SCF non-convergence)
+    exhaust their retries and are left in ERROR, so the loop still terminates.
     """
+    reset_counts: dict = {}                      # record_id -> times reset
     while True:
         complete = incomplete = error = 0
+        to_reset: List[int] = []
         for ds_sp in sp_dsets.values():
-            for entry_name in ds_sp.entry_names:
-                for spec_key in all_spec_names:
-                    record = ds_sp.get_record(entry_name, spec_key)
-                    if record is None:
-                        continue
-                    if is_complete(record.status):
-                        complete += 1
-                    elif is_incomplete(record.status):
-                        incomplete += 1
-                    elif is_error(record.status):
-                        error += 1
+            # One aggregated /status request per dataset instead of one
+            # get_record() HTTP round-trip per (entry × spec) leaf — at
+            # benchmark scale (~2600 leaves) the per-record sweep was >10 min
+            # of pure latency with no output, indistinguishable from a hang.
+            spec_status = ds_sp.status()
+            n_err = 0
+            for spec_key in all_spec_names:
+                for status_val, n in spec_status.get(spec_key, {}).items():
+                    if is_complete(status_val):
+                        complete += n
+                    elif is_incomplete(status_val):
+                        incomplete += n
+                    elif is_error(status_val):
+                        n_err += n
+            if n_err == 0:
+                continue
+            # Errors present: fetch only those records (batched server-side)
+            # — the retry bookkeeping needs their ids.
+            for _entry, _spec, record in ds_sp.iterate_records(
+                specification_names=list(all_spec_names),
+                status=qcf.RecordStatusEnum.error,
+            ):
+                if reset_counts.get(record.id, 0) < max_resets:
+                    to_reset.append(record.id)
+                else:
+                    error += 1              # retries exhausted -> give up
+        # Recover transient failures before deciding we are done.
+        if to_reset:
+            # A single record can appear via more than one (entry, spec) if two
+            # spec definitions hash identically; dedupe so the retry budget
+            # isn't burned twice in one cycle.
+            to_reset = list(set(to_reset))
+            logger.info(
+                f"  NM SP: auto-resetting {len(to_reset)} errored record(s) "
+                f"(transient-failure recovery, <= {max_resets}x each)..."
+            )
+            try:
+                client.reset_records(to_reset)
+            except Exception as e:
+                logger.warning(
+                    f"  NM SP: reset failed ({e}); will retry next cycle."
+                )
+            else:
+                # Count the attempt only on a successful reset — a failed call
+                # would silently spend the retry budget without ever kicking
+                # the server, defeating the transient-failure recovery.
+                for rid in to_reset:
+                    reset_counts[rid] = reset_counts.get(rid, 0) + 1
+            time.sleep(wait_interval)
+            continue
         if incomplete == 0:
             logger.info(
                 f"  NM SP: Complete: {complete}, Error: {error} {bcheck}"
@@ -484,8 +555,8 @@ def compute_per_method_nm_metrics(
 def run_nm_sampling(
     *, config, client, odset_dict: dict,
     all_dft_functionals: List[str], dft_geom_functionals: dict,
-    n_adsorbate_atoms: int, res_folder: Path,
-    logger: logging.Logger,
+    fragments_per_struct: Dict[str, Sequence[Sequence[int]]],
+    res_folder: Path, logger: logging.Logger,
 ):
     """Top-level driver for the normal-mode sampling benchmark.
 
@@ -531,7 +602,7 @@ def run_nm_sampling(
     padded_log(logger, "Normal-mode classification")
     mode_data = collect_system_normal_modes(
         client, ref_mols, config.hessian_lot,
-        n_adsorbate_atoms=n_adsorbate_atoms,
+        fragments_per_struct=fragments_per_struct,
         inter_threshold=config.inter_threshold,
         bend_max_cm=config.bend_max_cm,
         logger=logger,
@@ -564,7 +635,7 @@ def run_nm_sampling(
             frequencies_cm=data["frequencies_cm"],
             modes_cart=data["modes_cart"],
             classes=data["classes"],
-            n_adsorbate_atoms=n_adsorbate_atoms,
+            fragment_atom_indices=fragments_per_struct[sysname],
             level_of_theory=config.hessian_lot,
         )
     logger.info(
@@ -600,7 +671,7 @@ def run_nm_sampling(
                 "\n  ABORT: imaginary frequencies detected at the equilibrium "
                 "geometry — the system is a saddle, not a minimum:\n  "
                 + "\n  ".join(msg_lines)
-                + f"\n  Open {molden_dir}/<system>.molden to see which "
+                + f"\n  Open {res_folder}/normal_modes_<system>.molden to see which "
                 "modes are imaginary."
                 + "\n  Re-optimise the geometry before nm_sampling, or set "
                 "allow_imaginary_modes=true to override.\n"
@@ -621,7 +692,7 @@ def run_nm_sampling(
             padding_char=gear,
         )
         logger.info(
-            f"\n  Inspect the modes in {molden_dir}/ before re-running with "
+            f"\n  Inspect the modes in {res_folder}/ before re-running with "
             "pre_run=false.\n"
         )
         return mode_data, {}
@@ -663,7 +734,7 @@ def run_nm_sampling(
     # 7. Wait
     logger.info("\nWaiting for NM gradient SPs to complete…")
     wait_for_nm_completion(
-        sp_dsets, all_spec_names, wait_interval=200, logger=logger,
+        client, sp_dsets, all_spec_names, wait_interval=200, logger=logger,
     )
 
     # 8. Compute metrics
