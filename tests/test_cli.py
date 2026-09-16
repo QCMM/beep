@@ -63,9 +63,35 @@ def test_workflow_models_keys():
         "be_comp_periodic", "be_assemble_periodic",
         "be_hess", "extract", "pre_exp",
         "geom_benchmark", "energy_benchmark", "nm_sampling",
-        "mbe", "mbe_extract",
+        "mbe", "mbe_extract", "sapt",
     }
     assert set(WORKFLOW_MODELS.keys()) == expected
+
+
+@patch("beep.cli.connect")
+def test_main_sapt_dispatch(mock_connect, monkeypatch, tmp_path):
+    mock_client = MagicMock()
+    mock_connect.return_value = mock_client
+
+    cfg_file = tmp_path / "sapt.json"
+    cfg_file.write_text(json.dumps({
+        "workflow": "sapt",
+        "molecule": "SO2",
+        "surface_model": "w5-7",
+        "optimization_spec": "mpwb1k-d3bj_def2-tzvpd",
+        "dry_run": True,
+    }))
+    monkeypatch.setattr(sys, "argv", ["beep", "--config", str(cfg_file)])
+
+    mock_run = MagicMock()
+    fake_module = types.ModuleType("beep.workflows.sapt")
+    fake_module.run = mock_run
+
+    with patch.dict(sys.modules, {"beep.workflows.sapt": fake_module}):
+        main()
+
+    mock_connect.assert_called_once()
+    mock_run.assert_called_once()
 
 
 def test_pre_existing_workflow_models_unchanged():
@@ -74,6 +100,7 @@ def test_pre_existing_workflow_models_unchanged():
         SamplingConfig, BeHessConfig, ExtractConfig, PreExpConfig,
         GeomBenchmarkConfig, EnergyBenchmarkConfig, NmSamplingConfig,
     )
+
     assert WORKFLOW_MODELS["sampling"] is SamplingConfig
     assert WORKFLOW_MODELS["be_hess"] is BeHessConfig
     assert WORKFLOW_MODELS["extract"] is ExtractConfig
@@ -140,3 +167,7 @@ def test_main_dispatch_mbe_extract(mock_connect, monkeypatch, tmp_path):
         main()
 
     mock_run.assert_called_once()
+
+
+
+

@@ -61,6 +61,7 @@ This is the easiest way to create a new configuration file — start from the sc
 | `sampling` | Generate binding site candidates via random molecular placement, RMSD filtering, and geometry optimization |
 | `be_hess` | Submit binding energy and Hessian computations for optimized structures |
 | `extract` | Extract binding energies, apply ZPVE corrections, and generate summary tables and plots |
+| `sapt` | Build SAPT fragments from optimized structures and submit SAPT singlepoints |
 | `pre_exp` | Compute pre-exponential factors from vibrational analysis over a temperature range |
 | `geom_benchmark` | Benchmark DFT geometry optimizations and per-component force RMSD along the reference trajectory against high-level reference data |
 | `energy_benchmark` | Benchmark DFT binding energies against high-level reference values (CBS extrapolation), with optional gCP correction |
@@ -73,6 +74,7 @@ examples/
   sampling.json
   be_hess.json
   extract.json
+  sapt.json
   pre_exp.json
   geom_benchmark.json
   energy_benchmark.json
@@ -87,6 +89,7 @@ N2/
   sampling/       # binding site structures, site_finder debug data, log
   be_hess/        # log, config copy
   extract/        # CSV tables, SVG plots, log
+  sapt/           # dry-run plan, SAPT result table, log
 ```
 
 Output folders contain a log file and a copy of the input configuration for reproducibility.

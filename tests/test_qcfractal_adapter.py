@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from qcportal.record_models import RecordStatusEnum
+from qcelemental.models import Molecule
 
 from beep.adapters.qcfractal_adapter import (
     connect,
@@ -21,6 +22,10 @@ from beep.adapters.qcfractal_adapter import (
     is_incomplete,
     is_error,
     status_label,
+    add_energy_spec,
+    add_singlepoint_entries,
+    get_or_create_singlepoint_dataset,
+    submit_singlepoints_in_dataset,
 )
 
 
@@ -468,6 +473,82 @@ def test_status_label_mapping():
     assert status_label(RecordStatusEnum.running) == "INCOMPLETE"
     assert status_label(RecordStatusEnum.waiting) == "INCOMPLETE"
     assert status_label(RecordStatusEnum.error) == "ERROR"
+
+
+# ---------------------------------------------------------------------------
+# SAPT singlepoint dataset helpers
+# ---------------------------------------------------------------------------
+
+def test_add_energy_spec_registers_sapt0_energy_specification():
+    mock_ds = MagicMock()
+    spec_name = add_energy_spec(
+        mock_ds,
+        spec_name="SAPT0_JUN-CC-PVDZ",
+        method="sapt0",
+        basis="jun-cc-pvdz",
+        program="psi4",
+        keywords={
+            "scf_type": "df",
+            "freeze_core": True,
+            "guess": "sad",
+        },
+        description="SAPT0 interaction-energy decomposition",
+    )
+
+    assert spec_name == "sapt0_jun-cc-pvdz"
+    mock_ds.add_specification.assert_called_once()
+    call = mock_ds.add_specification.call_args
+    assert call.kwargs["name"] == spec_name
+    specification = call.kwargs["specification"]
+    assert specification.driver.value == "energy"
+    assert specification.method == "sapt0"
+    assert specification.basis == "jun-cc-pvdz"
+    assert specification.program == "psi4"
+    assert specification.keywords["freeze_core"] is True
+
+
+def test_sapt_singlepoint_helpers_add_and_submit_fragmented_entry():
+    mock_client = MagicMock()
+    mock_ds = MagicMock()
+    mock_client.get_dataset.return_value = mock_ds
+    fragmented_molecule = Molecule(
+        symbols=["O", "H", "H", "He"],
+        geometry=[
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+        ],
+        fragments=[[0, 1, 2], [3]],
+        fragment_charges=[0, 0],
+        fragment_multiplicities=[1, 1],
+    )
+
+    dataset = get_or_create_singlepoint_dataset(mock_client, "sapt_SO2_w5-7")
+    add_singlepoint_entries(
+        dataset,
+        [("SO2_W5_01_0008", fragmented_molecule)],
+    )
+    submit_singlepoints_in_dataset(
+        dataset,
+        spec_names=["sapt0_jun-cc-pvdz"],
+        tag="sapt",
+        subset=["SO2_W5_01_0008"],
+    )
+
+    assert dataset is mock_ds
+    mock_client.get_dataset.assert_called_once_with(
+        "singlepoint",
+        "sapt_SO2_w5-7",
+    )
+    added_entry = mock_ds.add_entries.call_args.args[0][0]
+    assert added_entry.name == "SO2_W5_01_0008"
+    assert added_entry.molecule == fragmented_molecule
+    mock_ds.submit.assert_called_once_with(
+        entry_names=["SO2_W5_01_0008"],
+        specification_names=["sapt0_jun-cc-pvdz"],
+        compute_tag="sapt",
+    )
 
 
 # ---------------------------------------------------------------------------

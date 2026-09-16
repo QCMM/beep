@@ -8,7 +8,7 @@ Usage:
 
 The JSON file must contain a "workflow" key that selects which workflow to run.
 Valid workflow values: sampling, be_hess, extract, pre_exp, geom_benchmark,
-energy_benchmark, nm_sampling, mbe, mbe_extract
+energy_benchmark, nm_sampling, sapt, mbe, mbe_extract
 """
 import argparse
 import json
@@ -27,6 +27,7 @@ from .models import (
     GeomBenchmarkConfig,
     EnergyBenchmarkConfig,
     NmSamplingConfig,
+    SaptConfig,
     MbeConfig,
     MbeExtractConfig,
 )
@@ -43,6 +44,7 @@ WORKFLOW_MODELS = {
     "geom_benchmark": GeomBenchmarkConfig,
     "energy_benchmark": EnergyBenchmarkConfig,
     "nm_sampling": NmSamplingConfig,
+    "sapt": SaptConfig,
     "mbe": MbeConfig,
     "mbe_extract": MbeExtractConfig,
 }
@@ -175,6 +177,8 @@ def main():
         from .workflows.energy_benchmark import run
     elif workflow == "nm_sampling":
         from .workflows.nm_sampling import run
+    elif workflow == "sapt":
+        from .workflows.sapt import run
     elif workflow == "mbe":
         from .workflows.mbe import run
     elif workflow == "mbe_extract":

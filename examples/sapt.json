@@ -1,0 +1,30 @@
+{
+    "workflow": "sapt",
+    "server": {
+        "address": "localhost:7777",
+        "username": null,
+        "password": null,
+        "verify": false
+    },
+    "molecule": "SO2",
+    "surface_model": "w5-7",
+    "optimization_spec": "mpwb1k-d3bj_def2-tzvpd",
+    "entries": ["SO2_W5_01_0008"],
+    "exclude_clusters": [],
+    "method": "sapt0",
+    "basis": "jun-cc-pvdz",
+    "program": "psi4",
+    "keywords": {
+        "scf_type": "df",
+        "freeze_core": true,
+        "guess": "sad"
+    },
+    "sapt_tag": "sapt",
+    "dry_run": true,
+    "wait_for_completion": false,
+    "wait_interval": 600,
+    "surface_charge": 0,
+    "surface_multiplicity": 1,
+    "molecule_charge": 0,
+    "molecule_multiplicity": 1
+}

@@ -1804,10 +1804,12 @@ def add_energy_spec(
 ) -> str:
     """Add an SP energy ``QCSpecification`` to a ``SinglepointDataset``.
 
-    Sister of :func:`add_gradient_spec` for the energy driver — used by
+    Sister of :func:`add_gradient_spec` for the energy driver - used by
     ``be_comp_periodic`` to register the BE electronic + dispersion specs
     on the complex, bare-surface, and gas-phase SinglepointDatasets.
-    Idempotent; returns the lowercased spec name actually registered.
+
+    Idempotent: ``add_specification`` silently reports already-existing
+    specs. Returns the lowercased specification name actually registered.
     """
     qc_spec = QCSpecification(
         program=program,
@@ -1818,10 +1820,11 @@ def add_energy_spec(
     )
     name = spec_name.lower()
     ds_sp.add_specification(
-        name=name, specification=qc_spec, description=description,
+        name=name,
+        specification=qc_spec,
+        description=description,
     )
     return name
-
 
 def add_singlepoint_entries(
     ds_sp: SinglepointDataset,
