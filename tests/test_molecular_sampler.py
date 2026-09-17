@@ -260,3 +260,37 @@ def test_adaptive_seats_at_contact_not_floating():
     near, coord = _placement_metrics(mols, len(cl.symbols))
     assert near < 3.7        # contact-seated, not floating (bug gave ~4.0-4.2 A)
     assert coord >= 1.5      # real neighbours present (bug gave < 0.6)
+
+
+# ---------------------------------------------------------------------------
+# Regressions: triatomic diameter, open-shell adsorbate bookkeeping
+# ---------------------------------------------------------------------------
+
+def test_calculate_diameter_triatomic_is_not_zero(hco_mol):
+    """Regression: a (3,3) array was special-cased to 0.0 as 'one water molecule',
+    but the function runs on the adsorbate, so HCO/H2O/HCN got diameter 0 and the
+    sphere sampler's inter-candidate spacing check was disabled."""
+    d = calculate_diameter(hco_mol.geometry)
+    assert d > 1.0 * qcel.constants.conversion_factor("angstrom", "bohr")
+    # max pairwise distance of the three atoms
+    g = hco_mol.geometry
+    expected = max(np.linalg.norm(g[i] - g[j]) for i in range(3) for j in range(3))
+    assert d == pytest.approx(expected)
+
+
+def test_calculate_diameter_single_atom_is_zero():
+    assert calculate_diameter(np.array([[0.0, 0.0, 0.0]])) == 0.0
+
+
+def test_create_molecule_keeps_doublet_adsorbate(ws3_cluster, hco_mol):
+    """Cluster and adsorbate become fragments; the doublet survives in the complex."""
+    assert hco_mol.molecular_multiplicity == 2
+    shifted = hco_mol.scramble(
+        do_shift=np.array([0.0, 0.0, 15.0]), do_rotate=False, do_resort=False
+    )[0]
+    mol = create_molecule(ws3_cluster, shifted)
+    n_cl = len(ws3_cluster.symbols)
+    assert mol.molecular_multiplicity == 2
+    assert mol.molecular_charge == pytest.approx(0.0)
+    assert list(mol.fragment_multiplicities) == [ws3_cluster.molecular_multiplicity, 2]
+    assert [list(f) for f in mol.fragments] == [list(range(n_cl)), list(range(n_cl, n_cl + 3))]

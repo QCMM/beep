@@ -44,7 +44,8 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
     else:
         T_min, T_max = config.range_of_temperature
         T_step = config.temperature_step
-        T_list = list(range(T_min, T_max, T_step))
+        # Inclusive of T_max (the log message below says "T_min K to T_max K").
+        T_list = list(range(T_min, T_max + 1, T_step))
 
     mol = config.molecule
     A = config.molecule_surface_area
@@ -54,7 +55,8 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
 
     main_logger = logging.getLogger("beep")
 
-    if mol is None:
+    if not mol:
+        # None or an empty list both mean "every molecule in the collection".
         mol = list(ds.entry_names)
 
     # Use first molecule name for the output folder (or collection name if list)
@@ -96,7 +98,8 @@ def run(config: PreExpConfig, client: FractalClient) -> None:
         v = pre_exponential_factor(mol_mass, T_list, sym_num, Ia, Ib, Ic, A)
         main_logger.info(
             f"Pre-exponential factor for {molecule} in the range of "
-            f"{T_min}K to {T_max}K with steps of {T_step}K has been calculated"
+            f"{T_min}K to {T_max}K (inclusive) with steps of {T_step}K "
+            f"has been calculated ({len(T_list)} temperatures)"
         )
 
         table = pd.DataFrame({"T": T_list, "v": v})

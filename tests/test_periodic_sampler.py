@@ -555,3 +555,204 @@ def test_site_filter_config_defaults_to_periodic():
     cfg = SamplingPeriodicConfig(**_periodic_config_kwargs())
     assert cfg.site_filter == "periodic"
     assert cfg.orientation_tol_ang == 0.3
+
+
+# ---------------------------------------------------------------------------
+# Regressions: seeded rotations, face-straddling adsorbates, spin bookkeeping
+# ---------------------------------------------------------------------------
+
+_CAND_KW = dict(
+    z_top_bohr=5.0 * ANG2BOHR,
+    z_scan_range_bohr=(0.0, 5.0 * ANG2BOHR),
+    sampling_distance_bohr=2.5 * ANG2BOHR,
+    cavity_scan_step_bohr=0.5 * ANG2BOHR,
+    cavity_window_bohr=1.0 * ANG2BOHR,
+    sanity_min_dist_bohr=1.5 * ANG2BOHR,
+    sanity_max_iter=20,
+)
+
+
+def _candidate(seed, x_ang=2.0, y_ang=2.0):
+    cell_diag = np.array([10.0, 10.0, 30.0])
+    result = generate_candidate(
+        _tiny_slab(cell_diag), _tiny_adsorbate(),
+        x_bohr=x_ang * ANG2BOHR, y_bohr=y_ang * ANG2BOHR,
+        cell_diag_bohr=cell_diag, pbc=[True, True, False],
+        rng=random.Random(seed), **_CAND_KW,
+    )
+    assert result is not None
+    return result
+
+
+def test_random_seed_controls_adsorbate_rotation():
+    """Regression: the rotation came from numpy's global RNG (qcelemental's scramble),
+    so seeding Python's `random` reproduced the grid noise but not the orientation."""
+    np.random.seed(1)
+    mol_a, _ = _candidate(7)
+    np.random.seed(2)          # must be irrelevant now
+    mol_b, _ = _candidate(7)
+    np.testing.assert_allclose(mol_a.geometry, mol_b.geometry)
+
+
+def test_different_seeds_give_different_rotations():
+    mol_a, _ = _candidate(7)
+    mol_b, _ = _candidate(8)
+    assert not np.allclose(mol_a.geometry[3:], mol_b.geometry[3:])
+
+
+def test_rotation_does_not_touch_global_random_state():
+    """The old code reseeded Python's global `random` on every attempt."""
+    random.seed(123)
+    expected = random.random()
+    random.seed(123)
+    _candidate(7)
+    assert random.random() == expected
+
+
+def test_recenter_adsorbate_straddling_cell_face():
+    """An adsorbate wrapped per atom across x=0 must be recentred as one molecule:
+    the naive mean of the split coordinates sat mid-cell, so the 'centered' entry
+    kept a split adsorbate."""
+    L = 10.0 * ANG2BOHR
+    cell_diag = np.array([L, L, 30.0 * ANG2BOHR])
+    pbc = [True, True, False]
+    bond = 1.13 * ANG2BOHR
+    geom = np.array([
+        [5.0 * ANG2BOHR, 5.0 * ANG2BOHR, 0.0],       # slab atom
+        [L - 0.3 * ANG2BOHR, 5.0 * ANG2BOHR, 5.0],   # C, wrapped to the far face
+        [-0.3 * ANG2BOHR + bond, 5.0 * ANG2BOHR, 5.0],  # O, just inside x=0
+    ])
+    out = recenter_adsorbate_com(geom, n_surface_atoms=1, cell_diag_bohr=cell_diag, pbc=pbc)
+    c, o = out[1], out[2]
+    # contiguous: the plain Euclidean bond length equals the true one
+    assert np.linalg.norm(o - c) == pytest.approx(bond)
+    # and centred: the (unweighted) adsorbate centre is at Lx/2, Ly/2
+    assert 0.5 * (c[0] + o[0]) == pytest.approx(0.5 * L)
+    assert 0.5 * (c[1] + o[1]) == pytest.approx(0.5 * L)
+
+
+def test_generate_candidate_on_face_keeps_adsorbate_contiguous():
+    """Grid nodes on the x=0 / y=0 lines rotate the adsorbate partly to negative x.
+    The per-atom wrap used to split it before recentering."""
+    bond = 1.13 * ANG2BOHR
+    for seed in range(6):
+        mol, _ = _candidate(seed, x_ang=0.0, y_ang=2.0)
+        ads = mol.geometry[3:]
+        assert np.linalg.norm(ads[1] - ads[0]) == pytest.approx(bond, rel=1e-6)
+        assert ads[:, 0].mean() == pytest.approx(5.0)   # cell is 10 bohr wide
+
+
+def test_periodic_filter_com_of_wrapped_adsorbate():
+    """Duplicate filtering must see a split adsorbate's true COM (on the molecule),
+    not the naive mean in the middle of the cell."""
+    from beep.core.periodic_sampler import filter_periodic_sites
+
+    # same CO, once contiguous near x=0.3 A, once stored wrapped across x=0
+    a = ("a", _ads(["C", "O"], [[0.3, 5.0, 12.0], [0.3, 5.0, 13.13]]))
+    split = ("split", _ads(["C", "O"], [[30.8, 5.0, 12.0], [0.9, 5.0, 13.13]]))
+    # rotated CO lying along x, straddling the face: C at x=-0.2 -> 30.8, O at +0.9
+    assert len(filter_periodic_sites([a, split], CELL, PBC, 2, com_tol_ang=1.0,
+                                     orient_tol_ang=None)) == 1
+
+
+def _doublet_hco():
+    return qcel.models.Molecule(
+        symbols=["C", "O", "H"],
+        geometry=np.array([[-0.62, 0.04, 0.0], [0.53, -0.10, 0.0], [-1.15, 1.03, 0.0]]) * ANG2BOHR,
+        molecular_charge=0, molecular_multiplicity=2,
+        fix_com=False, fix_orientation=False,
+    )
+
+
+def test_combine_propagates_adsorbate_multiplicity_and_fragments():
+    """An open-shell adsorbate must keep its spin state in the stored complex."""
+    from beep.core.periodic_sampler import _combine
+
+    cell_diag = np.array([10.0, 10.0, 30.0])
+    slab = _tiny_slab(cell_diag)
+    hco = _doublet_hco()
+    ads_coords = hco.geometry + np.array([5.0 * ANG2BOHR, 5.0 * ANG2BOHR, 3.0 * ANG2BOHR])
+    mol = _combine(slab, hco, ads_coords)
+    assert mol.molecular_multiplicity == 2
+    assert mol.molecular_charge == pytest.approx(0.0)
+    assert [list(f) for f in mol.fragments] == [[0, 1, 2], [3, 4, 5]]
+    assert list(mol.fragment_multiplicities) == [1, 2]
+    assert list(mol.fragment_charges) == [0.0, 0.0]
+
+
+def test_generate_candidate_keeps_doublet_adsorbate():
+    cell_diag = np.array([10.0, 10.0, 30.0])
+    result = generate_candidate(
+        _tiny_slab(cell_diag), _doublet_hco(),
+        x_bohr=2.0 * ANG2BOHR, y_bohr=2.0 * ANG2BOHR,
+        cell_diag_bohr=cell_diag, pbc=[True, True, False],
+        rng=random.Random(0), **_CAND_KW,
+    )
+    assert result is not None
+    mol, _ = result
+    assert mol.molecular_multiplicity == 2
+    assert list(mol.fragment_multiplicities) == [1, 2]
+
+
+def test_strip_adsorbate_keeps_surface_state_from_fragments():
+    from beep.core.periodic_sampler import _combine
+
+    cell_diag = np.array([10.0, 10.0, 30.0])
+    slab = _tiny_slab(cell_diag)
+    hco = _doublet_hco()
+    ads_coords = hco.geometry + np.array([5.0 * ANG2BOHR, 5.0 * ANG2BOHR, 3.0 * ANG2BOHR])
+    bare = strip_adsorbate(_combine(slab, hco, ads_coords), n_surface_atoms=3)
+    assert list(bare.symbols) == ["O", "O", "O"]
+    assert bare.molecular_multiplicity == 1
+    assert bare.molecular_charge == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Workflow: adsorbate comes from the entry's initial-molecule slot
+# ---------------------------------------------------------------------------
+
+def test_periodic_workflow_reads_adsorbate_from_entry_slot(tmp_path, monkeypatch):
+    """Regression: the adsorbate lookup went through fetch_opt_record, which needs an
+    optimization record at the MACE spec; an MLP-only run has none, so every run
+    fell through to the atoms collection (or died). The slab side already used
+    fetch_entry_initial_molecule; the adsorbate must too."""
+    from unittest.mock import MagicMock, patch
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+    from beep.workflows import sampling_periodic
+
+    monkeypatch.chdir(tmp_path)
+    cfg = SamplingPeriodicConfig(**_periodic_config_kwargs())
+
+    ds_sm = MagicMock(); ds_sm.entry_names = ["CO", "H2O"]
+    ds_surf = MagicMock(); ds_surf.entry_names = []      # no slabs -> loop body skipped
+
+    def get_collection(client, kind, name):
+        return ds_sm if name == cfg.small_molecule_collection else ds_surf
+
+    with patch.object(sampling_periodic, "qcf") as qcf:
+        qcf.get_collection.side_effect = get_collection
+        sampling_periodic.run(cfg, MagicMock())
+
+    qcf.fetch_entry_initial_molecule.assert_called_once_with(ds_sm, "CO")
+    qcf.fetch_initial_molecule.assert_not_called()
+    qcf.fetch_opt_record.assert_not_called()
+    qcf.fetch_atom_molecule.assert_not_called()
+
+
+def test_periodic_workflow_falls_back_to_atoms_collection(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock, patch
+    from beep.models.sampling_periodic import SamplingPeriodicConfig
+    from beep.workflows import sampling_periodic
+
+    monkeypatch.chdir(tmp_path)
+    cfg = SamplingPeriodicConfig(**_periodic_config_kwargs(molecule="H"))
+    ds_sm = MagicMock(); ds_sm.entry_names = ["CO"]
+    ds_surf = MagicMock(); ds_surf.entry_names = []
+
+    with patch.object(sampling_periodic, "qcf") as qcf:
+        qcf.get_collection.side_effect = lambda c, k, n: ds_sm if n == cfg.small_molecule_collection else ds_surf
+        client = MagicMock()
+        sampling_periodic.run(cfg, client)
+
+    qcf.fetch_atom_molecule.assert_called_once_with(client, cfg.atoms_collection, "H")
+    qcf.fetch_entry_initial_molecule.assert_not_called()

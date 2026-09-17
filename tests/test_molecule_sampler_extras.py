@@ -225,3 +225,23 @@ def test_single_site_spherical_sampling_with_noise(co_w2_0001):
     )
     assert len(result) > 0
     assert all(isinstance(m, Molecule) for m in result)
+
+
+def test_single_site_spherical_sampling_shell_radius(co_w2_0001):
+    """Regression: the shell radius was converted Angstrom->bohr twice, placing every
+    grid point 1.89x too far out. A point on a sampling_shell=R shell must sit at
+    R*angst2bohr (bohr) from the target molecule's COM (the origin)."""
+    sampling_mol = Molecule(
+        symbols=list(co_w2_0001.symbols[6:]),
+        geometry=co_w2_0001.geometry[6:].flatten(),
+    )
+    shell = 3.0
+    result = single_site_spherical_sampling(
+        cluster=co_w2_0001, sampling_mol=sampling_mol, sampled_mol_size=2,
+        sampling_shell=shell, grid_size="sparse", purge=False, noise=False,
+        zenith_angle=np.pi, print_out=False,
+    )
+    n_cluster = len(co_w2_0001.symbols)
+    for mol in result:
+        placed = com(mol.geometry[n_cluster:], list(mol.symbols[n_cluster:]))
+        assert np.linalg.norm(placed) == pytest.approx(shell * angst2bohr, rel=1e-6)

@@ -1,7 +1,8 @@
 """Sampling workflow config — maps to launch_sampling.py argparse flags."""
 from typing import Optional, Literal, List, Dict, Any
 from pydantic import BaseModel, Field
-from .base import ServerConfig, LevelOfTheory
+from pydantic.json_schema import SkipJsonSchema
+from .base import ServerConfig, LevelOfTheory, QC_KEYWORDS_DESCRIPTION, deprecated_null_only
 
 
 class SamplingConfig(BaseModel):
@@ -30,7 +31,14 @@ class SamplingConfig(BaseModel):
     refinement_tag: str = Field("refinement", description="Queue tag for refinement computation tasks")
     total_binding_sites: int = Field(220, description="Total number of binding sites to generate")
     sampling_clusters: List[str] = Field([], description="Subset of clusters to sample (empty = all clusters in surface model collection)")
-    keyword_id: Optional[int] = Field(None, description="QCFractal keyword ID for custom options")
+    qc_keywords: Optional[Dict[str, Any]] = Field(
+        None,
+        description=QC_KEYWORDS_DESCRIPTION + " Applied to the refinement optimisations.",
+    )
+    keyword_id: SkipJsonSchema[Optional[Any]] = Field(
+        None, description="Deprecated, use qc_keywords.", exclude=True,
+    )
+    _dep_keyword_id = deprecated_null_only("keyword_id", "qc_keywords")
     sampling_opt_keywords: Optional[Dict[str, Any]] = Field(
         None,
         description=(

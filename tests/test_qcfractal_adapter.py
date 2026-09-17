@@ -1,4 +1,5 @@
 """Tests for beep/adapters/qcfractal_adapter.py — all server calls mocked."""
+import logging
 from collections import Counter
 from unittest.mock import MagicMock, patch
 
@@ -887,3 +888,403 @@ def test_fetch_atom_molecule_propagates_other_portal_errors():
     client.get_dataset.return_value = ds
     with pytest.raises(PortalRequestError):
         fetch_atom_molecule(client, "atoms", "H")
+
+
+# ---------------------------------------------------------------------------
+# compute_hessian — basis-less LOTs and program/dispersion-aware reuse
+# ---------------------------------------------------------------------------
+
+def _hessian_client(query_results=None):
+    """Client whose be_nocp dataset holds one entry over molecules 1 and 2."""
+    from beep.adapters.qcfractal_adapter import PortalRequestError  # noqa: F401
+
+    client = MagicMock()
+    ds_nocp = MagicMock()
+    stoich_1 = MagicMock(); stoich_1.molecule.id = 1
+    stoich_2 = MagicMock(); stoich_2.molecule.id = 2
+    entry = MagicMock(); entry.stoichiometries = [stoich_1, stoich_2]
+    ds_nocp.iterate_entries.return_value = [entry]
+    client.get_dataset.return_value = ds_nocp
+
+    mol1 = MagicMock(); mol1.id = 1; mol1.symbols = ["O", "H", "H"]
+    mol2 = MagicMock(); mol2.id = 2; mol2.symbols = ["C", "O"]
+    client.get_molecules.return_value = [mol1, mol2]
+
+    client.query_singlepoints.return_value = iter(query_results or [])
+    meta = MagicMock(); meta.n_existing = 0; meta.n_inserted = 1
+    client.add_singlepoints.return_value = (meta, [900])
+    return client
+
+
+@pytest.mark.parametrize("opt_lot, exp_method, exp_basis", [
+    ("gfn2-xtb", "gfn2-xtb", None),
+    ("b3lyp-d3bj_def2-svp", "b3lyp-d3bj", "def2-svp"),
+])
+def test_compute_hessian_accepts_basisless_lot(opt_lot, exp_method, exp_basis):
+    """``method, basis = opt_lot.split("_")`` used to raise ValueError for
+    basis-less LOTs (gfn2-xtb, MACE aliases); only the first underscore
+    separates method from basis."""
+    from beep.adapters.qcfractal_adapter import compute_hessian
+
+    client = _hessian_client()
+    ids = compute_hessian(client, "be_CO_W5_01", opt_lot, 1, "hess", MagicMock())
+
+    assert ids == [900]
+    q = client.query_singlepoints.call_args.kwargs
+    assert q["method"] == exp_method and q["basis"] == exp_basis
+    sub = client.add_singlepoints.call_args.kwargs
+    assert sub["method"] == exp_method and sub["basis"] == exp_basis
+    assert sorted(sub["molecules"]) == [1, 2]
+
+
+def _hess_record(rec_id, mol_id, keywords):
+    r = MagicMock()
+    r.id = rec_id
+    r.molecule_id = mol_id
+    r.properties = {"return_energy": -1.0}
+    r.specification.keywords = keywords
+    return r
+
+
+def test_compute_hessian_reuse_requires_matching_program_and_dispersion():
+    """The reuse pre-query must be scoped to ``program`` and, for orca /
+    gaussian, to the native dispersion token get_zpve_mol later requires.
+    A stray psi4 Hessian (no simple_input token) at the same method/basis
+    must not mark an ORCA molecule as done."""
+    from beep.adapters.qcfractal_adapter import compute_hessian
+
+    psi4_like = _hess_record(10, 1, {"function_kwargs": {"dertype": 1}})
+    orca_like = _hess_record(11, 2, {"simple_input": "D3BJ"})
+    client = _hessian_client([psi4_like, orca_like])
+
+    ids = compute_hessian(
+        client, "be_CO_W5_01", "b3lyp-d3bj_def2-svp", 1, "hess", MagicMock(),
+        program="orca",
+    )
+
+    q = client.query_singlepoints.call_args.kwargs
+    assert q["program"] == "orca"
+    assert q["method"] == "b3lyp"            # bare functional on orca
+    # Only molecule 2 (matching D3BJ token) is reused; molecule 1 resubmitted.
+    sub = client.add_singlepoints.call_args.kwargs
+    assert sub["molecules"] == [1]
+    assert sub["program"] == "orca"
+    assert sub["keywords"] == {"simple_input": "D3BJ"}
+    assert ids == [11, 900]
+
+
+def test_compute_hessian_reuse_psi4_rejects_dispersion_keyword_records():
+    """On the psi4 path a record whose keywords carry a native dispersion
+    token belongs to another program's spec and must not count as done."""
+    from beep.adapters.qcfractal_adapter import compute_hessian
+
+    orca_like = _hess_record(11, 1, {"simple_input": "D3BJ"})
+    plain = _hess_record(12, 2, {"function_kwargs": {"dertype": 1}})
+    client = _hessian_client([orca_like, plain])
+
+    ids = compute_hessian(
+        client, "be_CO_W5_01", "b3lyp-d3bj_def2-svp", 1, "hess", MagicMock(),
+        program="psi4",
+    )
+    assert client.query_singlepoints.call_args.kwargs["program"] == "psi4"
+    assert client.add_singlepoints.call_args.kwargs["molecules"] == [1]
+    assert ids == [12, 900]
+
+
+def test_compute_hessian_orca_bare_functional_rejects_dispersion_records():
+    """A plain (non-dispersion) orca request must not reuse a b3lyp-d3bj
+    orca Hessian, which is stored under the same bare method."""
+    from beep.adapters.qcfractal_adapter import compute_hessian
+
+    disp = _hess_record(11, 1, {"simple_input": "D3BJ"})
+    bare = _hess_record(12, 2, {})
+    client = _hessian_client([disp, bare])
+
+    compute_hessian(
+        client, "be_CO_W5_01", "b3lyp_def2-svp", 1, "hess", MagicMock(),
+        program="orca",
+    )
+    assert client.add_singlepoints.call_args.kwargs["molecules"] == [1]
+
+
+# ---------------------------------------------------------------------------
+# _collect_reaction_record_ids — restricted to the specs just submitted
+# ---------------------------------------------------------------------------
+
+def test_collect_reaction_record_ids_filters_by_spec_names():
+    from beep.adapters.qcfractal_adapter import _collect_reaction_record_ids
+
+    client = MagicMock()
+    ds = MagicMock()
+    rec = MagicMock(); rec.id = 7
+    ds.iterate_records.return_value = [("e1", "pbe_def2-svp", rec)]
+    client.get_dataset.return_value = ds
+
+    ids = _collect_reaction_record_ids(
+        client, "be_H2O_W5_01", ("be_nocp",), spec_names=["PBE_def2-svp", "pbe-d3bj"],
+    )
+    assert ids == [7]
+    kwargs = ds.iterate_records.call_args.kwargs
+    assert kwargs["specification_names"] == ["pbe-d3bj", "pbe_def2-svp"]
+
+
+@patch("beep.adapters.qcfractal_adapter._collect_reaction_record_ids")
+@patch("beep.adapters.qcfractal_adapter.submit_energies")
+def test_compute_be_dft_energies_monitors_only_submitted_specs(mock_submit, mock_collect):
+    """check_jobs_status must not wait on LOTs of earlier runs: the record
+    collection is restricted to the spec names built in this call."""
+    from beep.adapters.qcfractal_adapter import compute_be_dft_energies
+
+    mock_submit.return_value = _fake_submit_result()
+    mock_collect.return_value = []
+    compute_be_dft_energies(
+        client=MagicMock(), rdset_base_name="be_H2O_W5_01",
+        all_dft=["pbe-d3bj_def2-tzvp", "hf3c_minix"], tag="t",
+        program="psi4", logger=MagicMock(),
+    )
+    spec_names = mock_collect.call_args.kwargs["spec_names"]
+    assert sorted(set(spec_names)) == ["hf3c_minix", "pbe-d3bj", "pbe_def2-tzvp"]
+
+
+# ---------------------------------------------------------------------------
+# create_or_load_reaction_dataset — only COMPLETE records, count on success
+# ---------------------------------------------------------------------------
+
+@patch("beep.adapters.qcfractal_adapter.add_reaction")
+@patch("beep.adapters.qcfractal_adapter.be_stoichiometry")
+def test_create_or_load_reaction_dataset_skips_non_complete(mock_stoich, mock_add):
+    from beep.adapters.qcfractal_adapter import create_or_load_reaction_dataset
+
+    def rec(status):
+        r = MagicMock(); r.status = status
+        r.final_molecule = MagicMock() if status == RecordStatusEnum.complete else None
+        return r
+
+    ds_opt = MagicMock()
+    ds_opt.get_record.side_effect = lambda st, lot: {
+        "s_waiting": rec(RecordStatusEnum.waiting),
+        "s_running": rec(RecordStatusEnum.running),
+        "s_error": rec(RecordStatusEnum.error),
+        "s_missing": None,
+        "s_done": rec(RecordStatusEnum.complete),
+        "s_fail": rec(RecordStatusEnum.complete),
+    }[st]
+    mock_stoich.return_value = {"be_nocp": [], "bsse": []}
+
+    def add(client, base, name, stoich):
+        if name == "s_fail":
+            raise RuntimeError("server refused")
+    mock_add.side_effect = add
+
+    logger = MagicMock()
+    opt_stru = {k: None for k in
+                ("s_waiting", "s_running", "s_error", "s_missing", "s_done", "s_fail")}
+    create_or_load_reaction_dataset(
+        MagicMock(), "be_H2O_W5", "hf3c_minix", MagicMock(), MagicMock(),
+        ds_opt, opt_stru, logger,
+    )
+
+    # be_stoichiometry only ever sees COMPLETE records (final_molecule set)
+    assert mock_stoich.call_count == 2
+    # n_entries counts only successful add_reaction calls
+    msgs = [c.args[0] for c in logger.info.call_args_list]
+    assert any("Created a total of 1 entries" in m for m in msgs)
+    warns = " ".join(c.args[0] for c in logger.warning.call_args_list)
+    assert "s_waiting" in warns and "s_running" in warns and "s_missing" in warns
+
+
+# ---------------------------------------------------------------------------
+# check_optimized_molecule — missing entry -> LevelOfTheoryNotFound
+# ---------------------------------------------------------------------------
+
+def test_check_optimized_molecule_missing_entry_raises_lot_not_found():
+    from beep.adapters.qcfractal_adapter import (
+        check_optimized_molecule, PortalRequestError,
+    )
+    from beep.core.errors import LevelOfTheoryNotFound
+
+    ds = MagicMock()
+    ds.name = "astro_mol"
+    ds.get_record.side_effect = PortalRequestError(
+        "Request failed: Missing 1 entries: XYZ (HTTP status 400)",
+        status_code=400, details={},
+    )
+    with pytest.raises(LevelOfTheoryNotFound, match="does not exist"):
+        check_optimized_molecule(ds, "hf3c_minix", "XYZ")
+
+
+def test_check_optimized_molecule_missing_spec_raises_lot_not_found():
+    from beep.adapters.qcfractal_adapter import check_optimized_molecule
+    from beep.core.errors import LevelOfTheoryNotFound
+
+    ds = MagicMock()
+    ds.name = "astro_mol"
+    ds.get_record.return_value = None
+    with pytest.raises(LevelOfTheoryNotFound):
+        check_optimized_molecule(ds, "hf3c_minix", ["XYZ"])
+
+
+def test_check_optimized_molecule_propagates_server_errors():
+    from beep.adapters.qcfractal_adapter import (
+        check_optimized_molecule, PortalRequestError,
+    )
+    ds = MagicMock()
+    ds.get_record.side_effect = PortalRequestError(
+        "Internal server error", status_code=500, details={},
+    )
+    with pytest.raises(PortalRequestError):
+        check_optimized_molecule(ds, "hf3c_minix", "XYZ")
+
+
+# ---------------------------------------------------------------------------
+# rmsd_filter_from_dataset — ERROR records warned, exact duplicates dropped
+# ---------------------------------------------------------------------------
+
+def _rmsd_ds(records):
+    ds = MagicMock()
+    ds.entry_names = list(records)
+    ds.get_record.side_effect = lambda name, lot: records[name]
+    return ds
+
+
+def _opt_record(status, rmsd_to_others=1.0):
+    r = MagicMock()
+    r.status = status
+    mol = MagicMock()
+    mol.align.return_value = (None, {"rmsd": rmsd_to_others})
+    r.final_molecule = mol
+    return r
+
+
+def test_rmsd_filter_warns_on_error_records():
+    from beep.adapters.qcfractal_adapter import rmsd_filter_from_dataset
+
+    ds = _rmsd_ds({
+        "ok": _opt_record(RecordStatusEnum.complete),
+        "bad": _opt_record(RecordStatusEnum.error),
+    })
+    logger = MagicMock()
+    out = rmsd_filter_from_dataset(ds, "hf3c_minix", logger)
+    assert list(out) == ["ok"]
+    warns = " ".join(c.args[0] for c in logger.warning.call_args_list)
+    assert "bad" in warns and "ERROR" in warns
+
+
+def test_rmsd_filter_drops_exact_duplicates():
+    """Two entries with identical geometry (RMSD == 0.0) are duplicates and
+    the second must be dropped; the old ``rmsd != 0.0`` guard kept them."""
+    from beep.adapters.qcfractal_adapter import rmsd_filter_from_dataset
+
+    ds = _rmsd_ds({
+        "a": _opt_record(RecordStatusEnum.complete, rmsd_to_others=0.0),
+        "b": _opt_record(RecordStatusEnum.complete, rmsd_to_others=0.0),
+    })
+    out = rmsd_filter_from_dataset(ds, "hf3c_minix", MagicMock())
+    assert list(out) == ["a"]
+    # No self-comparison: only the (a, b) pair was aligned.
+    assert ds.get_record.call_count == 2
+    assert out["a"].align.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# _check_insert_meta / keyword type checks
+# ---------------------------------------------------------------------------
+
+def test_check_insert_meta_warns_on_failed_insert(caplog):
+    from qcportal.metadata_models import InsertMetadata
+    from beep.adapters.qcfractal_adapter import _check_insert_meta
+
+    meta = InsertMetadata(
+        errors=[(0, "Specification 'x' already exists with different content")],
+        existing_idx=[],
+    )
+    logger = logging.getLogger("beep_insert_meta_test")
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        ok = _check_insert_meta(meta, "specification 'x' in ds", logger)
+    assert ok is False
+    assert "did not fully accept specification 'x' in ds" in caplog.text
+    assert "different content" in caplog.text
+
+
+def test_check_insert_meta_silent_on_success(caplog):
+    from qcportal.metadata_models import InsertMetadata
+    from beep.adapters.qcfractal_adapter import _check_insert_meta
+
+    logger = logging.getLogger("beep_insert_meta_test")
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        assert _check_insert_meta(InsertMetadata(existing_idx=[0]), "spec", logger) is True
+        assert _check_insert_meta(None, "spec", logger) is True
+        assert _check_insert_meta(MagicMock(), "spec", logger) is True
+    assert caplog.text == ""
+
+
+def test_add_opt_specification_checks_insert_meta(caplog):
+    from qcportal.metadata_models import InsertMetadata
+    from beep.adapters.qcfractal_adapter import add_opt_specification
+
+    ds = MagicMock()
+    ds.name = "ds"
+    ds.add_specification.return_value = InsertMetadata(errors=[(0, "conflict")])
+    beep_logger = logging.getLogger("beep")
+    beep_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger="beep"):
+            add_opt_specification(ds, {"name": "S", "qc_spec": {"method": "hf", "basis": "sto-3g"}})
+    finally:
+        beep_logger.removeHandler(caplog.handler)
+    assert "optimization specification 's'" in caplog.text
+    assert "conflict" in caplog.text
+
+
+@pytest.mark.parametrize("bad", [5, "scf_type=df", ["scf_type", "df"]])
+def test_add_opt_specification_rejects_non_dict_keywords(bad):
+    """A legacy integer keyword ID (or any non-dict) used to be silently
+    replaced by {}; it must now fail loudly."""
+    from beep.adapters.qcfractal_adapter import add_opt_specification
+
+    ds = MagicMock()
+    with pytest.raises(TypeError, match="must be a dict"):
+        add_opt_specification(ds, {
+            "name": "s", "qc_spec": {"method": "hf", "basis": "sto-3g", "keywords": bad},
+        })
+    ds.add_specification.assert_not_called()
+
+
+def test_add_opt_specification_rejects_non_dict_opt_keywords():
+    from beep.adapters.qcfractal_adapter import add_opt_specification
+
+    ds = MagicMock()
+    with pytest.raises(TypeError, match="optimization keywords"):
+        add_opt_specification(ds, {
+            "name": "s", "qc_spec": {"method": "hf", "basis": "sto-3g"},
+            "optimization_spec": {"keywords": 3},
+        })
+
+
+def test_add_opt_specification_passes_dict_keywords_through():
+    from beep.adapters.qcfractal_adapter import add_opt_specification
+
+    ds = MagicMock()
+    add_opt_specification(ds, {
+        "name": "s",
+        "qc_spec": {"method": "hf", "basis": "sto-3g", "keywords": {"scf_type": "df"}},
+        "optimization_spec": {"keywords": {"maxiter": 50}},
+    })
+    spec = ds.add_specification.call_args.args[1]
+    assert spec.qc_specification.keywords == {"scf_type": "df"}
+    assert spec.keywords == {"maxiter": 50}
+
+
+def test_submit_energies_rejects_non_dict_keywords():
+    from beep.adapters.qcfractal_adapter import submit_energies
+
+    with pytest.raises(TypeError, match="must be a dict"):
+        submit_energies(MagicMock(), "base", "pbe", "def2-svp", "psi4",
+                        "be_nocp", "tag", keywords=42)
+
+
+def test_submit_hessians_rejects_non_dict_keywords():
+    from beep.adapters.qcfractal_adapter import submit_hessians
+
+    with pytest.raises(TypeError, match="must be a dict"):
+        submit_hessians(MagicMock(), "psi4", "hf", "sto-3g", [1], 42, "tag")

@@ -6,21 +6,28 @@
         "password": null,
         "verify": false
     },
-    "molecule": null,
-    "benchmark_structures": [],
-    "small_molecule_collection": null,
-    "surface_model_collection": null,
-    "opt_level_of_theory": [],
+    "molecule": "CO",
+    "benchmark_structures": [
+        "CO_W3_0001",
+        "CO_W3_0007"
+    ],
+    "small_molecule_collection": "Small_molecules",
+    "surface_model_collection": "small water",
+    "atoms_collection": "atoms",
+    "opt_level_of_theory": [
+        "mpwb1k-d3bj_def2-tzvpd"
+    ],
     "reference_geometry_level_of_theory": "ccsd(t)_aug-cc-pvtz",
     "be_level_of_theory": [],
     "cbs_level_of_theory": [],
-    "keyword_id": null,
-    "program": null,
-    "be_basis": null,
-    "tag_reference_geometry": null,
-    "tag_dft_geometry": null,
-    "tag_be": null,
-    "tag_cbs": null,
+    "program": "psi4",
+    "be_basis": "def2-tzvpd",
+    "tag_reference_geometry": "ref-geom",
+    "tag_dft_geometry": "dft-geom",
+    "tag_be": "be-bench",
+    "tag_cbs": "cbs-bench",
     "use_initial_reference_geometry": false,
-    "custom_dft_functionals": []
+    "custom_dft_functionals": [],
+    "gcp_correction": false,
+    "generate_plots": false
 }

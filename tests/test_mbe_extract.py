@@ -169,10 +169,12 @@ def test_zpve_enabled_writes_corrected_table(tmp_path, monkeypatch):
     sp_ds = DummySinglepointDataset(sp_records)
     _patch_collections(monkeypatch, mb_ds, sp_ds)
 
-    # Stub the read-only ZPVE borrow to a known per-site value.
+    # Stub the read-only ZPVE borrow to a known, non-symmetric per-site value
+    # so the sign of the correction is actually checked below.
+    delta_zpve = 1.7
     monkeypatch.setattr(
         bt, "borrow_zpve_corrections",
-        lambda *a, **k: pd.Series({"cluster-a": 1.5}, name="Delta_ZPVE"),
+        lambda *a, **k: pd.Series({"cluster-a": delta_zpve}, name="Delta_ZPVE"),
     )
 
     cfg = MbeExtractConfig(
@@ -196,9 +198,14 @@ def test_zpve_enabled_writes_corrected_table(tmp_path, monkeypatch):
     assert f"{spec}+ZPVE" in df_zpve.columns
     assert "Delta_ZPVE" in df_zpve.columns
     df_total = pd.read_csv(data_dir / "total_be.csv", index_col=0)
-    assert df_zpve.loc["cluster-a", f"{spec}+ZPVE"] == pytest.approx(
-        df_total.loc["cluster-a", spec] + 1.5
-    )
+    # MBE BEs are positive-convention and Delta_ZPVE = ZPVE(complex) - ZPVE(parts)
+    # is positive, so the ZPVE-corrected BE must be BE - Delta_ZPVE (smaller).
+    be_uncorr = df_total.loc["cluster-a", spec]
+    be_corr = df_zpve.loc["cluster-a", f"{spec}+ZPVE"]
+    assert be_corr == pytest.approx(be_uncorr - delta_zpve)
+    assert be_corr < be_uncorr
+    assert be_corr != pytest.approx(be_uncorr + delta_zpve)
+    assert df_zpve.loc["cluster-a", "Delta_ZPVE"] == pytest.approx(delta_zpve)
     assert "ZPVE correction" in out_path.read_text()
 
 

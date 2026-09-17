@@ -52,7 +52,12 @@ def _add_entry(mb_ds, entry_name, molecule, update_existing, existing_entries) -
         return
     try:
         mb_ds.add_entry(name=entry_name, initial_molecule=molecule, overwrite=update_existing)
-    except TypeError:
+    except TypeError as exc:
+        # Only swallow the signature mismatch of dataset classes that do not
+        # accept ``overwrite`` (qcportal 0.64 ManybodyDataset.add_entry).
+        # Any other TypeError (e.g. molecule validation) is a real error.
+        if "overwrite" not in str(exc):
+            raise
         mb_ds.add_entry(name=entry_name, initial_molecule=molecule)
     logger.info(f"Entry added/updated: {entry_name}")
 

@@ -11,6 +11,7 @@
     "small_molecule_collection": "Small_molecules",
     "surface_clusters": ["slab_01", "slab_02"],
 
+    "opt_level_of_theory": "lmft-co-d-v0",
     "be_electronic_lot": {
         "mace_model": "/path/to/models/my-electronic-model.model"
     },

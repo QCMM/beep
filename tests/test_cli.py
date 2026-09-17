@@ -140,3 +140,50 @@ def test_main_dispatch_mbe_extract(mock_connect, monkeypatch, tmp_path):
         main()
 
     mock_run.assert_called_once()
+
+
+def test_schema_prints_valid_json(monkeypatch, capsys):
+    """--schema must use the pydantic v2 API and emit parseable JSON."""
+    monkeypatch.setattr(sys, "argv", ["beep", "--schema", "geom_benchmark"])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 0
+    schema = json.loads(capsys.readouterr().out)
+    assert schema["title"] == "GeomBenchmarkConfig"
+    assert "qc_keywords" in schema["properties"]
+    # deprecated null-only alias is loadable but not advertised
+    assert "dft_optimization_keyword" not in schema["properties"]
+
+
+def test_schema_does_not_use_deprecated_schema_json(monkeypatch, capsys):
+    import warnings
+    monkeypatch.setattr(sys, "argv", ["beep", "--schema", "sampling"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        with pytest.raises(SystemExit):
+            main()
+    json.loads(capsys.readouterr().out)
+
+
+@patch("beep.cli.connect")
+def test_main_invalid_config_prints_clean_error(mock_connect, monkeypatch, tmp_path, capsys):
+    """A config that fails model validation must exit 1 with a readable
+    per-field message instead of a pydantic traceback."""
+    cfg_file = tmp_path / "bad.json"
+    cfg_file.write_text(json.dumps({
+        "workflow": "geom_benchmark",
+        "opt_dataset": "ds",
+        # benchmark_structures missing; deprecated name with a keyword ID
+        "dft_optimization_keyword": 7,
+    }))
+    monkeypatch.setattr(sys, "argv", ["beep", "--config", str(cfg_file)])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "invalid configuration for workflow 'geom_benchmark'" in err
+    assert "benchmark_structures" in err
+    assert "dft_optimization_keyword" in err
+    assert "qc_keywords" in err
+    assert "Traceback" not in err
+    mock_connect.assert_not_called()

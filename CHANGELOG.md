@@ -9,6 +9,140 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`mbe_extract`: ZPVE-corrected MBE binding energies were too large by
+  2·ΔZPVE.** MBE BEs are positive-convention (complex minus fragments,
+  negated) and `Delta_ZPVE` = ZPVE(complex) − ZPVE(parts) is positive, so
+  the correction has to be subtracted. The `+` had been carried over from
+  `extract`, where BEs are negative-convention and `+` is right. The
+  regression test that locked in the wrong sign now checks it with
+  asymmetric numbers.
+
+- **`extract` / `apply_lin_models`: `StdDev_all_dft` was taken over the
+  method columns plus the freshly inserted mean.** The mean adds zero
+  deviation but inflates the denominator, so the reported spread was low by
+  √((n−1)/n), about 10 % for five functionals. Both are now computed over
+  the method columns only, as the `--be_methods` path already did.
+
+- **`sampling_periodic`: `random_seed` did not control the adsorbate
+  orientation.** qcelemental's `Molecule.scramble` draws its rotation from
+  numpy's global RNG, not Python's `random`, so only the grid noise was
+  reproducible. The rotation matrix is now built from the workflow's own
+  seeded RNG and passed to `scramble` explicitly.
+
+- **`sampling_periodic`: adsorbates placed on the x = 0 / y = 0 grid lines
+  were split across the cell faces.** The per-atom wrap ran before COM
+  recentering, and the naive mean of the split coordinates put the "centre"
+  mid-cell, so the stored entry kept the split molecule and the duplicate
+  filter used the same wrong COM. Atoms are now unwrapped (minimum image
+  from the first adsorbate atom) before the COM is taken and wrapped once
+  after centring; the duplicate filter uses the same unwrapped COM.
+
+- **`sampling` (sphere method): any triatomic adsorbate had diameter 0.**
+  `calculate_diameter` special-cased a `(3, 3)` array as "one water
+  molecule", but it is called on the adsorbate, so HCO, H2O, HCN and CO2
+  silently lost the inter-candidate spacing check. `single_site_spherical_sampling`
+  also converted the shell radius to bohr twice (1.89× the requested radius).
+
+- **Open-shell adsorbates lost their multiplicity in MBE fragmentation and in
+  the sampled complexes.** `mbe_fragmentation` hard-coded charge 0 /
+  multiplicity 1 for every fragment, so HCO, CH3O and CH2OH were submitted as
+  singlets; `sampling` and `sampling_periodic` rebuilt the complex without
+  fragment charges/multiplicities and let qcelemental infer a parity-based
+  value. Complexes now carry explicit fragments with their own charge and
+  multiplicity (total charge summed, unpaired electrons coupled high-spin).
+
+- **`be_hess`: cluster names were re-parsed from entry names and broke for
+  anything but `Wnn_mm`.** `split("_")[-3:-1]` gave `CO_cd5` for a cluster
+  named `cd5`, so the reaction dataset was looked up under the wrong name and
+  `compute_hessian` silently submitted nothing. The cluster name is now
+  carried from `check_refinement_status`; a cluster emptied by the RMSD
+  filter is skipped with a warning instead of raising `IndexError`.
+
+- **`compute_hessian` / `compute_be_dft_energies` crashed on basis-less
+  levels of theory** (`gfn2-xtb`, MACE aliases) with a two-way
+  `split("_")`; only the first underscore separates method from basis now.
+
+- **`compute_hessian` reuse pre-query ignored program and dispersion.** A
+  stray psi4 Hessian at the same functional/basis marked an ORCA or Gaussian
+  molecule as done (and vice versa), suppressing submission while
+  `get_zpve_mol` later reported "no Hessian". Reuse is now scoped to the
+  requested program and dispersion keyword.
+
+- **MBE monitors polled forever on cancelled records.** Only COMPLETE and
+  ERROR were terminal and `max_wait` defaults to `None`; CANCELLED, INVALID
+  and DELETED are now terminal failures, logged and counted.
+
+- **`nm_sampling` could loop forever when `client.reset_records` kept
+  failing**; failed reset calls now consume the per-record retry budget.
+  An aborted run (no geometries, modes or displacements) now exits 1
+  instead of logging "finished successfully".
+
+- **Silently discarded QC keywords.** The `nm_sampling`, `geom_benchmark`
+  and `sampling` program-keyword fields (now `qc_keywords`, see Changed)
+  were typed as QCFractal 0.15 keyword IDs and every consumer replaced a
+  non-dict with `{}`, so user SCF options vanished without a trace.
+  `qc_keywords` is an inline dict that reaches the specification; the
+  adapter raises `TypeError` on a non-dict instead of discarding it, and a
+  legacy ID under any of the old names is rejected at config validation.
+
+- **Specification/entry insertions no longer hide server errors.**
+  `add_specification` / `add_entry` return `InsertMetadata`; a same-name
+  spec with different content was silently ignored and the old spec ran.
+  Every insertion site now logs the server's error list.
+
+- **`be_hess` / `energy_benchmark` monitoring waited on every level of theory
+  ever registered on the reaction datasets**, not only the specs submitted
+  in the current run, so ERRORs from old LOTs stalled and polluted the
+  status. `_collect_reaction_record_ids` is now filtered by spec name.
+
+- **`create_or_load_reaction_dataset` crashed on WAITING/RUNNING
+  optimizations** (`final_molecule` is `None`); only COMPLETE records become
+  reaction entries and the entry count reflects successful additions.
+
+- **`check_optimized_molecule` raised a raw `PortalRequestError`** for a
+  missing entry instead of `LevelOfTheoryNotFound`.
+
+- **`rmsd_filter_from_dataset` dropped ERROR records silently and kept exact
+  duplicates** (`rmsd != 0.0`); both now behave as the docstring says.
+
+- **`geom_benchmark` crashed on `record.id` when a LOT had no record for a
+  structure** (qcportal 0.64 returns `None`); the LOT is excluded with a
+  warning.
+
+- **`extract` ZPVE guard counted BE rows, not finished Hessians**, so the
+  linear model could be fitted from fewer than five points; the process-wide
+  `warnings.filterwarnings("ignore")` that hid the resulting `RankWarning`
+  (also in `energy_benchmark`) is gone. `extract` no longer raises `KeyError`
+  when a `be_nocp` entry has no BSSE row (3c methods), and `zpve` no longer
+  raises `TypeError` when the Hessian record has no electronic energy.
+
+- **`pre_exp`: `molecule: []` crashed, the temperature range excluded
+  `T_max` although the log said inclusive, and linear molecules were
+  detected with an exact `Ia == 0` float compare.** `[]` now means all
+  molecules, the range is inclusive, `range_of_temperature` is validated,
+  and linearity uses a relative tolerance (`Ia < 1e-6·Ib`).
+
+- **`sampling` with `store_initial_structures` mangled any path containing a
+  dot** (`.replace(".", "")` ran on the whole path); the early stop fired
+  one cluster late (`>` instead of `>=`); the fallback to the `n_water//3`
+  slot heuristic was a silent bare `except` and now warns with the cause.
+
+- **`sampling_periodic` read the adsorbate through an optimization record at
+  the MACE spec**, which MLP-only runs never have; it now uses the entry's
+  initial-molecule slot like the slab side.
+
+- **`cbs_extrapolation`: `scf_xtpl_helgaker_2` raised `NameError` for array
+  input with `verbose > 2`**; Halkier 1998 DOI corrected.
+
+- **`beep --schema` used the removed pydantic v1 `schema_json`; an invalid
+  config now prints a per-field error list and exits 1** instead of a
+  traceback. Importing `beep` from an uninstalled checkout no longer raises
+  `PackageNotFoundError` (`__version__` falls back to `0.0.0+unknown`).
+
+- **`mbe`: the `add_entry(overwrite=...)` compatibility shim swallowed every
+  `TypeError`**, including molecule validation errors; it now re-raises
+  anything but the signature mismatch.
+
 - **`extract`: methods present only in later clusters no longer vanish
   from the report.** `concatenate_frames` reindexed every subsequent
   cluster's frame onto the columns accumulated from the first-iterated
@@ -61,6 +195,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   their existing dispersion specs and records stay valid.
 
 ### Changed
+
+- **Program keywords are `qc_keywords` in every workflow config.** The
+  per-program QC options (psi4/ORCA/Gaussian keywords such as `guess`,
+  `damping_percentage`, `scf_type`, `reference`) that become a
+  specification's `qc_spec.keywords` were exposed under one name per
+  workflow, all of them misleading: `keyword_id` (`sampling`, `be_hess`,
+  `energy_benchmark`), `dft_keyword` (`nm_sampling`) and
+  `dft_optimization_keyword` (`geom_benchmark`). They are now a single
+  `qc_keywords: dict | null` field, distinct from the `*_opt_keywords`
+  fields, which are geomeTRIC optimizer options. `sampling.qc_keywords`
+  goes verbatim to the refinement `qc_spec`; `be_hess.qc_keywords` is
+  merged over the open-shell default `{"reference": "uks"}` for the BE
+  single points; `nm_sampling.qc_keywords` reaches every DFT gradient spec
+  and `geom_benchmark.qc_keywords` every DFT optimization spec. Motivation:
+  the UKS SCF of the F atom (²P) on water oscillates with the default SAD
+  guess at every site (`{"guess": "gwh", "damping_percentage": 20}` fixes
+  it), and there was no consistent way to pass SCF keywords through the
+  configs. The old names remain as deprecated aliases that accept `null`
+  only, so existing configs carrying `"keyword_id": null` etc. still load;
+  any other value (a legacy QCFractal 0.15 keyword ID or a dict under the
+  old name) fails validation with a message pointing to `qc_keywords`.
+  `energy_benchmark.keyword_id` was never read by the workflow and has no
+  replacement. The deprecated fields are excluded from the config copy
+  written to disk and from `beep --schema`. A config that sets a dict
+  creates a new specification and must not be re-run on species already
+  computed with the default one.
+
+- **`examples/*.json` are now complete, validating configs** (previously six
+  of them carried `null` in required fields and failed model validation);
+  a test loads every example against its workflow model.
 
 - **Removed `BeHessConfig.dispersion_tag`** (added in 0.15.0 alongside
   `mace_dispersion`). It routed the analytic dispersion single-points to

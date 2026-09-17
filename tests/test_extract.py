@@ -223,3 +223,119 @@ def test_concatenate_frames_unions_method_columns_across_clusters(
     assert df.loc["CO_W12_2_0001", "b3lyp-d3bj/def2-svp"] == pytest.approx(-13.0)
     assert df.loc[["CO_W12_1_0001", "CO_W12_1_0002"],
                   "b3lyp-d3bj/def2-svp"].isna().all()
+
+
+# ---------------------------------------------------------------------------
+# StdDev must be computed over the method columns only (not incl. the Mean)
+# ---------------------------------------------------------------------------
+
+@patch("beep.workflows.extract.qcf.check_collection_exists", return_value=True)
+@patch("beep.workflows.extract.qcf.fetch_reaction_values")
+def test_concatenate_frames_std_over_methods_only(mock_fetch, mock_exists):
+    """Regression: StdDev_all_dft was computed on the frame that already held
+    the Mean column, so the std ran over methods + mean and came out low by
+    sqrt((n-1)/n). It must equal the pandas std (ddof=1) over the methods."""
+    from beep.workflows.extract import concatenate_frames
+    entries = ["CO_W12_1_0001", "CO_W12_1_0002"]
+    vals = {
+        "wb97x-v/def2-tzvp":   [-10.0, -3.0],
+        "m06-hf/def2-tzvp":    [-12.0, -5.0],
+        "wpbe-d3bj/def2-tzvp": [-17.0, -4.0],
+    }
+    mock_fetch.return_value = pd.DataFrame(vals, index=entries)
+    ds_w = MagicMock()
+    ds_w.entry_names = ["W12_1"]
+    df, ok = concatenate_frames(
+        MagicMock(), "CO", ds_w, "mpwb1k-d3bj_def2-tzvpd",
+        be_range=(-0.1, -25.0), stoichiometry="bsse")
+    assert ok
+    expected = pd.DataFrame(vals, index=entries)
+    pd.testing.assert_series_equal(
+        df["Mean_Eb_all_dft"], expected.mean(axis=1), check_names=False)
+    pd.testing.assert_series_equal(
+        df["StdDev_all_dft"], expected.std(axis=1, ddof=1), check_names=False)
+    # Explicit numeric check for the first site: std([-10,-12,-17]) = 3.6056
+    assert df.loc["CO_W12_1_0001", "StdDev_all_dft"] == pytest.approx(
+        np.std([-10.0, -12.0, -17.0], ddof=1))
+
+
+def _run_zpve_correction(entries, be_methods, basis, get_zpve_side_effect,
+                         be_df=None):
+    from beep.workflows.extract import zpve_correction
+    mock_ds = MagicMock()
+    mock_ds.entry_names = entries
+    if be_df is None:
+        be_df = _make_be_df(entries, be_methods, basis)
+    with patch("beep.workflows.extract.qcf.get_collection", return_value=mock_ds), \
+         patch("beep.workflows.extract.qcf.fetch_reaction_values",
+               return_value=be_df), \
+         patch("beep.workflows.extract.qcf.fetch_reaction_entries",
+               return_value=_make_nocp_df(entries)), \
+         patch("beep.workflows.extract.qcf.get_zpve_mol",
+               side_effect=get_zpve_side_effect):
+        return zpve_correction(
+            name_be=["be_C_W5_01_HF3C_MINIX"],
+            be_methods=be_methods,
+            lot_opt="hf3c_minix",
+            basis=basis,
+            client=MagicMock(),
+            scale_factor=1.0,
+            be_range=(-0.1, -25.0),
+        )
+
+
+def test_zpve_correction_std_over_methods_only():
+    """The ZPVE-corrected frame's StdDev_all_dft must be the std (ddof=1) over
+    the three +ZPVE method columns, not over methods + Mean."""
+    entries = [f"C_W5_01_{i:04d}" for i in range(1, 6)]
+    be_methods = ["wb97x-v", "m06-hf", "wpbe-d3bj"]
+    basis = "def2-tzvp"
+    be_df = pd.DataFrame({
+        "wb97x-v/def2-tzvp":   [-10.0, -11.0, -12.0, -13.0, -14.0],
+        "m06-hf/def2-tzvp":    [-12.0, -12.5, -13.5, -15.0, -16.0],
+        "wpbe-d3bj/def2-tzvp": [-17.0, -16.0, -15.0, -14.5, -13.0],
+    }, index=entries)
+    df_be, fit, todelete = _run_zpve_correction(
+        entries, be_methods, basis, _fake_get_zpve_mol, be_df=be_df)
+    zpve_cols = [f"{bm}/{basis}+ZPVE" for bm in be_methods]
+    assert set(zpve_cols) <= set(df_be.columns)
+    pd.testing.assert_series_equal(
+        df_be["StdDev_all_dft"], df_be[zpve_cols].std(axis=1, ddof=1),
+        check_names=False)
+    pd.testing.assert_series_equal(
+        df_be["Mean_Eb_all_dft"], df_be[zpve_cols].mean(axis=1),
+        check_names=False)
+
+
+def test_zpve_correction_too_few_hessians_counts_zpve_not_be_rows():
+    """Regression: the "too few Hessians" guard counted BE rows (len(df_be)),
+    so five BE sites with only three finished Hessians passed the guard and a
+    linear model was fitted from three points. It must count sites that
+    actually carry a Delta_ZPVE."""
+    entries = [f"C_W5_01_{i:04d}" for i in range(1, 6)]   # 5 BE rows
+    pending = {1003, 1004}                                  # 2 dimers without Hessian
+
+    def zpve_two_pending(client, mol_id, lot_opt, **kw):
+        if mol_id in pending:
+            return (None, True)      # Hessian not yet available
+        return _fake_get_zpve_mol(client, mol_id, lot_opt, **kw)
+
+    with pytest.raises(ValueError, match=r"Too few Hessians \(3\)"):
+        _run_zpve_correction(entries, ["wb97x-v"], "def2-tzvp", zpve_two_pending)
+
+
+def test_zpve_correction_drop_ignores_entries_missing_from_be_frame():
+    """Regression: df_be.drop(todelete) raised KeyError when a be_nocp entry
+    had no row in the bsse frame (3c methods skip the bsse stoichiometry)."""
+    entries = [f"C_W5_01_{i:04d}" for i in range(1, 7)]   # 6 nocp entries
+    be_df = _make_be_df(entries[:5], ["wb97x-v"], "def2-tzvp")  # only 5 in bsse frame
+
+    def zpve_sixth_bad(client, mol_id, lot_opt, **kw):
+        if mol_id == 1005:            # sixth dimer -> flagged for deletion
+            return (None, False)
+        return _fake_get_zpve_mol(client, mol_id, lot_opt, **kw)
+
+    df_be, fit, todelete = _run_zpve_correction(
+        entries, ["wb97x-v"], "def2-tzvp", zpve_sixth_bad, be_df=be_df)
+    assert todelete == [entries[5]]
+    assert len(df_be) == 5

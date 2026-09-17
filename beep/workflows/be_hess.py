@@ -60,9 +60,11 @@ def check_refinement_status(client, surf_ds, mol_name, opt_lot,
     """Check completion status of all refinement OptimizationDatasets.
 
     Returns ``(ready_datasets, complete_counts)`` where *ready_datasets*
-    is the list of :class:`OptimizationDataset` objects that have at
-    least one COMPLETE entry, and *complete_counts* maps each dataset
-    name to its number of COMPLETE entries.
+    is a list of ``(OptimizationDataset, cluster_name)`` pairs for the
+    datasets that have at least one COMPLETE entry, and *complete_counts*
+    maps each dataset name to its number of COMPLETE entries. The cluster
+    name is carried alongside the dataset so that downstream code does not
+    have to re-derive it by parsing entry names.
     """
     if exclude_clusters is None:
         exclude_clusters = []
@@ -118,7 +120,7 @@ def check_refinement_status(client, surf_ds, mol_name, opt_lot,
         lines.append(f"  {ds_opt_name:<25s} {status_parts}")
 
         if n_complete > 0:
-            ready_datasets.append(opt_ds)
+            ready_datasets.append((opt_ds, cn))
             complete_counts[opt_ds.name] = n_complete
 
     header = f"Refinement status for {mol_name} (LOT: {opt_lot}):"
@@ -154,14 +156,26 @@ def _rdset_base_name(molecule: str, cluster_name: str, opt_lot: str) -> str:
 
 def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
                            smol_mol, opt_lot, mult, config):
+    """Create the BE reaction datasets and submit the energies.
+
+    ``finished_opt_list`` holds ``(OptimizationDataset, cluster_name)`` pairs
+    as returned by :func:`check_refinement_status`; the cluster name is used
+    verbatim (it is NOT re-parsed from entry names, which breaks for cluster
+    names without exactly one underscore, e.g. ``cd5``).
+    """
     all_ids = []
 
-    for ds_opt in finished_opt_list:
+    for ds_opt, cluster_name in finished_opt_list:
         padded_log(logger, f"Checking {ds_opt.name} for repeated structures", padding_char="*", total_length=60)
         opt_stru = qcf.rmsd_filter_from_dataset(ds_opt, opt_lot, logger)
+        if not opt_stru:
+            logger.warning(
+                f"No structures left in {ds_opt.name} after the RMSD filter; "
+                f"skipping cluster {cluster_name}."
+            )
+            continue
 
         padded_log(logger, f"Building name for the new ReactionDataset", padding_char="*", total_length=60)
-        cluster_name = "_".join(list(opt_stru.keys())[0].split("_")[-3:-1])
         cluster_mol = qcf.fetch_final_molecule(surf_opt_ds, cluster_name, opt_lot)
         rdset_name = _rdset_base_name(config.molecule, cluster_name, opt_lot)
         logger.info(f"ReactionDataset name for {ds_opt.name} is: {rdset_name}")
@@ -181,6 +195,10 @@ def process_be_computation(client, logger, finished_opt_list, surf_opt_ds,
             # psi4-only option; the ORCA and Gaussian harnesses reject unknown
             # keywords and select UKS/UHF automatically from the multiplicity.
             keyword = {"reference": "uks"}
+        if config.qc_keywords:
+            # user SCF keywords (guess, damping, level shift, ...) on top of the
+            # defaults, for species whose SCF fails with the default guess (F atom)
+            keyword = {**(keyword or {}), **config.qc_keywords}
 
         padded_log(logger, f"Sending computations for {rdset_name}", padding_char="*", total_length=60)
         if config.level_of_theory:
@@ -271,7 +289,7 @@ def run(config: BeHessConfig, client: FractalClient) -> None:
         ready_ds_2, counts_2 = check_refinement_status(
             client, surf_opt_ds, config.molecule, opt_lot, config.exclude_clusters,
         )
-        newly_ready = [ds for ds in ready_ds_2
+        newly_ready = [(ds, cn) for ds, cn in ready_ds_2
                        if counts_2[ds.name] > counts_1.get(ds.name, 0)]
         if newly_ready:
             padded_log(logger, f"Pass 2: processing {len(newly_ready)} datasets with new entries")

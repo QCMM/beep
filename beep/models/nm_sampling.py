@@ -1,7 +1,8 @@
 """Normal-mode displacement sampling workflow config."""
-from typing import Optional, Literal, List, Dict
+from typing import Optional, Literal, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator, model_validator
-from .base import ServerConfig, lowercase_str
+from pydantic.json_schema import SkipJsonSchema
+from .base import ServerConfig, lowercase_str, QC_KEYWORDS_DESCRIPTION, deprecated_null_only
 
 
 class BandSpec(BaseModel):
@@ -131,7 +132,14 @@ class NmSamplingConfig(BaseModel):
 
     # --- DFT gradients ---
     dft_program: str = Field("psi4", description="QC program for the DFT gradients")
-    dft_keyword: Optional[int] = Field(None, description="QCFractal keyword ID for DFT gradient SPs")
+    qc_keywords: Optional[Dict[str, Any]] = Field(
+        None,
+        description=QC_KEYWORDS_DESCRIPTION + " Applied to every DFT gradient spec.",
+    )
+    dft_keyword: SkipJsonSchema[Optional[Any]] = Field(
+        None, description="Deprecated, use qc_keywords.", exclude=True,
+    )
+    _dep_dft_keyword = deprecated_null_only("dft_keyword", "qc_keywords")
     tag_dft_grad: Optional[str] = Field(None, description="Queue tag for the DFT gradient computations")
 
     # --- Mode selection ---

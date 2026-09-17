@@ -1,7 +1,8 @@
 """Geometry benchmark workflow config — entry-based, single OptimizationDataset."""
-from typing import Optional, Literal, List, Dict
+from typing import Optional, Literal, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
-from .base import ServerConfig
+from pydantic.json_schema import SkipJsonSchema
+from .base import ServerConfig, QC_KEYWORDS_DESCRIPTION, deprecated_null_only
 
 
 class GeomBenchmarkConfig(BaseModel):
@@ -42,7 +43,14 @@ class GeomBenchmarkConfig(BaseModel):
     )
     tag_reference_geometry: Optional[str] = Field(None, description="Queue tag for reference geometry tasks")
     dft_optimization_program: str = Field("psi4", description="Program for DFT geometry optimizations")
-    dft_optimization_keyword: Optional[int] = Field(None, description="QCFractal keyword ID for DFT optimizations")
+    qc_keywords: Optional[Dict[str, Any]] = Field(
+        None,
+        description=QC_KEYWORDS_DESCRIPTION + " Applied to every DFT geometry optimization spec.",
+    )
+    dft_optimization_keyword: SkipJsonSchema[Optional[Any]] = Field(
+        None, description="Deprecated, use qc_keywords.", exclude=True,
+    )
+    _dep_dft_optimization_keyword = deprecated_null_only("dft_optimization_keyword", "qc_keywords")
     tag_dft_geometry: Optional[str] = Field(None, description="Queue tag for DFT geometry tasks")
     use_initial_reference_geometry: bool = Field(False, description="Use initial (unoptimized) reference geometry")
     trajectory_analysis: bool = Field(

@@ -6,14 +6,25 @@
         "password": null,
         "verify": false
     },
-    "opt_method": null,
-    "be_methods": [],
-    "surface_model": null,
-    "hessian_clusters": [],
-    "molecules": [],
-    "be_range": [-0.1, -25.0],
-    "scale_factor": null,
-    "basis": null,
+    "opt_method": "mpwb1k-d3bj_def2-tzvpd",
+    "be_methods": [
+        "wb97x-v",
+        "m06-hf",
+        "wpbe-d3mbj"
+    ],
+    "surface_model": "Water_22",
+    "hessian_clusters": [
+        "W22_02"
+    ],
+    "molecules": [
+        "CO"
+    ],
+    "be_range": [
+        -0.1,
+        -25.0
+    ],
+    "scale_factor": 0.958,
+    "basis": "def2-tzvp",
     "exclude_clusters": [],
     "stoichiometry": "bsse",
     "no_zpve": false,

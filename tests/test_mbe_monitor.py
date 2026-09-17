@@ -198,3 +198,99 @@ def test_existing_wait_for_completion_is_untouched():
     params = list(inspect.signature(wait_for_completion).parameters)
     # Original signature: (client, pid_list, frequency, logger, max_wait=...)
     assert params[:4] == ["client", "pid_list", "frequency", "logger"]
+
+
+# ---------------------------------------------------------------------------
+# Terminal failure statuses (CANCELLED / INVALID / DELETED) must end polling
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("failed", ["cancelled", "invalid", "deleted"])
+def test_wait_for_manybody_completion_stops_on_cancelled_child(failed, caplog):
+    """A child record cancelled/invalidated/deleted on the server never
+    reaches COMPLETE or ERROR; with max_wait=None the monitor used to poll
+    forever. It must terminate and report the entry as a failure."""
+    snapshots = [
+        {
+            "entry-a": DummyRecord(DummyStatus("complete"), {DummyStatus("complete"): 1}),
+            "entry-b": DummyRecord(DummyStatus(failed), {DummyStatus(failed): 1}),
+        }
+    ]
+    client = DummyClient(DummyDataset(snapshots))
+    time_ctrl = TimeController()
+    sleeps: List[float] = []
+
+    def sleep_fn(seconds):
+        sleeps.append(seconds)
+        time_ctrl.sleep(seconds)
+        if len(sleeps) > 5:
+            raise AssertionError("monitor did not terminate on a terminal failure status")
+
+    beep_logger = logging.getLogger("beep")
+    beep_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger="beep"):
+            result = wait_for_manybody_completion(
+                client=client,
+                dataset_name="dataset",
+                spec_name="spec",
+                entry_names=["entry-a", "entry-b"],
+                poll_interval_s=1,
+                max_wait_s=None,
+                sleep_fn=sleep_fn,
+                time_fn=time_ctrl.time,
+            )
+    finally:
+        beep_logger.removeHandler(caplog.handler)
+
+    assert sleeps == []
+    assert result.polls == 1
+    assert result.timed_out is False
+    assert result.per_entry_final_status["entry-b"] == failed.upper()
+    assert result.n_error == 1
+    assert result.errored_entries == ["entry-b"]
+    assert "entry-b" in caplog.text and failed.upper() in caplog.text
+
+
+def test_wait_for_dataset_records_stops_on_cancelled_record(caplog):
+    snapshots = [{"m": DummyRecord(DummyStatus("cancelled"), None)}]
+    dataset = DummyDataset(snapshots)
+    time_ctrl = TimeController()
+    sleeps: List[float] = []
+
+    def sleep_fn(seconds):
+        sleeps.append(seconds)
+        time_ctrl.sleep(seconds)
+        if len(sleeps) > 5:
+            raise AssertionError("monitor did not terminate on CANCELLED")
+
+    beep_logger = logging.getLogger("beep")
+    beep_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger="beep"):
+            statuses, timed_out = wait_for_dataset_records(
+                dataset,
+                entry_names=["m"],
+                specification_names=["monomer_spec"],
+                poll_interval=1,
+                max_wait=None,
+                sleep_fn=sleep_fn,
+                time_fn=time_ctrl.time,
+            )
+    finally:
+        beep_logger.removeHandler(caplog.handler)
+
+    assert sleeps == []
+    assert timed_out is False
+    assert statuses[("m", "monomer_spec")] == "CANCELLED"
+    assert "m/monomer_spec" in caplog.text and "CANCELLED" in caplog.text
+
+
+def test_mbe_terminal_statuses_cover_real_record_status_enum():
+    from qcportal.record_models import RecordStatusEnum
+    from beep.adapters.qcfractal_adapter import _MBE_TERMINAL_STATUSES
+
+    for member in (RecordStatusEnum.complete, RecordStatusEnum.error,
+                   RecordStatusEnum.cancelled, RecordStatusEnum.invalid):
+        assert member.name.upper() in _MBE_TERMINAL_STATUSES
+    for member in (RecordStatusEnum.waiting, RecordStatusEnum.running):
+        assert member.name.upper() not in _MBE_TERMINAL_STATUSES

@@ -123,8 +123,13 @@ def run_sampling(
     try:
         n_anchors = len(adaptive_shift_vectors(cluster, target_mol, sampling_shell))
         max_structures = max(3, int(-(-(frac * n_anchors) // 1)) * n_orient)  # ceil * orient
-    except Exception:  # degenerate/mocked geometry -> fall back to the size heuristic
+    except Exception as exc:  # degenerate/mocked geometry -> fall back to the size heuristic
         max_structures = int(max(3, (len(cluster.symbols) / ATOMS_PER_CLUSTER_MOL) // 3))
+        logger.warning(
+            "Adaptive anchor count failed (%s: %s); falling back to the "
+            "n_water//3 size heuristic: %d structures.",
+            type(exc).__name__, exc, max_structures,
+        )
 
     logger.info(
         f"Entering the sampling procedure, will generate a total of "
@@ -233,9 +238,13 @@ def run_sampling(
                     f"Initial structure set for visualization will be saved "
                     f"in {str(debug_path)}"
                 )
-                filename = (
-                    f"{debug_path}_{round(shell, 2):.2f}".replace(".", "")
-                    + ".mol"
+                # Strip the dot only from the filename component: applying it to
+                # the whole path mangled any directory containing a dot
+                # (e.g. ~/beep-0.12/, .local/).
+                debug_path = Path(debug_path)
+                filename = str(
+                    debug_path.parent
+                    / (f"{debug_path.name}_{round(shell, 2):.2f}".replace(".", "") + ".mol")
                 )
                 debug_mol.to_file(filename, "xyz")
 
@@ -350,7 +359,9 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
     rbasis = r_lot.qc_basis
     rprogram = r_lot.qc_program
 
-    qc_keyword = config.keyword_id
+    # QC-program keywords for the refinement optimizations (dict); passed
+    # verbatim as the qc_spec keywords of the refinement specification.
+    qc_keyword = config.qc_keywords
 
     opt_lot = s_lot.lot_name
     ropt_lot = r_lot.lot_name
@@ -363,7 +374,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
         "basis": basis,
         "program": program,
         "tag": config.sampling_tag,
-        "kw_id": None,  # keyword_id is used for refinement spec, not sampling
+        "kw_id": None,  # qc_keywords is used for refinement spec, not sampling
         "rmsd_symm": config.rmsd_symmetry,
         "store_initial": config.store_initial_structures,
         "rmsd_val": config.rmsd_value,
@@ -461,7 +472,7 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
         logger.info(f"\n  {bcheck} Cluster {w}: {n_sites} binding sites  |  Running total: {count}")
 
-        if count > config.total_binding_sites:
+        if count >= config.total_binding_sites:
             logger.info(f"\n  Target of {config.total_binding_sites} binding sites reached. Stopping early.")
             break
 

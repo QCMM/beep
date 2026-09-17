@@ -217,3 +217,39 @@ def test_bias_tag_strong_thresholds():
     assert _bias_tag(0.5) == "strong underbind"
     assert _bias_tag(-0.5) == "strong overbind"
     assert _bias_tag(2.3) == "strong underbind"
+
+
+def test_import_works_without_installed_package_metadata():
+    """``__version__`` must not raise PackageNotFoundError when beep is run
+    from an uninstalled checkout (PYTHONPATH only). Run in a subprocess so
+    the patched ``importlib.metadata.version`` is in place before the
+    package is first imported."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    # Only the ``beep`` distribution is made to look uninstalled: other
+    # packages (qcelemental) also call importlib.metadata.version at import.
+    code = (
+        "import importlib.metadata as m\n"
+        "from importlib.metadata import PackageNotFoundError\n"
+        "_orig = m.version\n"
+        "def _version(name):\n"
+        "    if name == 'beep':\n"
+        "        raise PackageNotFoundError(name)\n"
+        "    return _orig(name)\n"
+        "m.version = _version\n"
+        "import beep\n"
+        "from beep.core import logging_utils\n"
+        "print(beep.__version__)\n"
+        "print(logging_utils.__version__)\n"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.split() == ["0.0.0+unknown", "0.0.0+unknown"]

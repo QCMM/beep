@@ -81,3 +81,17 @@ def test_corl_2pt_float():
 def test_corl_2pt_type_mismatch():
     with pytest.raises(ValueError):
         corl_xtpl_helgaker_2("MP2", 2, -0.20, 3, np.array([-0.25]))
+
+
+def test_scf_2pt_ndarray_verbose_does_not_raise():
+    """Regression: the verbose>2 ndarray branch referenced psi4-internal names
+    (nppp, core, logger) and raised NameError. The branch is gone; the value
+    must be identical to the quiet call."""
+    lo = np.array([-100.0, -50.0])
+    hi = np.array([-100.1, -50.2])
+    quiet = scf_xtpl_helgaker_2("hf", 2, lo, 3, hi)
+    loud = scf_xtpl_helgaker_2("hf", 2, lo, 3, hi, verbose=3)
+    np.testing.assert_allclose(loud, quiet)
+    # matches the scalar branch element-wise
+    for i in range(2):
+        assert loud[i] == pytest.approx(scf_xtpl_helgaker_2("hf", 2, float(lo[i]), 3, float(hi[i])))

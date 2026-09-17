@@ -1,7 +1,8 @@
 """Energy benchmark workflow config — maps to launch_energy_benchmark.py argparse flags."""
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Any
 from pydantic import BaseModel, Field, field_validator
-from .base import ServerConfig, lowercase_str, lowercase_list
+from pydantic.json_schema import SkipJsonSchema
+from .base import ServerConfig, lowercase_str, lowercase_list, deprecated_null_only
 
 
 class EnergyBenchmarkConfig(BaseModel):
@@ -20,7 +21,11 @@ class EnergyBenchmarkConfig(BaseModel):
     )
     be_level_of_theory: List[str] = Field([], description="Levels of theory for BE single-point calculations")
     cbs_level_of_theory: List[str] = Field([], description="Levels of theory for CBS extrapolation")
-    keyword_id: Optional[int] = Field(None, description="QCFractal keyword ID for custom options")
+    # Never consumed by the workflow; kept so old configs with "keyword_id": null load.
+    keyword_id: SkipJsonSchema[Optional[Any]] = Field(
+        None, description="Deprecated and unused; has no replacement.", exclude=True,
+    )
+    _dep_keyword_id = deprecated_null_only("keyword_id", "qc_keywords")
     program: str = Field("psi4", description="QC program to use")
     be_basis: str = Field("def2-tzvpd", description="Basis set for DFT binding energy single-point calculations")
     tag_reference_geometry: Optional[str] = Field(None, description="Queue tag for reference geometry tasks")

@@ -132,3 +132,59 @@ class TestPreExponentialFactor:
         result = pre_exponential_factor(mass, [300], sigma=1, Ia=Ia, Ib=Ib, Ic=Ic, A=1e-19)
         assert len(result) == 1
         assert result[0] > 0
+
+
+class TestLinearRotorDetection:
+    """``Ia == 0`` exact float compare replaced by a relative tolerance so a
+    linear molecule whose smallest eigenvalue is round-off noise (possibly
+    negative) still takes the linear branch."""
+
+    def _linear_value(self, mass, T, sigma, Ib, A):
+        kB = qcel.constants.get("kb")
+        h = qcel.constants.get("h")
+        pi = math.pi
+        trans = ((2 * pi * mass * kB * T) / h**2) * A
+        rot = (8 * pi**(5 / 2) * kB * T / h**2) * (Ib / sigma)
+        return ((kB * T) / h) * trans * rot
+
+    def test_co_computed_moments_take_linear_branch(self):
+        from beep.core.pre_exponential import is_linear_rotor
+        mass = get_mass(CO_XYZ)
+        symbols, coords = parse_coordinates(CO_XYZ)
+        Ia, Ib, Ic = get_moments_of_inertia(symbols, coords)
+        assert Ia != 0 or True   # round-off, not exactly zero in general
+        assert is_linear_rotor(Ia, Ib)
+        (v,) = pre_exponential_factor(mass, [300], sigma=1, Ia=Ia, Ib=Ib, Ic=Ic, A=1e-19)
+        assert v == pytest.approx(self._linear_value(mass, 300, 1, Ib, 1e-19), rel=1e-12)
+        # And identical to passing an exact zero
+        (v0,) = pre_exponential_factor(mass, [300], sigma=1, Ia=0.0, Ib=Ib, Ic=Ic, A=1e-19)
+        assert v == pytest.approx(v0, rel=1e-12)
+
+    def test_negative_roundoff_ia_takes_linear_branch(self):
+        """A slightly negative eigenvalue must not reach math.sqrt."""
+        mass = get_mass(CO_XYZ)
+        symbols, coords = parse_coordinates(CO_XYZ)
+        Ia, Ib, Ic = get_moments_of_inertia(symbols, coords)
+        (v,) = pre_exponential_factor(mass, [300], sigma=1, Ia=-1e-60, Ib=Ib, Ic=Ic, A=1e-19)
+        assert v == pytest.approx(self._linear_value(mass, 300, 1, Ib, 1e-19), rel=1e-12)
+
+    def test_water_takes_nonlinear_branch(self):
+        from beep.core.pre_exponential import is_linear_rotor
+        mass = get_mass(H2O_XYZ)
+        symbols, coords = parse_coordinates(H2O_XYZ)
+        Ia, Ib, Ic = get_moments_of_inertia(symbols, coords)
+        assert not is_linear_rotor(Ia, Ib)
+        (v,) = pre_exponential_factor(mass, [300], sigma=2, Ia=Ia, Ib=Ib, Ic=Ic, A=1e-19)
+        kB = qcel.constants.get("kb")
+        h = qcel.constants.get("h")
+        pi = math.pi
+        trans = ((2 * pi * mass * kB * 300) / h**2) * 1e-19
+        rot = (pi**0.5 / (2 * h**3)) * (8 * pi**2 * kB * 300)**1.5 * math.sqrt(Ia * Ib * Ic)
+        assert v == pytest.approx(((kB * 300) / h) * trans * rot, rel=1e-12)
+
+    def test_negative_nonlinear_moment_raises(self):
+        mass = get_mass(H2O_XYZ)
+        symbols, coords = parse_coordinates(H2O_XYZ)
+        Ia, Ib, Ic = get_moments_of_inertia(symbols, coords)
+        with pytest.raises(ValueError):
+            pre_exponential_factor(mass, [300], sigma=2, Ia=Ia, Ib=-Ib, Ic=Ic, A=1e-19)

@@ -93,15 +93,37 @@ def get_moments_of_inertia(symbols, coordinates):
     return Ia, Ib, Ic
 
 
+# Relative threshold below which the smallest principal moment of inertia is
+# treated as zero, i.e. the molecule is linear. Diagonalising the inertia
+# tensor of a linear molecule gives Ia ~ 1e-60 kg m^2 (round-off, possibly
+# negative) rather than exactly 0, so an exact comparison is not reliable.
+LINEAR_INERTIA_REL_TOL = 1e-6
+
+
+def is_linear_rotor(Ia, Ib, rel_tol=LINEAR_INERTIA_REL_TOL):
+    """True when ``Ia`` is negligible relative to ``Ib`` (linear molecule)."""
+    return Ia < rel_tol * Ib
+
+
 def pre_exponential_factor(m, T_list, sigma, Ia, Ib, Ic, A):
-    """Compute pre-exponential desorption rate factor for a list of temperatures."""
+    """Compute pre-exponential desorption rate factor for a list of temperatures.
+
+    A linear rotor (``Ia`` negligible relative to ``Ib``, see
+    :func:`is_linear_rotor`) uses the two-dimensional rotational partition
+    function; a nonlinear one uses the three-dimensional form.
+    """
     kB = qcel.constants.get("kb")
     h = qcel.constants.get("h")
     pi = math.pi
+    linear = is_linear_rotor(Ia, Ib)
+    if not linear and (Ia < 0 or Ib < 0 or Ic < 0):
+        raise ValueError(
+            f"Principal moments of inertia must be non-negative; got Ia={Ia}, Ib={Ib}, Ic={Ic}"
+        )
 
     def _single_T(T):
         translational_part = ((2 * pi * m * kB * T) / h**2) * A
-        if Ia == 0:
+        if linear:
             rotational_part = (8 * pi**(5/2) * kB * T / h**2) * (Ib / sigma)
         else:
             rotational_part = (pi**0.5 / (sigma * h**3)) * (8 * pi**2 * kB * T)**(3 / 2) * math.sqrt(Ia * Ib * Ic)

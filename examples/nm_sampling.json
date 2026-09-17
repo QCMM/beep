@@ -29,7 +29,7 @@
     "tag_reference_grad": "ref-grad",
 
     "dft_program": "psi4",
-    "dft_keyword": null,
+    "qc_keywords": null,
     "tag_dft_grad": "dft-grad",
 
     "bands": {

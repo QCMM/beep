@@ -6,16 +6,21 @@
         "password": null,
         "verify": false
     },
-    "molecule": null,
-    "surface_model_collection": null,
-    "small_molecule_collection": null,
+    "molecule": "CO",
+    "surface_model_collection": "Water_22",
+    "small_molecule_collection": "Small_molecules",
     "atoms_collection": "atoms",
-    "level_of_theory": [],
+    "level_of_theory": [
+        "wb97x-v_def2-tzvp",
+        "m06-hf_def2-tzvp"
+    ],
     "exclude_clusters": [],
-    "opt_level_of_theory": null,
-    "keyword_id": null,
-    "hessian_clusters": [],
-    "program": null,
-    "energy_tag": null,
-    "hessian_tag": null
+    "opt_level_of_theory": "mpwb1k-d3bj_def2-tzvpd",
+    "qc_keywords": null,
+    "hessian_clusters": [
+        "W22_02"
+    ],
+    "program": "psi4",
+    "energy_tag": "energies",
+    "hessian_tag": "hessian"
 }

@@ -180,3 +180,156 @@ def test_geom_benchmark_lowercases_reference_method_and_basis():
     )
     # Method (idx 0) and basis (idx 1) lowercased; program (idx 2) left alone.
     assert cfg.reference_geometry_level_of_theory == ["ccsd(t)", "aug-cc-pvtz", "psi4"]
+
+
+# ---------------------------------------------------------------------------
+# PreExpConfig.range_of_temperature validation
+# ---------------------------------------------------------------------------
+
+def test_pre_exp_range_of_temperature_accepts_min_max_and_single():
+    cfg = PreExpConfig(workflow="pre_exp", range_of_temperature=[10, 273])
+    assert cfg.range_of_temperature == [10, 273]
+    cfg = PreExpConfig(workflow="pre_exp", range_of_temperature=[50])
+    assert cfg.range_of_temperature == [50]
+
+
+@pytest.mark.parametrize("bad", [[], [10, 20, 30], [273, 10], [0, 100], [-5]])
+def test_pre_exp_range_of_temperature_rejects_bad_ranges(bad):
+    with pytest.raises(ValidationError):
+        PreExpConfig(workflow="pre_exp", range_of_temperature=bad)
+
+
+def test_pre_exp_temperature_step_must_be_positive():
+    with pytest.raises(ValidationError):
+        PreExpConfig(workflow="pre_exp", temperature_step=0)
+
+
+# ---------------------------------------------------------------------------
+# Keyword fields are inline dicts, not QCFractal 0.15 keyword IDs
+# ---------------------------------------------------------------------------
+
+def _nm_kwargs(**extra):
+    base = dict(
+        workflow="nm_sampling",
+        opt_dataset="ds",
+        benchmark_structures=["h2o_2"],
+        fragments={"h2o_2": [[0, 1, 2], [3, 4, 5]]},
+        geometry_opt_lot="hf3c_minix",
+    )
+    base.update(extra)
+    return base
+
+
+def test_geom_benchmark_qc_keywords_accepts_dict():
+    cfg = GeomBenchmarkConfig(
+        workflow="geom_benchmark", opt_dataset="ds", benchmark_structures=["W22_01"],
+        qc_keywords={"scf_type": "df", "maxiter": 200},
+    )
+    assert cfg.qc_keywords == {"scf_type": "df", "maxiter": 200}
+
+
+def test_geom_benchmark_qc_keywords_rejects_int():
+    """A legacy integer keyword ID used to validate and then be silently
+    dropped by every consumer; it must now be rejected with a clear error."""
+    with pytest.raises(ValidationError) as exc_info:
+        GeomBenchmarkConfig(
+            workflow="geom_benchmark", opt_dataset="ds",
+            benchmark_structures=["W22_01"], qc_keywords=7,
+        )
+    errs = exc_info.value.errors()
+    assert errs[0]["loc"] == ("qc_keywords",)
+    assert "dict" in errs[0]["msg"]
+
+
+def test_nm_sampling_qc_keywords_accepts_dict():
+    from beep.models import NmSamplingConfig
+    cfg = NmSamplingConfig(**_nm_kwargs(qc_keywords={"scf_type": "df"}))
+    assert cfg.qc_keywords == {"scf_type": "df"}
+    assert NmSamplingConfig(**_nm_kwargs()).qc_keywords is None
+
+
+def test_nm_sampling_qc_keywords_rejects_int():
+    from beep.models import NmSamplingConfig
+    with pytest.raises(ValidationError) as exc_info:
+        NmSamplingConfig(**_nm_kwargs(qc_keywords=7))
+    errs = exc_info.value.errors()
+    assert errs[0]["loc"] == ("qc_keywords",)
+    assert "dict" in errs[0]["msg"]
+
+
+# ---------------------------------------------------------------------------
+# Deprecated per-workflow names for the QC-program keywords: null still loads
+# (old configs), anything else errors pointing at qc_keywords.
+# ---------------------------------------------------------------------------
+
+def _nm_model():
+    from beep.models import NmSamplingConfig
+    return NmSamplingConfig
+
+
+_DEPRECATED_QC_KEYWORD_FIELDS = [
+    pytest.param(
+        SamplingConfig, "keyword_id",
+        dict(workflow="sampling", molecule="CO",
+             sampling_level_of_theory={"method": "gfn2-xtb", "program": "xtb"},
+             refinement_level_of_theory={"method": "hf", "basis": "sto-3g"}),
+        id="sampling.keyword_id",
+    ),
+    pytest.param(
+        BeHessConfig, "keyword_id",
+        dict(workflow="be_hess", molecule="CO", opt_level_of_theory="hf3c_minix"),
+        id="be_hess.keyword_id",
+    ),
+    pytest.param(
+        EnergyBenchmarkConfig, "keyword_id",
+        dict(workflow="energy_benchmark", molecule="CO", benchmark_structures=["W22_01"],
+             opt_level_of_theory=["pbe_def2-svp"], tag_be="be", tag_cbs="cbs"),
+        id="energy_benchmark.keyword_id",
+    ),
+    pytest.param(
+        _nm_model, "dft_keyword", _nm_kwargs(),
+        id="nm_sampling.dft_keyword",
+    ),
+    pytest.param(
+        GeomBenchmarkConfig, "dft_optimization_keyword",
+        dict(workflow="geom_benchmark", opt_dataset="ds", benchmark_structures=["W22_01"]),
+        id="geom_benchmark.dft_optimization_keyword",
+    ),
+]
+
+
+def _resolve(model):
+    return model() if model is _nm_model else model
+
+
+@pytest.mark.parametrize("model, old, kwargs", _DEPRECATED_QC_KEYWORD_FIELDS)
+def test_deprecated_qc_keyword_name_accepts_null_only(model, old, kwargs):
+    model = _resolve(model)
+    cfg = model(**kwargs, **{old: None})
+    assert getattr(cfg, old) is None
+    # never written back out: the config copy on disk and --schema use qc_keywords
+    assert old not in cfg.model_dump()
+    assert old not in model.model_json_schema()["properties"]
+    for bad in (7, "legacy", {"guess": "gwh"}):
+        with pytest.raises(ValidationError) as exc_info:
+            model(**kwargs, **{old: bad})
+        errs = exc_info.value.errors()
+        assert errs[0]["loc"] == (old,)
+        assert "qc_keywords" in errs[0]["msg"]
+
+
+@pytest.mark.parametrize("model, kwargs", [
+    pytest.param(m.values[0], m.values[2], id=m.id)
+    for m in _DEPRECATED_QC_KEYWORD_FIELDS if m.id != "energy_benchmark.keyword_id"
+])
+def test_qc_keywords_is_the_unified_program_keyword_field(model, kwargs):
+    model = _resolve(model)
+    cfg = model(**kwargs, qc_keywords={"guess": "gwh", "damping_percentage": 20})
+    assert cfg.qc_keywords == {"guess": "gwh", "damping_percentage": 20}
+    assert cfg.model_dump()["qc_keywords"] == {"guess": "gwh", "damping_percentage": 20}
+    assert "qc_keywords" in model.model_json_schema()["properties"]
+
+
+def test_energy_benchmark_has_no_qc_keywords_field():
+    """energy_benchmark.keyword_id was never read; it has no replacement."""
+    assert "qc_keywords" not in EnergyBenchmarkConfig.model_fields

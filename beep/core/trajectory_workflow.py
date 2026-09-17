@@ -95,7 +95,8 @@ def build_trajectory_sp_datasets(
     entry per traj step (``step_NNN``), and register one SP+gradient spec
     per DFT functional. Idempotent — safe to re-run."""
     traj_dsets = {}
-    kw = dft_keyword if isinstance(dft_keyword, dict) else {}
+    # Inline keyword dict validated by the config model; pass it through.
+    kw = dict(dft_keyword or {})
     for struct_name, steps in traj_data.items():
         ds_name = f"{struct_name}_trajref"
         ds_sp = qcf.get_or_create_singlepoint_dataset(client, ds_name)

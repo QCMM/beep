@@ -5,6 +5,39 @@ from typing import Optional, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+QC_KEYWORDS_DESCRIPTION = (
+    "Extra QC-program keywords (psi4/ORCA/Gaussian options such as "
+    "{'guess': 'gwh', 'damping_percentage': 20}) passed as the "
+    "specification's qc_spec keywords. Distinct from *_opt_keywords, "
+    "which are geomeTRIC optimizer options."
+)
+
+
+def deprecated_null_only(old: str, new: str):
+    """Validator for a removed config field: null passes, anything else errors pointing to `new`.
+
+    Use as a class attribute on the model, next to the deprecated field::
+
+        keyword_id: SkipJsonSchema[Optional[Any]] = Field(
+            None, description="Deprecated, use qc_keywords.", exclude=True)
+        _dep_keyword_id = deprecated_null_only("keyword_id", "qc_keywords")
+
+    The field stays declared so old configs that carry ``"<old>": null``
+    still load; ``exclude=True`` keeps it out of ``model_dump`` (and thus
+    the config copy every workflow writes) and ``SkipJsonSchema`` out of
+    ``beep --schema``.
+    """
+    def _reject_non_null(v):
+        if v is not None:
+            raise ValueError(
+                f"`{old}` is no longer supported (QCFractal >= 0.50 stores program "
+                f"keywords inline, not by server-side ID); put the options in "
+                f"`{new}` as a dict"
+            )
+        return v
+    return field_validator(old)(_reject_non_null)
+
+
 def safe_config_dump(config) -> str:
     """JSON-serialize a workflow config without exposing credentials.
 

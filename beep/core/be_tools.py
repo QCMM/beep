@@ -147,8 +147,11 @@ def apply_lin_models(df_be, df_be_zpve, meth_fit_dict, be_methods, basis, mol, b
             lin_zpve_df[scaled_column_name] = df_be[column_name] * m + n
             logger.info(f"Applied linear model to {column_name}")
 
-    lin_zpve_df["Mean_Eb_all_dft"] = lin_zpve_df.mean(axis=1)
-    lin_zpve_df["StdDev_all_dft"] = lin_zpve_df.std(axis=1)
+    # Mean and std over the method columns only; computing the std after the
+    # Mean column is inserted would include it and shrink the std.
+    method_cols = list(lin_zpve_df.columns)
+    lin_zpve_df["Mean_Eb_all_dft"] = lin_zpve_df[method_cols].mean(axis=1)
+    lin_zpve_df["StdDev_all_dft"] = lin_zpve_df[method_cols].std(axis=1)
 
     if generate_plots:
         common_indices = df_be.index.intersection(df_be_zpve.index)

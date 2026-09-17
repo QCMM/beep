@@ -82,22 +82,9 @@ def scf_xtpl_helgaker_2(functionname: str, zLO: int, valueLO, zHI, valueHI, verb
         beta = (valueHI - valueLO) * beta_division
         value = valueHI - beta * beta_mult
 
-        if verbose > 2:
-            cbsscheme = f"""\n   ==> Helgaker 2-point exponential SCF extrapolation for method: {functionname.upper()} <==\n"""
-            cbsscheme += f"""\n   LO-zeta ({zLO}) Data\n"""
-            cbsscheme += nppp(valueLO)
-            cbsscheme += f"""\n   HI-zeta ({zHI}) Data\n"""
-            cbsscheme += nppp(valueHI)
-
-            cbsscheme += f"""\n   Alpha (exponent) Value:          {alpha:16.8f}"""
-            cbsscheme += f"""\n   Beta Data\n"""
-            cbsscheme += nppp(beta)
-            cbsscheme += f"""\n   Extrapolated Data\n"""
-            cbsscheme += nppp(value)
-            cbsscheme += "\n"
-            core.print_out(cbsscheme)
-            logger.debug(cbsscheme)
-
+        # No verbose printing for array inputs: the psi4 branch that did so
+        # depended on psi4-internal helpers (nppp, core) that are not
+        # available here.
         return value
 
     else:
@@ -198,7 +185,7 @@ def corl_xtpl_helgaker_2(functionname, zLO, valueLO, zHI, valueHI, verbose=False
     ----------
     .. [5] Halkier, Helgaker, Jorgensen, Klopper, Koch, Olsen, & Wilson,
        Chem. Phys. Lett. 286 (1998) 243-252,
-       DOI: 10.1016/S0009-2614(99)00179-7
+       DOI: 10.1016/S0009-2614(98)00111-0
     """
     import numpy as np
     if type(valueLO) != type(valueHI):

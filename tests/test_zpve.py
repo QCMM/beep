@@ -106,3 +106,19 @@ def test_vibanal_wfn_thermo_consistency(hessian_data):
 
     # ZPE < E_corr (thermal energy includes ZPE + thermal population)
     assert therminfo["ZPE_corr"].data < therminfo["E_corr"].data
+
+
+def test_vibanal_wfn_energy_none_keeps_corrections(hessian_data):
+    """Regression: Hessian records from non-psi4 programs carry no electronic
+    energy; ``E0 + ZPE_corr`` raised TypeError and the whole ZPVE correction
+    was lost. With energy=None the corrections must still be returned and only
+    the totals are None."""
+    hess, mol, energy = hessian_data
+    vib_ref, therm_ref = _vibanal_wfn(hess=hess, molecule=mol, energy=energy)
+    vib_none, therm_none = _vibanal_wfn(hess=hess, molecule=mol, energy=None)
+
+    np.testing.assert_allclose(vib_none["omega"].data, vib_ref["omega"].data)
+    for key in ("ZPE_vib", "ZPE_corr", "E_corr", "H_corr", "G_corr"):
+        assert therm_none[key].data == pytest.approx(therm_ref[key].data)
+    for key in ("ZPE_tot", "E_tot", "H_tot", "G_tot"):
+        assert np.isnan(therm_none[key].data)

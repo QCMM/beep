@@ -6,10 +6,16 @@
         "password": null,
         "verify": false
     },
-    "molecule": [],
-    "molecule_collection": null,
-    "level_of_theory": null,
-    "range_of_temperature": [10, 273],
+    "molecule": [
+        "CO",
+        "H2O"
+    ],
+    "molecule_collection": "Small_molecules",
+    "level_of_theory": "mpwb1k-d3bj_def2-tzvpd",
+    "range_of_temperature": [
+        10,
+        273
+    ],
     "temperature_step": 1,
     "molecule_surface_area": 1e-18
 }

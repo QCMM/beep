@@ -1,7 +1,11 @@
 """BE + Hessian workflow config — maps to launch_be_hess.py argparse flags."""
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
-from .base import ServerConfig, lowercase_str, lowercase_list, validate_mace_model_path
+from pydantic.json_schema import SkipJsonSchema
+from .base import (
+    ServerConfig, lowercase_str, lowercase_list, validate_mace_model_path,
+    QC_KEYWORDS_DESCRIPTION, deprecated_null_only,
+)
 
 
 class BeHessConfig(BaseModel):
@@ -36,7 +40,17 @@ class BeHessConfig(BaseModel):
     )
     exclude_clusters: List[str] = Field([], description="Cluster names to exclude from computation")
     opt_level_of_theory: str = Field(..., description="Level of theory used for geometry optimization (method_basis format)")
-    keyword_id: Optional[str] = Field(None, description="QCFractal keyword ID for custom options")
+    qc_keywords: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            QC_KEYWORDS_DESCRIPTION + " Applied to the BE single points, merged over "
+            "the open-shell default {'reference': 'uks'} (psi4)."
+        ),
+    )
+    keyword_id: SkipJsonSchema[Optional[Any]] = Field(
+        None, description="Deprecated, use qc_keywords.", exclude=True,
+    )
+    _dep_keyword_id = deprecated_null_only("keyword_id", "qc_keywords")
     hessian_clusters: List[str] = Field([], description="Cluster names for Hessian calculations")
     program: str = Field("psi4", description="QC program to use")
     energy_tag: Optional[str] = Field(None, description="Queue tag for energy computation tasks")

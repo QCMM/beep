@@ -45,6 +45,7 @@ from pydantic import ValidationError
 from ..core.logging_utils import log_formatted_list, padded_log
 from ..core.stoichiometry import be_stoichiometry
 from ..core.errors import DatasetNotFound, LevelOfTheoryNotFound
+from ..models.base import split_lot_string
 
 # Backward-compatible aliases
 FractalClient = PortalClient
@@ -96,6 +97,36 @@ def _resolve_dataset_type(collection_type):
         return _COLLECTION_TYPE_MAP.get(collection_type, collection_type.lower())
     name = getattr(collection_type, "__name__", str(collection_type))
     return _COLLECTION_TYPE_MAP.get(name, name.lower())
+
+
+def _check_insert_meta(meta, what: str, logger: Optional[logging.Logger] = None) -> bool:
+    """Inspect the ``InsertMetadata`` returned by ``add_specification`` /
+    ``add_entry`` / ``add_entries`` and warn when the server rejected (part
+    of) the insertion.
+
+    qcportal's dataset-level add calls are idempotent for identical
+    content, but a same-name specification or entry whose *content* differs
+    from what the server already holds is reported through
+    ``meta.errors`` (``meta.success`` is False) rather than raised. Silently
+    discarding that metadata means the old spec keeps running under the new
+    name. Returns True when the insertion was fully accepted.
+    """
+    if meta is None:
+        return True
+    success = getattr(meta, "success", None)
+    if success is not False:
+        return True
+    log = logger or logging.getLogger("beep")
+    n_existing = getattr(meta, "n_existing", 0)
+    n_inserted = getattr(meta, "n_inserted", 0)
+    errors = getattr(meta, "error_string", None) or str(getattr(meta, "errors", ""))
+    log.warning(
+        f"Server did not fully accept {what}: inserted={n_inserted}, "
+        f"existing={n_existing}. This usually means an item with the same "
+        f"name already exists with different content and was NOT updated. "
+        f"Errors: {errors.strip()}"
+    )
+    return False
 
 
 def is_complete(status):
@@ -247,13 +278,18 @@ def check_optimized_molecule(ds, opt_lot: str, mol_names) -> None:
     if isinstance(mol_names, str):
         mol_names = [mol_names]
     for mol in list(mol_names):
-        record = ds.get_record(mol, opt_lot)
-        if record is None:
+        # fetch_opt_record translates both "entry not in dataset" (HTTP 400
+        # from the server) and "no record at this spec" into KeyError, so
+        # callers get LevelOfTheoryNotFound instead of a raw
+        # PortalRequestError for a missing entry.
+        try:
+            record = fetch_opt_record(ds, mol, opt_lot)
+        except KeyError as e:
             raise LevelOfTheoryNotFound(
                 f"{opt_lot} level of theory for {mol} or the entry itself "
                 f"does not exist in {ds.name} dataset. "
                 "Add the molecule and optimize it first\n"
-            )
+            ) from e
         if is_incomplete(record.status):
             raise ValueError(
                 f" Optimization has status {record.status} restart it or wait"
@@ -481,6 +517,25 @@ def fetch_opt_energies(ds_opt, entry_list: List[str], opt_lot: str,
 # Job submission
 # ---------------------------------------------------------------------------
 
+def _require_keywords_dict(keywords, what: str) -> dict:
+    """Return ``keywords`` as a dict, or raise TypeError for anything else.
+
+    QCFractal 0.15 stored keywords server-side under integer IDs; qcportal
+    0.63+ takes inline dicts. Previously a non-dict value was silently
+    replaced by ``{}``, so user options vanished without a trace.
+    """
+    if keywords is None:
+        return {}
+    if isinstance(keywords, dict):
+        return keywords
+    raise TypeError(
+        f"{what} must be a dict of option name -> value (or null), got "
+        f"{type(keywords).__name__} {keywords!r}. QCFractal keyword IDs are "
+        "no longer supported; write the keywords inline, e.g. "
+        '{"scf_type": "df"}.'
+    )
+
+
 def add_opt_specification(ds_opt, spec_dict: dict,
                           overwrite: bool = True) -> None:
     """Add an optimization specification to a dataset.
@@ -498,10 +553,11 @@ def add_opt_specification(ds_opt, spec_dict: dict,
     qc_spec_dict = spec_dict.get("qc_spec", {})
     opt_spec_dict = spec_dict.get("optimization_spec", {})
 
-    # In v0.63, keywords are dicts, not server-stored IDs
-    qc_keywords = qc_spec_dict.get("keywords", {})
-    if not isinstance(qc_keywords, dict):
-        qc_keywords = {}
+    # In v0.63, keywords are dicts, not server-stored IDs. A non-dict
+    # (e.g. a legacy integer keyword ID) used to be silently replaced by {}.
+    qc_keywords = _require_keywords_dict(
+        qc_spec_dict.get("keywords"), f"qc_spec keywords of spec '{name}'",
+    )
 
     qc_spec = QCSpecification(
         program=qc_spec_dict.get("program", "psi4"),
@@ -511,9 +567,9 @@ def add_opt_specification(ds_opt, spec_dict: dict,
         keywords=qc_keywords,
     )
 
-    opt_keywords = opt_spec_dict.get("keywords", {})
-    if not isinstance(opt_keywords, dict):
-        opt_keywords = {}
+    opt_keywords = _require_keywords_dict(
+        opt_spec_dict.get("keywords"), f"optimization keywords of spec '{name}'",
+    )
 
     opt_spec = OptimizationSpecification(
         program=opt_spec_dict.get("program", "geometric"),
@@ -521,7 +577,8 @@ def add_opt_specification(ds_opt, spec_dict: dict,
         keywords=opt_keywords,
     )
 
-    ds_opt.add_specification(name, opt_spec, description=description)
+    meta = ds_opt.add_specification(name, opt_spec, description=description)
+    _check_insert_meta(meta, f"optimization specification '{name}' in {ds_opt.name}")
 
 
 def add_opt_entry(ds_opt, name: str, molecule: Molecule,
@@ -531,7 +588,8 @@ def add_opt_entry(ds_opt, name: str, molecule: Molecule,
     The ``save`` parameter is accepted for backward compatibility but
     is ignored — v0.63 entries are saved immediately via the API.
     """
-    ds_opt.add_entry(name=name, initial_molecule=molecule)
+    meta = ds_opt.add_entry(name=name, initial_molecule=molecule)
+    _check_insert_meta(meta, f"entry '{name}' in {ds_opt.name}")
 
 
 def submit_optimizations(ds_opt, opt_lot: str, tag: str, subset=None):
@@ -542,6 +600,19 @@ def submit_optimizations(ds_opt, opt_lot: str, tag: str, subset=None):
         specification_names=[opt_lot],
         compute_tag=tag,
     )
+
+
+def _energy_spec_name(method: str, basis: Optional[str],
+                      spec_name: Optional[str] = None) -> str:
+    """Spec name used by :func:`submit_energies` for an energy computation.
+
+    Single source of truth so that the monitoring side
+    (:func:`_collect_reaction_record_ids`) can restrict itself to exactly the
+    specs submitted in the same call.
+    """
+    if spec_name is None:
+        spec_name = f"{method}_{basis}" if basis else method
+    return spec_name.lower()
 
 
 def submit_energies(client: PortalClient, rdset_base_name: str,
@@ -558,11 +629,9 @@ def submit_energies(client: PortalClient, rdset_base_name: str,
     """
     ds_name = _stoich_dataset_name(rdset_base_name, stoich)
     ds = client.get_dataset("reaction", ds_name)
-    if spec_name is None:
-        spec_name = f"{method}_{basis}" if basis else method
-    spec_name = spec_name.lower()
+    spec_name = _energy_spec_name(method, basis, spec_name)
 
-    kw_dict = keywords if isinstance(keywords, dict) else {}
+    kw_dict = _require_keywords_dict(keywords, f"keywords of energy spec '{spec_name}'")
     qc_spec = QCSpecification(
         program=program,
         driver=SinglepointDriver.energy,
@@ -575,7 +644,8 @@ def submit_energies(client: PortalClient, rdset_base_name: str,
         singlepoint_specification=qc_spec,
         keywords=ReactionKeywords(),
     )
-    ds.add_specification(spec_name, rxn_spec)
+    meta = ds.add_specification(spec_name, rxn_spec)
+    _check_insert_meta(meta, f"reaction specification '{spec_name}' in {ds_name}")
 
     return ds.submit(
         specification_names=[spec_name],
@@ -586,7 +656,7 @@ def submit_energies(client: PortalClient, rdset_base_name: str,
 def submit_hessians(client: PortalClient, program: str, method: str,
                     basis: str, mol_ids: list, keywords, tag: str):
     """Submit hessian computations via client.add_singlepoints."""
-    kw_dict = keywords if isinstance(keywords, dict) else {}
+    kw_dict = _require_keywords_dict(keywords, "Hessian keywords")
     return client.add_singlepoints(
         molecules=mol_ids,
         program=program,
@@ -660,7 +730,8 @@ def add_reaction(client: PortalClient, rdset_base_name: str,
         ds = client.get_dataset("reaction", ds_name)
         # be_stoichiometry returns (Molecule, coeff); v0.63 wants (coeff, Molecule)
         stoichiometries = [(coeff, mol) for mol, coeff in mol_coeff_list]
-        ds.add_entry(name=name, stoichiometries=stoichiometries)
+        meta = ds.add_entry(name=name, stoichiometries=stoichiometries)
+        _check_insert_meta(meta, f"reaction entry '{name}' in {ds_name}")
 
 
 def add_keywords(client: PortalClient, keyword_set) -> Any:
@@ -1059,14 +1130,29 @@ def rmsd_filter_from_dataset(ds_opt, opt_lot: str,
     for index in ds_opt.entry_names:
         try:
             record = ds_opt.get_record(index, opt_lot)
-            if record is not None and is_complete(record.status):
-                molecule_records[index] = record.final_molecule
         except (ValidationError, TypeError) as e:
             logger.warning(
-                f"Error retrieving record {index}, "
-                "Optimization finished with ERROR"
+                f"Error retrieving record {index} ({e}); skipping it."
             )
             continue
+        if record is None:
+            logger.warning(
+                f"No record for {index} at {opt_lot}; skipping it."
+            )
+            continue
+        if is_complete(record.status):
+            molecule_records[index] = record.final_molecule
+        elif is_error(record.status):
+            logger.warning(
+                f"Optimization of {index} at {opt_lot} finished with ERROR; "
+                "it is excluded from the RMSD filter."
+            )
+        else:
+            logger.warning(
+                f"Optimization of {index} at {opt_lot} has status "
+                f"{status_label(record.status)}; it is excluded from the "
+                "RMSD filter."
+            )
 
     molecule_keys: List[str] = list(molecule_records.keys())
     count = 0
@@ -1080,7 +1166,9 @@ def rmsd_filter_from_dataset(ds_opt, opt_lot: str,
                 f"RMSD between {molecule_keys[i]} and "
                 f"{molecule_keys[j]}: {rmsd}"
             )
-            if rmsd < 0.25 and rmsd != 0.0:
+            # j > i, so a pair is never a self-comparison; an RMSD of
+            # exactly 0.0 is a genuine duplicate geometry and must be dropped.
+            if rmsd < 0.25:
                 if molecule_keys[j] not in molecules_to_delete:
                     molecules_to_delete.append(molecule_keys[j])
 
@@ -1146,10 +1234,13 @@ def create_or_load_reaction_dataset(
         logger.info(f"Processing structure: {st}")
         rr = ds_opt.get_record(st, opt_lot)
 
-        if rr is None or is_error(rr.status):
+        # Only COMPLETE optimizations carry a final_molecule; WAITING /
+        # RUNNING / ERROR / CANCELLED records would crash be_stoichiometry.
+        if rr is None or not is_complete(rr.status):
+            status = "missing" if rr is None else status_label(rr.status)
             logger.warning(
-                f"WARNING: Optimization of {st} with {opt_lot} finished "
-                "with error. Will skip this structure."
+                f"WARNING: Optimization of {st} with {opt_lot} is not "
+                f"complete (status: {status}). Will skip this structure."
             )
             continue
 
@@ -1158,13 +1249,13 @@ def create_or_load_reaction_dataset(
         be_stoich = be_stoichiometry(smol_mol, cluster_mol, struct_mol, logger)
         be_stoich = {k: v for k, v in be_stoich.items() if k in stoich_types}
 
-        n_entries += 1
         try:
             add_reaction(client, rdset_name, st, be_stoich)
-            logger.info(f"Successfully added {st} to the datasets.\n")
         except (KeyError, Exception) as e:
             logger.warning(f"Failed to add {st}. Skipping entry. {e}")
             continue
+        n_entries += 1
+        logger.info(f"Successfully added {st} to the datasets.\n")
 
     logger.info(f"Created a total of {n_entries} entries in {rdset_name}.\n")
     return rdset_name
@@ -1323,8 +1414,9 @@ def compute_be_dft_energies(
     # adapters and core/dft_functionals.
     from ..core.dft_functionals import is_3c_method
 
+    spec_names: List[str] = []
     for i, lot in enumerate(all_dft):
-        method, basis = lot.split("_")
+        method, basis = split_lot_string(lot)
         bare, disp_method, disp_program = _split_dispersion(method)
         logger.info(f"Processing method: {method}, basis: {basis}")
 
@@ -1339,6 +1431,7 @@ def compute_be_dft_energies(
                 continue
             if disp_method is None:
                 # No dispersion suffix — single integrated spec
+                spec_names.append(_energy_spec_name(method, basis))
                 result = submit_energies(
                     client, rdset_base_name,
                     method=method, basis=basis, program=program,
@@ -1348,6 +1441,8 @@ def compute_be_dft_energies(
                 lot_existing += result.n_existing
             else:
                 # Separated pair: bare DFT + bare dispersion
+                spec_names.append(_energy_spec_name(bare, basis))
+                spec_names.append(_energy_spec_name(disp_method, None))
                 dft_result = submit_energies(
                     client, rdset_base_name,
                     method=bare, basis=basis, program=program,
@@ -1383,18 +1478,31 @@ def compute_be_dft_energies(
         f"{all_existing} are newly linked from existing records."
     )
 
-    return _collect_reaction_record_ids(client, rdset_base_name)
+    return _collect_reaction_record_ids(
+        client, rdset_base_name, spec_names=spec_names,
+    )
 
 
 def _collect_reaction_record_ids(client: PortalClient,
                                  rdset_base_name: str,
-                                 stoich_types: Tuple[str, ...] = STOICH_TYPES) -> List[int]:
-    """Collect record IDs across the given stoichiometry datasets for monitoring."""
+                                 stoich_types: Tuple[str, ...] = STOICH_TYPES,
+                                 spec_names: Optional[Sequence[str]] = None) -> List[int]:
+    """Collect record IDs across the given stoichiometry datasets for monitoring.
+
+    ``spec_names`` restricts the collection to the specifications submitted
+    by the caller. Without it every spec ever registered on the dataset
+    (e.g. LOTs of earlier runs) would be monitored, so ``check_jobs_status``
+    would wait on and report errors from unrelated levels of theory.
+    """
     record_ids = []
+    spec_filter = None
+    if spec_names is not None:
+        spec_filter = sorted({n.lower() for n in spec_names})
     for stoich in stoich_types:
         ds_name = _stoich_dataset_name(rdset_base_name, stoich)
         ds = client.get_dataset("reaction", ds_name)
         for _, _, record in ds.iterate_records(
+            specification_names=spec_filter,
             status=[RecordStatusEnum.complete, RecordStatusEnum.running,
                     RecordStatusEnum.waiting, RecordStatusEnum.error],
         ):
@@ -1455,9 +1563,15 @@ def compute_be_mace_energies(
 
     all_submitted = 0
     all_existing = 0
+    spec_names: List[str] = []
     for model_path in mace_models:
         alias = Path(model_path).stem
         logger.info(f"Processing MACE model: {alias} ({model_path})")
+        spec_names.append(_energy_spec_name(model_path, None, alias))
+        if mace_dispersion:
+            spec_names.append(
+                _energy_spec_name(mace_dispersion, None, f"{alias}{disp_suffix}")
+            )
 
         model_submitted = 0
         model_existing = 0
@@ -1499,7 +1613,39 @@ def compute_be_mace_energies(
         f"{all_existing} are newly linked from existing records."
     )
 
-    return _collect_reaction_record_ids(client, rdset_base_name, MACE_STOICH_TYPES)
+    return _collect_reaction_record_ids(
+        client, rdset_base_name, MACE_STOICH_TYPES, spec_names=spec_names,
+    )
+
+
+def _hessian_record_matches_dispersion(record, program: str, kw: dict) -> bool:
+    """True if an existing Hessian record's dispersion keyword agrees with
+    the ``(program, keywords)`` pair :func:`hessian_method_and_keywords`
+    would submit.
+
+    orca / gaussian store dispersion in a native keyword on the harness's
+    escape-hatch field, so a record at the bare functional matches only if
+    that field carries exactly the requested token (or no dispersion token
+    when none is requested). psi4 encodes dispersion in the method string,
+    so any record carrying a native dispersion token belongs to another
+    program's spec and is rejected.
+    """
+    rec_kw = getattr(getattr(record, "specification", None), "keywords", None) or {}
+    if not isinstance(rec_kw, dict):
+        return False
+    spec = DISPERSION_KEYWORD_SPEC.get(program.lower())
+    if spec is not None:
+        field, table = spec
+        wanted = (kw or {}).get(field)
+        rec_val = rec_kw.get(field, "")
+        if wanted:
+            return _keyword_token_match(rec_val, wanted)
+        return not any(_keyword_token_match(rec_val, tok) for tok in table.values())
+    for field, table in DISPERSION_KEYWORD_SPEC.values():
+        rec_val = rec_kw.get(field, "")
+        if any(_keyword_token_match(rec_val, tok) for tok in table.values()):
+            return False
+    return True
 
 
 def compute_hessian(
@@ -1528,7 +1674,7 @@ def compute_hessian(
         padding_char="*", total_length=60,
     )
 
-    method, basis = opt_lot.split("_")
+    method, basis = split_lot_string(opt_lot)
 
     # Collect unique molecule IDs from be_nocp entries
     mol_ids = set()
@@ -1566,13 +1712,22 @@ def compute_hessian(
     # exactly on the keyword dict, so without this pre-query the migrated
     # records would miss and trigger redundant Hessian re-computes —
     # individually expensive and not what we want for already-done work.
-    existing = list(client.query_singlepoints(
-        driver=SinglepointDriver.hessian,
-        molecule_id=u_mols,
-        method=method,
-        basis=basis,
-        status=RecordStatusEnum.complete,
-    ))
+    # The match is keyword-agnostic *except* for the program and the
+    # dispersion token: a psi4 Hessian must not satisfy an ORCA/Gaussian
+    # request (get_zpve_mol later queries by program for those), and a bare
+    # functional query on orca/gaussian must not be satisfied by a record
+    # that carries a dispersion keyword (or vice versa).
+    existing = [
+        r for r in client.query_singlepoints(
+            driver=SinglepointDriver.hessian,
+            molecule_id=u_mols,
+            method=method,
+            basis=basis,
+            program=program,
+            status=RecordStatusEnum.complete,
+        )
+        if _hessian_record_matches_dispersion(r, program, kw)
+    ]
     have = {r.molecule_id for r in existing if r.properties is not None}
     to_submit = [m for m in u_mols if m not in have]
     record_ids = [r.id for r in existing if r.molecule_id in have]
@@ -1787,9 +1942,10 @@ def add_gradient_spec(
         keywords=keywords or {},
     )
     name = spec_name.lower()
-    ds_sp.add_specification(
+    meta = ds_sp.add_specification(
         name=name, specification=qc_spec, description=description,
     )
+    _check_insert_meta(meta, f"singlepoint specification '{name}' in {ds_sp.name}")
     return name
 
 
@@ -1817,9 +1973,10 @@ def add_energy_spec(
         keywords=keywords or {},
     )
     name = spec_name.lower()
-    ds_sp.add_specification(
+    meta = ds_sp.add_specification(
         name=name, specification=qc_spec, description=description,
     )
+    _check_insert_meta(meta, f"singlepoint specification '{name}' in {ds_sp.name}")
     return name
 
 
@@ -1836,7 +1993,9 @@ def add_singlepoint_entries(
         SinglepointDatasetNewEntry(name=name, molecule=mol)
         for name, mol in entries
     ]
-    return ds_sp.add_entries(new_entries)
+    meta = ds_sp.add_entries(new_entries)
+    _check_insert_meta(meta, f"{len(new_entries)} entries in {ds_sp.name}")
+    return meta
 
 
 def submit_singlepoints_in_dataset(
@@ -1996,7 +2155,18 @@ def get_optimization_trajectory(
 # ``wait_for_completion`` used by sampling / geom_benchmark.
 # ---------------------------------------------------------------------------
 
-_MBE_TERMINAL_STATUSES = {"COMPLETE", "ERROR"}
+# Terminal statuses, derived from the real RecordStatusEnum so a record that
+# was cancelled / invalidated / deleted server-side stops the polling loop
+# instead of being waited on forever (MbeMonitorConfig.max_wait defaults to
+# None, i.e. no timeout). "DELETED" is not a RecordStatusEnum member in
+# qcportal 0.64 but is kept for forward compatibility.
+_MBE_FAILED_STATUSES = frozenset({
+    RecordStatusEnum.error.name.upper(),
+    RecordStatusEnum.cancelled.name.upper(),
+    RecordStatusEnum.invalid.name.upper(),
+    "DELETED",
+})
+_MBE_TERMINAL_STATUSES = frozenset({RecordStatusEnum.complete.name.upper()}) | _MBE_FAILED_STATUSES
 _MBE_CHILD_STATUS_KEYS = ("WAITING", "RUNNING", "COMPLETE", "ERROR")
 
 
@@ -2104,14 +2274,21 @@ def _mbe_log_poll_summary(poll_index, entries, statuses, children_counts) -> Non
 
 
 def _mbe_summarize_final_statuses(per_entry_final_status):
+    logger = logging.getLogger("beep")
     n_complete = n_error = n_missing = n_other = 0
     errored_entries = []
     for entry, status in per_entry_final_status.items():
         if status == "COMPLETE":
             n_complete += 1
-        elif status == "ERROR":
+        elif status in _MBE_FAILED_STATUSES:
             n_error += 1
             errored_entries.append(entry)
+            if status != "ERROR":
+                logger.warning(
+                    f"Entry '{entry}' reached terminal failure status {status} "
+                    "(cancelled/invalidated/deleted on the server); it will "
+                    "not complete without manual intervention."
+                )
         elif status == "MISSING":
             n_missing += 1
         else:
@@ -2248,6 +2425,12 @@ def wait_for_dataset_records(
         )
 
         if all(s in _MBE_TERMINAL_STATUSES for s in per_record_status.values()):
+            for (entry, spec), s in per_record_status.items():
+                if s in _MBE_FAILED_STATUSES and s != "ERROR":
+                    logger.warning(
+                        f"Record {entry}/{spec} reached terminal failure status "
+                        f"{s} (cancelled/invalidated/deleted on the server)."
+                    )
             break
 
         elapsed = time_fn() - start_time

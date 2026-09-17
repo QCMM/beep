@@ -4,11 +4,14 @@ ZPVE vibrational analysis — pure numpy implementation.
 No psi4 or QCFractal imports. Computes vibrational frequencies and
 thermochemistry from a Hessian matrix and a qcelemental Molecule.
 """
+import logging
 import numpy as np
 from typing import Union
 from types import SimpleNamespace
 import qcelemental as qcel
 from qcelemental import Datum
+
+logger = logging.getLogger("beep")
 
 
 # ---------------------------------------------------------------------------
@@ -354,22 +357,33 @@ def _thermo(vibinfo, T, P, multiplicity, molecular_mass, E0, sigma,
     # ZPE
     ZPE_vib = ZPE_vib_K * _R_EH_K
     ZPE_corr = ZPE_elec + ZPE_trans + ZPE_rot + ZPE_vib
-    ZPE_tot = E0 + ZPE_corr
 
     # Thermal energy
     E_vib = E_vib_K * _R_EH_K
     E_corr = (E_elec + E_trans + E_rot) * _R_EH_K + E_vib
-    E_tot = E0 + E_corr
 
     # Enthalpy
     H_vib = H_vib_K * _R_EH_K
     H_corr = (H_elec + H_trans + H_rot) * _R_EH_K + H_vib
-    H_tot = E0 + H_corr
 
     # Gibbs: G = H - TS
     S_tot = S_elec + S_trans + S_rot + S_vib  # in units of R
     G_corr = H_corr - T * S_tot * _R_EH_K
-    G_tot = E0 + G_corr
+
+    # Totals need the electronic energy; a Hessian record from a program that
+    # does not report it (non-psi4) passes E0=None. The corrections above are
+    # still valid, so keep them and leave the totals undefined.
+    if E0 is None:
+        logger.debug(
+            "No electronic energy available for the thermochemistry totals; "
+            "ZPE_tot/E_tot/H_tot/G_tot set to NaN (corrections are unaffected)."
+        )
+        ZPE_tot = E_tot = H_tot = G_tot = np.nan
+    else:
+        ZPE_tot = E0 + ZPE_corr
+        E_tot = E0 + E_corr
+        H_tot = E0 + H_corr
+        G_tot = E0 + G_corr
 
     therminfo = {
         "ZPE_vib":  Datum("ZPE_vib",  "Eh", ZPE_vib),

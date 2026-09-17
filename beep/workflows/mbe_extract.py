@@ -199,9 +199,14 @@ def assemble_mbe_be(config: MbeExtractConfig, client: FractalClient, res_folder:
             imag_threshold=config.zpve.imag_threshold,
             logger=logger,
         )
+        # Sign convention: MBE BEs are POSITIVE (fragments minus complex) and
+        # Delta_ZPVE = ZPVE(complex) - ZPVE(parts) is also positive, so the
+        # ZPVE-corrected BE is BE - Delta_ZPVE. This differs from
+        # workflows/extract.py, where BEs are NEGATIVE-convention and the
+        # correction is added (BE + Delta_ZPVE).
         df_total_be_zpve = pd.DataFrame(index=entry_names)
         for spec in specs:
-            df_total_be_zpve[f"{spec}+ZPVE"] = df_total_be[spec] + delta_zpve
+            df_total_be_zpve[f"{spec}+ZPVE"] = df_total_be[spec] - delta_zpve
         df_total_be_zpve["Delta_ZPVE"] = delta_zpve
         df_total_be_zpve.to_csv(data_dir / "total_be_zpve.csv", index=True, float_format="%.8f")
 

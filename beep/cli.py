@@ -16,6 +16,8 @@ import sys
 import logging
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .models import (
     SamplingConfig,
     SamplingPeriodicConfig,
@@ -70,7 +72,7 @@ def _print_schema(workflow_name):
         )
         sys.exit(1)
     model = WORKFLOW_MODELS[workflow_name]
-    print(model.schema_json(indent=2))
+    print(json.dumps(model.model_json_schema(), indent=2))
 
 
 def main():
@@ -133,7 +135,22 @@ def main():
         sys.exit(1)
 
     # Validate with the appropriate Pydantic model
-    config = WORKFLOW_MODELS[workflow](**raw)
+    try:
+        config = WORKFLOW_MODELS[workflow](**raw)
+    except ValidationError as e:
+        print(
+            f"Error: invalid configuration for workflow '{workflow}' "
+            f"in {config_path} ({e.error_count()} error(s)):",
+            file=sys.stderr,
+        )
+        for err in e.errors():
+            loc = ".".join(str(x) for x in err.get("loc", ())) or "<root>"
+            print(f"  {loc}: {err.get('msg')}", file=sys.stderr)
+        print(
+            f"Use 'beep --schema {workflow}' to see the expected fields.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Set up console-only logging (workflows add file handlers per output folder)
     logger = logging.getLogger("beep")

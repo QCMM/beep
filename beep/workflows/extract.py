@@ -1,6 +1,5 @@
 """Extract BE data workflow — refactored from workflows/launch_extract_be_data.py."""
 import logging
-import warnings
 from typing import List, Tuple, Dict
 
 import numpy as np
@@ -15,8 +14,6 @@ from ..core.logging_utils import (
 from ..core.be_tools import apply_lin_models, calculate_mean_std
 from ..adapters import qcfractal_adapter as qcf
 from ..adapters.qcfractal_adapter import FractalClient, DISPERSION_SUFFIXES
-
-warnings.filterwarnings("ignore")
 
 bcheck = "\u2714"
 gear = "\u2699"
@@ -135,8 +132,11 @@ def concatenate_frames(client, mol, ds_w, opt_method, be_range=(-0.1, -25.0),
     df_be.drop(columns=cols_to_drop, inplace=True)
 
     logger.info("Computing mean values and standard deviation...")
-    df_be["Mean_Eb_all_dft"] = df_be.mean(axis=1)
-    df_be["StdDev_all_dft"] = df_be.std(axis=1)
+    # Mean and std over the method columns only: the std must not include the
+    # freshly inserted Mean column (that would shrink it by sqrt((n-1)/n)).
+    method_cols = list(df_be.columns)
+    df_be["Mean_Eb_all_dft"] = df_be[method_cols].mean(axis=1)
+    df_be["StdDev_all_dft"] = df_be[method_cols].std(axis=1)
 
     logger.info(f"Applying binding energy range of {be_range} kcal/mol")
     df_be = df_be[
@@ -237,14 +237,22 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
             logger.info(f"Structure {entry}, has no Hessian yet, wait for completion or send the computation.")
 
     df_zpve = pd.DataFrame.from_dict(zpve_corr_dict, orient="index", columns=["Delta_ZPVE"])
-    df_be = df_be.drop(todelete)
+    # 3c methods skip the bsse stoichiometry, so a be_nocp entry may have no
+    # row in df_be; ignore those rather than raising KeyError.
+    df_be = df_be.drop(todelete, errors="ignore")
 
-    if len(df_be) < 5:
-        raise ValueError("Too few Hessians to construct a ZPVE linear model. Please compute more Hessians.")
-    if 5 <= len(df_be) <= 9:
-        logger.info(f"WARNING: Number of Hessians is low and may result in a poor linear model. Proceed with caution.")
+    # Count sites that actually carry a ZPVE correction, not all BE rows:
+    # entries whose Hessian is still pending contribute nothing to the fit.
+    n_hess = int(df_zpve["Delta_ZPVE"].notna().sum()) if not df_zpve.empty else 0
+    if n_hess < 5:
+        raise ValueError(
+            f"Too few Hessians ({n_hess}) to construct a ZPVE linear model. "
+            "Please compute more Hessians."
+        )
+    if 5 <= n_hess <= 9:
+        logger.info(f"WARNING: Number of Hessians ({n_hess}) is low and may result in a poor linear model. Proceed with caution.")
     else:
-        logger.info(f"Total number of Hessian structures: {len(df_be)}")
+        logger.info(f"Total number of Hessian structures: {n_hess}")
 
     logger.info(f"Applying scaling factor {scale_factor} to the ZPVE correction")
     df_zpve["Delta_ZPVE"] *= scale_factor
@@ -267,8 +275,11 @@ def zpve_correction(name_be, be_methods, lot_opt, basis, client,
 
     df_be = df_be[[col for col in df_be.columns if "+ZPVE" in col]]
 
-    df_be["Mean_Eb_all_dft"] = df_be.mean(axis=1)
-    df_be["StdDev_all_dft"] = df_be.std(axis=1)
+    # Mean and std over the ZPVE-corrected method columns only (see
+    # concatenate_frames for why the Mean column must be excluded).
+    method_cols = list(df_be.columns)
+    df_be["Mean_Eb_all_dft"] = df_be[method_cols].mean(axis=1)
+    df_be["StdDev_all_dft"] = df_be[method_cols].std(axis=1)
 
     logger.info(f"Applying binding energy range of {be_range} kcal/mol")
     df_be = df_be[

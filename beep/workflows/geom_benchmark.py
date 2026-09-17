@@ -47,7 +47,9 @@ def create_and_add_specification(client, odset, method, basis, program,
             "driver": "gradient",
             "method": method,
             "basis": basis,
-            "keywords": qc_keyword if isinstance(qc_keyword, dict) else {},
+            # Inline keyword dict (validated by GeomBenchmarkConfig); the
+            # adapter raises on anything that is not a dict or None.
+            "keywords": dict(qc_keyword or {}),
             "program": program,
         },
     }
@@ -163,7 +165,17 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
         err = None
         for struct_name, odset in odset_dict.items():
             record = odset.get_record(struct_name, opt_lot_key)
-            err = (is_error(record.status) or record.status.value == "cancelled") if record is not None else True
+            if record is None:
+                # qcportal 0.64 get_record returns None for a missing record.
+                err = True
+                logger.warning(
+                    f"WARNING: No record for {struct_name} at the {opt_lot} level "
+                    "of theory (never submitted or deleted). "
+                    "This level of theory will be excluded from the benchmark."
+                )
+                errored_specs.append((opt_lot, struct_name, None))
+                break
+            err = is_error(record.status) or record.status.value == "cancelled"
             if err:
                 logger.warning(
                     f"WARNING: Calculation for {struct_name} at the {opt_lot} level of theory "
@@ -187,7 +199,8 @@ def compare_rmsd(dft_lot, odset_dict, ref_geom_fmols):
     if errored_specs:
         logger.warning(f"\nSummary of errored optimizations ({len(errored_specs)} total):")
         for spec, struct, rec_id in errored_specs:
-            logger.warning(f"  {spec} / {struct}  (record id: {rec_id})")
+            rec_label = f"record id: {rec_id}" if rec_id is not None else "no record"
+            logger.warning(f"  {spec} / {struct}  ({rec_label})")
         logger.warning("")
 
     rmsd_df = rmsd_df.dropna(axis=1, how="all")
@@ -283,7 +296,7 @@ def run(config: GeomBenchmarkConfig, client: FractalClient) -> None:
     padded_log(logger, "Start of the DFT geometry computations")
 
     dft_program = config.dft_optimization_program
-    dft_keyword = config.dft_optimization_keyword
+    dft_keyword = config.qc_keywords
 
     dft_geom_functionals = {
         "geom_hmgga_dz": geom_hmgga_dz(),

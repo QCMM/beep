@@ -303,8 +303,10 @@ def build_nm_sp_datasets(
     entries, register one gradient spec per DFT functional + one reference
     CCSD(T) spec. Idempotent."""
     sp_dsets: Dict[str, object] = {}
-    dft_kw = dft_keyword if isinstance(dft_keyword, dict) else {}
-    ref_kw = reference_grad_keywords if isinstance(reference_grad_keywords, dict) else {}
+    # Keywords are inline dicts (validated by NmSamplingConfig); pass them
+    # through unchanged so user options are never silently dropped.
+    dft_kw = dict(dft_keyword or {})
+    ref_kw = dict(reference_grad_keywords or {})
 
     ref_method, _, ref_basis = reference_grad_lot.partition("_")
     if not ref_basis:
@@ -400,6 +402,7 @@ def wait_for_nm_completion(
     exhaust their retries and are left in ERROR, so the loop still terminates.
     """
     reset_counts: dict = {}                      # record_id -> times reset
+    reset_failures: dict = {}                    # record_id -> failed reset calls
     while True:
         complete = incomplete = error = 0
         to_reset: List[int] = []
@@ -426,7 +429,9 @@ def wait_for_nm_completion(
                 specification_names=list(all_spec_names),
                 status=qcf.RecordStatusEnum.error,
             ):
-                if reset_counts.get(record.id, 0) < max_resets:
+                attempts = (reset_counts.get(record.id, 0)
+                            + reset_failures.get(record.id, 0))
+                if attempts < max_resets:
                     to_reset.append(record.id)
                 else:
                     error += 1              # retries exhausted -> give up
@@ -443,13 +448,16 @@ def wait_for_nm_completion(
             try:
                 client.reset_records(to_reset)
             except Exception as e:
+                # A failed reset call must still consume budget: if the
+                # server keeps rejecting the reset, the records would
+                # otherwise be retried forever and the loop would never exit.
+                for rid in to_reset:
+                    reset_failures[rid] = reset_failures.get(rid, 0) + 1
                 logger.warning(
-                    f"  NM SP: reset failed ({e}); will retry next cycle."
+                    f"  NM SP: reset failed ({e}); will retry next cycle "
+                    f"(<= {max_resets} attempts per record)."
                 )
             else:
-                # Count the attempt only on a successful reset — a failed call
-                # would silently spend the retry budget without ever kicking
-                # the server, defeating the transient-failure recovery.
                 for rid in to_reset:
                     reset_counts[rid] = reset_counts.get(rid, 0) + 1
             time.sleep(wait_interval)
@@ -720,7 +728,7 @@ def run_nm_sampling(
         reference_grad_program=config.reference_grad_program,
         reference_grad_keywords=config.reference_grad_keywords,
         dft_program=config.dft_program,
-        dft_keyword=config.dft_keyword,
+        dft_keyword=config.qc_keywords,
         logger=logger,
     )
 

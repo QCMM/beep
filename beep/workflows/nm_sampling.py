@@ -96,13 +96,26 @@ def run(config: NmSamplingConfig, client: FractalClient) -> None:
         f for group in dft_geom_functionals.values() for f in group
     ]
 
-    run_nm_sampling(
+    metrics, _raw_deltas = run_nm_sampling(
         config=config, client=client, odset_dict=odset_dict,
         all_dft_functionals=all_dft_functionals,
         dft_geom_functionals=dft_geom_functionals,
         fragments_per_struct=fragments,
         res_folder=data_folder, logger=logger,
     )
+
+    if metrics is None:
+        # run_nm_sampling returns (None, {}) when it aborts (no geometries,
+        # no normal modes, no displacements, ...). Do not report success:
+        # fail the CLI run with a nonzero exit code, as an uncaught exception
+        # in any other workflow would.
+        logger.error(
+            "NM-sampling benchmark aborted before producing results; "
+            f"see the log above and {log_file} for the reason."
+        )
+        logger.removeHandler(file_handler)
+        file_handler.close()
+        raise SystemExit(1)
 
     padded_log(
         logger,

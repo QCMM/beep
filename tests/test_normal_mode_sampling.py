@@ -438,3 +438,34 @@ def test_write_modes_json_matches_reference_shape(tmp_path):
     assert payload["modes"][1]["freq_cm"] == pytest.approx(80.0)
     # Displacement matrix shape
     assert np.asarray(payload["modes"][0]["disp"]).shape == (3, 3)
+
+
+# ---------------------------------------------------------------------------
+# Workflow entry point: an aborted run must not report success / exit 0
+# ---------------------------------------------------------------------------
+
+def test_nm_sampling_workflow_abort_exits_nonzero(tmp_path, monkeypatch):
+    """Regression: run_nm_sampling returns (None, {}) when it aborts, but the
+    workflow still logged "finished successfully" and the CLI exited 0."""
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+    from beep.models.nm_sampling import NmSamplingConfig
+    from beep.workflows import nm_sampling as wf
+
+    cfg_dict = json.loads(
+        (Path(__file__).resolve().parent.parent / "examples" / "nm_sampling.json").read_text()
+    )
+    config = NmSamplingConfig(**cfg_dict)
+    monkeypatch.chdir(tmp_path)
+
+    with patch.object(wf.qcf, "check_collection_existence"), \
+         patch.object(wf.qcf, "get_collection", return_value=MagicMock()), \
+         patch.object(wf, "run_nm_sampling", return_value=(None, {})), \
+         patch.object(wf, "padded_log") as m_padded:
+        with pytest.raises(SystemExit) as exc:
+            wf.run(config, MagicMock())
+
+    assert exc.value.code == 1
+    assert not any(
+        "finished successfully" in str(c.args[1]) for c in m_padded.call_args_list
+    )

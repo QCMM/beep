@@ -43,10 +43,13 @@ def calculate_diameter(cluster_xyz: np.ndarray) -> float:
     cluster_xyz (numpy.ndarray): A NumPy array where each row represents an atom and each column represents X, Y, and Z values.
 
     Returns:
-    float: The diameter of the cluster in bohr.
+    float: The diameter of the cluster in bohr (0.0 for a single atom).
     """
-    # Check if there's only one water molecule in the cluster
-    if cluster_xyz.shape == (3, 3):
+    # No special case for three atoms: this function is applied to the adsorbate,
+    # and a (3, 3) array is any triatomic (HCO, H2O, HCN...), not "one water".
+    # Returning 0.0 there disabled the inter-candidate spacing check.
+    cluster_xyz = np.asarray(cluster_xyz, dtype=float).reshape(-1, 3)
+    if len(cluster_xyz) < 2:
         return 0.0
 
     # Calculate pairwise distances between all pairs of atoms in the cluster
@@ -148,13 +151,21 @@ def create_molecule(cluster: Molecule, mol_shift: Molecule) -> Molecule:
     geom.extend(list(cluster.geometry.flatten()))
     geom.extend(list(mol_shift.geometry.flatten()))
 
-    mult = mol_shift.molecular_multiplicity
-    chg = mol_shift.molecular_charge
+    # Cluster and adsorbate become two fragments with their own charge and
+    # multiplicity; the totals couple them high-spin (unpaired electrons add),
+    # which for a closed-shell cluster equals the adsorbate's own values.
+    n_cl = len(cluster.symbols)
+    n_ad = len(mol_shift.symbols)
+    frag_charges = [float(cluster.molecular_charge), float(mol_shift.molecular_charge)]
+    frag_mults = [int(cluster.molecular_multiplicity), int(mol_shift.molecular_multiplicity)]
 
     new_mol = Molecule(symbols=atms,
                        geometry=geom,
-                       molecular_multiplicity = mult,
-                       molecular_charge = chg,
+                       fragments=[list(range(n_cl)), list(range(n_cl, n_cl + n_ad))],
+                       fragment_charges=frag_charges,
+                       fragment_multiplicities=frag_mults,
+                       molecular_multiplicity=sum(m - 1 for m in frag_mults) + 1,
+                       molecular_charge=sum(frag_charges),
                        fix_com=False,
                        fix_orientation=False)
 
@@ -419,7 +430,6 @@ def random_molecule_sampler(
 
     dis_min, dis_max = calculate_displacements(cluster, sampling_shell)
     target_mol_diam = calculate_diameter(target_molecule.geometry)
-    cluster_diam = calculate_diameter(cluster.geometry)
 
     # initialize variables
     cluster_with_sampled_mol = []
@@ -752,8 +762,10 @@ def single_site_spherical_sampling(
 
     # generate the new structures
     for i in grid_xyz:
-        # move the center of mass of sampled molecule to the point i in grid
-        shift_vector = np.array(i) * angst2bohr
+        # move the center of mass of sampled molecule to the point i in grid.
+        # grid_xyz is already in bohr (radio = sampling_shell * angst2bohr above);
+        # converting again placed every point 1.89x too far out.
+        shift_vector = np.array(i, dtype=float)
         sampling_final_mol = sampling_mol.scramble(
             do_shift=shift_vector, do_rotate=True, do_resort=False
         )[0]

@@ -179,10 +179,14 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
 
     # --- Load adsorbate ---
     ds_sm = qcf.get_collection(client, "OptimizationDataset", config.small_molecule_collection)
-    try:
-        # No opt-LOT for MLP-only runs; take the initial-molecule slot
-        adsorbate = qcf.fetch_initial_molecule(ds_sm, smol_name, lot.lot_name)
-    except KeyError:
+    # Take the entry's initial-molecule slot directly: an MLP-only run has no
+    # optimization record for the adsorbate at the MACE spec, and going through
+    # fetch_opt_record (as before) required one. Same fix as the slab side.
+    # get_entry() returns None for a missing entry, so check membership first
+    # and fall back to the atoms collection for single-atom adsorbates.
+    if smol_name in set(ds_sm.entry_names):
+        adsorbate = qcf.fetch_entry_initial_molecule(ds_sm, smol_name)
+    else:
         adsorbate = qcf.fetch_atom_molecule(client, config.atoms_collection, smol_name)
 
     # --- Load surfaces ---

@@ -67,6 +67,26 @@ def wrap_into_cell(
     return out
 
 
+def unwrap_contiguous(
+    coords: np.ndarray, cell_diag_bohr: np.ndarray, pbc: Sequence[bool]
+) -> np.ndarray:
+    """Make a group of atoms contiguous under PBC (Bohr, shape (N,3)).
+
+    Every atom is re-expressed as the first atom plus the minimum-image
+    displacement from it, so a molecule that was wrapped per atom across a cell
+    face becomes whole again. The result is not necessarily inside the primary
+    cell; wrap it afterwards if needed. Taking a naive mean of split coordinates
+    gives a centre of mass in the middle of the cell instead of on the molecule.
+    """
+    out = np.asarray(coords, dtype=float).reshape(-1, 3).copy()
+    if len(out) < 2:
+        return out
+    ref = out[0].copy()
+    for i in range(1, len(out)):
+        out[i] = ref + min_image_vec(out[i] - ref, cell_diag_bohr, pbc)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Grid construction
 # ---------------------------------------------------------------------------
@@ -287,8 +307,17 @@ def frozen_atom_indices(
 # Duplicate filtering (periodic)
 # ---------------------------------------------------------------------------
 
-def _adsorbate_com_and_profile(mol, n_adsorbate_atoms: int) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+def _adsorbate_com_and_profile(
+    mol,
+    n_adsorbate_atoms: int,
+    cell_diag_bohr: Optional[np.ndarray] = None,
+    pbc: Optional[Sequence[bool]] = None,
+) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     """Adsorbate COM, and an element-resolved sorted height profile about it.
+
+    When ``cell_diag_bohr``/``pbc`` are given the adsorbate is first made contiguous
+    (minimum-image displacements from its first atom), so a molecule stored wrapped
+    across a cell face gets its real COM rather than a point in the middle of the cell.
 
     The profile is, per element, the z-displacements of that element's atoms from the
     adsorbate COM, sorted. z is the surface normal, so this measures orientation
@@ -306,6 +335,8 @@ def _adsorbate_com_and_profile(mol, n_adsorbate_atoms: int) -> Tuple[np.ndarray,
     an amorphous surface a different azimuth almost always comes with a different COM.
     """
     geom = np.asarray(mol.geometry, dtype=float).reshape(-1, 3)[-n_adsorbate_atoms:]
+    if cell_diag_bohr is not None and pbc is not None:
+        geom = unwrap_contiguous(geom, cell_diag_bohr, pbc)
     masses = np.asarray(mol.masses, dtype=float)[-n_adsorbate_atoms:]
     symbols = [str(s) for s in mol.symbols][-n_adsorbate_atoms:]
     com = (geom * masses[:, None]).sum(axis=0) / masses.sum()
@@ -361,10 +392,13 @@ def filter_periodic_sites(
     cell = np.asarray(cell_ang, dtype=float)
     inv_cell = np.linalg.inv(cell)
     periodic = np.asarray(pbc, dtype=bool)
+    cell_diag_bohr = _cell_diag_bohr(cell_ang)
 
     coms, profiles, names = [], [], []
     for name, mol in named_molecules:
-        com, profile = _adsorbate_com_and_profile(mol, n_adsorbate_atoms)
+        com, profile = _adsorbate_com_and_profile(
+            mol, n_adsorbate_atoms, cell_diag_bohr, pbc
+        )
         coms.append(com * BOHR2ANG)
         profiles.append(profile)
         names.append(name)
@@ -460,44 +494,103 @@ def generate_candidate(
         shift_vect = np.array([x_bohr, y_bohr, z_shift])
 
     # Try random rotations until the sanity check passes.
+    n_surf = len(surface.symbols)
     for _ in range(sanity_max_iter):
-        # qcelemental's Molecule.scramble draws from Python's global `random`;
-        # seed it fresh from `rng` on every attempt so results are reproducible
-        # given the same top-level seed.
-        random.seed(rng.randrange(2 ** 31 - 1))
+        # qcelemental's Molecule.scramble(do_rotate=True) draws its rotation from
+        # numpy's global RNG (qcelemental.util.random_rotation_matrix), so seeding
+        # Python's `random` never controlled it. Build the rotation matrix from
+        # this run's `rng` and hand it to scramble so the orientation is
+        # reproducible given the same top-level seed.
+        rotation = qcel.util.random_rotation_matrix(
+            deflection=1.0, randnums=[rng.random(), rng.random(), rng.random()]
+        )
         mol_shifted = adsorbate.scramble(
-            do_shift=shift_vect, do_rotate=True, do_resort=False, deflection=1.0
+            do_shift=shift_vect, do_rotate=rotation, do_resort=False
         )[0]
-        ads_coords = wrap_into_cell(mol_shifted.geometry, cell_diag_bohr, pbc)
+        # Keep the adsorbate contiguous (no per-atom wrap): all_atoms_ok uses
+        # minimum-image distances, and wrapping atom by atom would split a
+        # molecule straddling a cell face, corrupting the COM used below.
+        ads_coords = np.asarray(mol_shifted.geometry, dtype=float).reshape(-1, 3)
         if all_atoms_ok(ads_coords, surface_geom, cell_diag_bohr, pbc, sanity_min_dist_bohr):
             # Return the CENTERED combined molecule (used for compute + saved
             # per-candidate xyz) plus the pre-shift adsorbate coordinates
             # (used by the aggregate debug xyz so the sampling coverage stays
             # visible instead of collapsing to a single point at cell center).
-            combined = _combine(surface, adsorbate, ads_coords)
-            n_surf = len(surface.symbols)
-            centered_geom = recenter_adsorbate_com(
-                combined.geometry, n_surf, cell_diag_bohr, pbc
+            full_geom = np.concatenate(
+                [np.asarray(surface_geom, dtype=float).reshape(-1, 3), ads_coords]
             )
-            centered_mol = qcel.models.Molecule(
-                symbols=list(combined.symbols),
-                geometry=centered_geom.flatten(),
-                fix_com=False,
-                fix_orientation=False,
+            centered_geom = recenter_adsorbate_com(
+                full_geom, n_surf, cell_diag_bohr, pbc
+            )
+            centered_mol = _combine(
+                surface, adsorbate, centered_geom[n_surf:],
+                surface_coords_bohr=centered_geom[:n_surf],
             )
             return centered_mol, ads_coords
     return None
 
 
-def _combine(surface: Molecule, adsorbate: Molecule, ads_coords_bohr: np.ndarray) -> Molecule:
-    """Build a combined qcel Molecule from a slab and adsorbate at chosen coords."""
-    symbols = list(surface.symbols) + list(adsorbate.symbols)
-    geometry = np.concatenate([surface.geometry.flatten(), ads_coords_bohr.flatten()])
+def _molecule_with_fragments(
+    symbols: Sequence[str],
+    geometry_bohr: np.ndarray,
+    fragment_specs: Sequence[Tuple[int, float, int]],
+) -> Molecule:
+    """qcel Molecule whose consecutive fragments carry explicit charge and multiplicity.
+
+    ``fragment_specs`` lists ``(n_atoms, charge, multiplicity)`` in atom order.
+    The total charge is the sum; the total multiplicity couples the fragments
+    high-spin (unpaired electrons add), which for a closed-shell slab equals the
+    adsorbate's. Without this, qcelemental infers a parity-based multiplicity for
+    the complex, silently turning e.g. a triplet adsorbate into a singlet.
+    """
+    fragments: List[List[int]] = []
+    charges: List[float] = []
+    mults: List[int] = []
+    start = 0
+    for n_atoms, charge, mult in fragment_specs:
+        fragments.append(list(range(start, start + int(n_atoms))))
+        charges.append(float(charge))
+        mults.append(int(mult))
+        start += int(n_atoms)
     return qcel.models.Molecule(
-        symbols=symbols,
-        geometry=geometry,
+        symbols=list(symbols),
+        geometry=np.asarray(geometry_bohr, dtype=float).flatten(),
+        fragments=fragments,
+        fragment_charges=charges,
+        fragment_multiplicities=mults,
+        molecular_charge=float(sum(charges)),
+        molecular_multiplicity=sum(m - 1 for m in mults) + 1,
         fix_com=False,
         fix_orientation=False,
+    )
+
+
+def _combine(
+    surface: Molecule,
+    adsorbate: Molecule,
+    ads_coords_bohr: np.ndarray,
+    surface_coords_bohr: Optional[np.ndarray] = None,
+) -> Molecule:
+    """Build a combined qcel Molecule from a slab and adsorbate at chosen coords.
+
+    The slab and the adsorbate become two fragments carrying their own charge and
+    multiplicity, so an open-shell adsorbate (HCO, CH3O, ...) keeps its spin state
+    in the stored complex. ``surface_coords_bohr`` overrides the slab positions
+    (used after the COM-recentering gauge shift).
+    """
+    surf_geom = surface.geometry if surface_coords_bohr is None else surface_coords_bohr
+    symbols = list(surface.symbols) + list(adsorbate.symbols)
+    geometry = np.concatenate(
+        [np.asarray(surf_geom, dtype=float).flatten(),
+         np.asarray(ads_coords_bohr, dtype=float).flatten()]
+    )
+    return _molecule_with_fragments(
+        symbols,
+        geometry,
+        [
+            (len(surface.symbols), surface.molecular_charge, surface.molecular_multiplicity),
+            (len(adsorbate.symbols), adsorbate.molecular_charge, adsorbate.molecular_multiplicity),
+        ],
     )
 
 
@@ -515,11 +608,21 @@ def strip_adsorbate(
     n = int(n_surface_atoms)
     symbols = list(combined_mol.symbols[:n])
     geometry = np.asarray(combined_mol.geometry, dtype=float).reshape(-1, 3)[:n]
+    # Carry the slab's own charge/multiplicity when the complex was built by
+    # ``_combine`` (slab = first fragment); otherwise let qcelemental infer them.
+    state: Dict[str, Any] = {}
+    fragments = getattr(combined_mol, "fragments", None)
+    if fragments is not None and len(fragments) >= 2 and list(fragments[0]) == list(range(n)):
+        state = {
+            "molecular_charge": float(combined_mol.fragment_charges[0]),
+            "molecular_multiplicity": int(combined_mol.fragment_multiplicities[0]),
+        }
     return qcel.models.Molecule(
         symbols=symbols,
         geometry=geometry.flatten(),
         fix_com=False,
         fix_orientation=False,
+        **state,
     )
 
 
@@ -535,9 +638,16 @@ def recenter_adsorbate_com(
     periodic axes (x, y in a standard slab; per `pbc`) are shifted; z is
     left unchanged so `freeze_below_z_ang` still picks the same atoms and
     the vacuum gap is preserved. Returns wrapped coordinates.
+
+    The adsorbate centre is taken from atoms made contiguous under PBC
+    (minimum-image displacements from the first adsorbate atom), so an
+    adsorbate that arrives split across a cell face is recentred as a whole
+    molecule instead of around a naive mean in the middle of the cell.
     """
     coords = np.asarray(combined_geom, dtype=float).copy().reshape(-1, 3)
-    ads_com = coords[n_surface_atoms:].mean(axis=0)
+    ads = unwrap_contiguous(coords[n_surface_atoms:], cell_diag_bohr, pbc)
+    coords[n_surface_atoms:] = ads
+    ads_com = ads.mean(axis=0)
     target = 0.5 * cell_diag_bohr
     shift = np.zeros(3)
     for i in range(3):

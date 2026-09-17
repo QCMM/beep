@@ -3,7 +3,10 @@ from typing import Any, Dict, List, Tuple, Union, NoReturn
 import pandas as pd
 import qcelemental as qcel
 
-from .. import __version__
+try:
+    from .. import __version__
+except ImportError:  # partially initialised package or uninstalled checkout
+    __version__ = "0.0.0+unknown"
 
 _LINE = "=" * 88
 
