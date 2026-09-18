@@ -12,8 +12,8 @@ BEEP requires Python 3.10+ and the QCFractal v0.63+ stack. The supported install
 path is to clone a `qcfractal-0.64` conda environment and pip-install BEEP on top:
 
 ```bash
-conda create --clone qcfractal-0.64 -p /path/to/envs/beep-0.13
-/path/to/envs/beep-0.13/bin/pip install .
+conda create --clone qcfractal-0.64 -p /path/to/envs/beep-0.16
+/path/to/envs/beep-0.16/bin/pip install .
 ```
 
 Pure `pip install .` also works in any environment that already has the
@@ -58,11 +58,16 @@ This is the easiest way to create a new configuration file — start from the sc
 
 | Workflow | Description |
 |----------|-------------|
-| `sampling` | Generate binding site candidates via random molecular placement, RMSD filtering, and geometry optimization |
-| `be_hess` | Submit binding energy and Hessian computations for optimized structures |
+| `sampling` | Generate binding-site candidates on water clusters (adaptive surface-anchored or spherical placement), RMSD-filter them and refine the geometries |
+| `sampling_periodic` | Grid-based sampling of binding sites on a periodic slab with MLP-driven optimizations and optional frozen layers |
+| `be_hess` | Submit binding energy (with BSSE) and Hessian computations for the optimized cluster structures |
 | `extract` | Extract binding energies, apply ZPVE corrections, and generate summary tables and plots |
-| `pre_exp` | Compute pre-exponential factors from vibrational analysis over a temperature range |
-| `geom_benchmark` | Benchmark DFT geometry optimizations and per-component force RMSD along the reference trajectory against high-level reference data |
+| `be_comp_periodic` | Submit periodic binding-energy single points (MACE + explicit dispersion) for complex, bare site and gas-phase adsorbate |
+| `be_assemble_periodic` | Assemble per-site periodic binding energies from the completed single points, with optional ZPVE shift |
+| `mbe` | Submit and monitor many-body-expansion binding energies on existing binding sites at a higher level of theory |
+| `mbe_extract` | Assemble MBE binding energies and n-body decomposition tables, optionally borrowing a ZPVE correction from `be_hess` |
+| `pre_exp` | Compute transition-state-theory pre-exponential desorption factors over a temperature range |
+| `geom_benchmark` | Benchmark DFT geometry optimizations and per-step force RMSD along the reference trajectory against high-level reference data |
 | `energy_benchmark` | Benchmark DFT binding energies against high-level reference values (CBS extrapolation), with optional gCP correction |
 | `nm_sampling` | Benchmark DFT gradients on ± normal-mode displacements against a high-level (CCSD(T)) reference, with per-band force-RMSE ranking |
 
@@ -71,11 +76,17 @@ Each workflow has a corresponding example configuration in the [`examples/`](exa
 ```
 examples/
   sampling.json
+  sampling_periodic.json
   be_hess.json
   extract.json
+  be_comp_periodic.json
+  be_assemble_periodic.json
+  mbe.json
+  mbe_extract.json
   pre_exp.json
   geom_benchmark.json
   energy_benchmark.json
+  nm_sampling.json
 ```
 
 ## Output

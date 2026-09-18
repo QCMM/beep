@@ -7,8 +7,9 @@ Usage:
     beep --schema sampling
 
 The JSON file must contain a "workflow" key that selects which workflow to run.
-Valid workflow values: sampling, be_hess, extract, pre_exp, geom_benchmark,
-energy_benchmark, nm_sampling, mbe, mbe_extract
+Valid workflow values: sampling, sampling_periodic, be_hess, extract,
+be_comp_periodic, be_assemble_periodic, mbe, mbe_extract, pre_exp,
+geom_benchmark, energy_benchmark, nm_sampling
 """
 import argparse
 import json
@@ -56,7 +57,8 @@ def _print_workflows():
     print(f"  {'Name':<20} Description")
     print(f"  {'----':<20} -----------")
     for name, model in WORKFLOW_MODELS.items():
-        doc = (model.__doc__ or "").strip().rstrip(".")
+        # first paragraph line only; the full docstring is in `beep --schema`
+        doc = (model.__doc__ or "").strip().splitlines()[0].strip().rstrip(".") if (model.__doc__ or "").strip() else ""
         print(f"  {name:<20} {doc}")
     print()
     print("Use 'beep --schema <workflow>' to see the full JSON schema for a workflow.")
