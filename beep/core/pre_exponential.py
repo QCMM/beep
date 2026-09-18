@@ -108,9 +108,31 @@ def is_linear_rotor(Ia, Ib, rel_tol=LINEAR_INERTIA_REL_TOL):
 def pre_exponential_factor(m, T_list, sigma, Ia, Ib, Ic, A):
     """Compute pre-exponential desorption rate factor for a list of temperatures.
 
-    A linear rotor (``Ia`` negligible relative to ``Ib``, see
-    :func:`is_linear_rotor`) uses the two-dimensional rotational partition
-    function; a nonlinear one uses the three-dimensional form.
+    Transition-state-theory prefactor (Tait et al. 2005; Minissale et al.
+    2022, ACS Earth Space Chem. 6, 597, Eqs. 16-20)::
+
+        nu = (kB T / h) * q_trans,2D * q_rot
+
+    with ``q_trans,2D = A * 2 pi m kB T / h^2`` and the classical rigid-rotor
+    partition functions. A linear rotor (``Ia`` negligible relative to
+    ``Ib``, see :func:`is_linear_rotor`) uses::
+
+        q_rot,lin = 8 pi^2 I kB T / (sigma h^2)
+
+    a nonlinear one::
+
+        q_rot,3D = sqrt(pi) / (sigma h^3) * (8 pi^2 kB T)^(3/2) * sqrt(Ia Ib Ic)
+
+    Note: Minissale et al. 2022 Eq. 20 carries an extra ``sqrt(pi)`` in the
+    linear form and their Table 4 an extra ``pi``; both are leftovers of the
+    three-dimensional orientation volume (8 pi^2) that has no counterpart for
+    the two angles of a linear molecule (orientation volume 4 pi). The form
+    used here equals the high-temperature limit ``kB T / (sigma h c B)`` of
+    the quantum rotor (CO at 298 K: 107.3 for B = 1.9313 cm^-1); the Eq. 20
+    form would give 190 and the Table 4 form 337.
+
+    ``A`` is the surface area per adsorbed molecule in m^2 (1e-19 m^2 for
+    most small molecules, Minissale et al. 2022).
     """
     kB = qcel.constants.get("kb")
     h = qcel.constants.get("h")
@@ -124,7 +146,7 @@ def pre_exponential_factor(m, T_list, sigma, Ia, Ib, Ic, A):
     def _single_T(T):
         translational_part = ((2 * pi * m * kB * T) / h**2) * A
         if linear:
-            rotational_part = (8 * pi**(5/2) * kB * T / h**2) * (Ib / sigma)
+            rotational_part = (8 * pi**2 * kB * T / h**2) * (Ib / sigma)
         else:
             rotational_part = (pi**0.5 / (sigma * h**3)) * (8 * pi**2 * kB * T)**(3 / 2) * math.sqrt(Ia * Ib * Ic)
         return ((kB * T) / h) * translational_part * rotational_part

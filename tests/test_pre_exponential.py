@@ -144,7 +144,7 @@ class TestLinearRotorDetection:
         h = qcel.constants.get("h")
         pi = math.pi
         trans = ((2 * pi * mass * kB * T) / h**2) * A
-        rot = (8 * pi**(5 / 2) * kB * T / h**2) * (Ib / sigma)
+        rot = (8 * pi**2 * kB * T / h**2) * (Ib / sigma)  # classical linear rotor
         return ((kB * T) / h) * trans * rot
 
     def test_co_computed_moments_take_linear_branch(self):
@@ -188,3 +188,51 @@ class TestLinearRotorDetection:
         Ia, Ib, Ic = get_moments_of_inertia(symbols, coords)
         with pytest.raises(ValueError):
             pre_exponential_factor(mass, [300], sigma=2, Ia=Ia, Ib=-Ib, Ic=Ic, A=1e-19)
+
+
+class TestRotationalPartitionFunctionValues:
+    """Pin the rotational partition functions to independent reference values.
+
+    The linear rotor must reproduce the high-temperature limit of the quantum
+    rotor, q_rot = kB T / (sigma h c B). For CO, B = 1.9313 cm^-1 gives
+    q_rot(298.15 K) = 107.3. Minissale et al. 2022 Eq. 20 (an extra sqrt(pi),
+    the form BEEP used before 0.16) would give 190, their Table 4 337.
+    """
+
+    kB = qcel.constants.get("kb")
+    h = qcel.constants.get("h")
+    c = qcel.constants.get("c")
+    amu_A2 = qcel.constants.get("atomic mass constant") * 1e-20
+
+    def _rot_part(self, m, T, sigma, Ia, Ib, Ic, A):
+        nu = pre_exponential_factor(m, [T], sigma, Ia, Ib, Ic, A)[0]
+        translational = (2 * math.pi * m * self.kB * T / self.h**2) * A
+        return nu / ((self.kB * T / self.h) * translational)
+
+    def test_linear_co_matches_spectroscopic_high_t_limit(self):
+        T, B_cm = 298.15, 1.9313
+        q_ref = self.kB * T / (self.h * self.c * 100.0 * B_cm)  # 107.3
+        I = self.h / (8 * math.pi**2 * self.c * 100.0 * B_cm)  # kg m^2 from B
+        q = self._rot_part(28.0 * qcel.constants.get("atomic mass constant"),
+                           T, 1, 0.0, I, I, 1e-19)
+        assert q == pytest.approx(q_ref, rel=1e-6)
+        assert q == pytest.approx(107.3, rel=1e-3)
+        # and explicitly not the sqrt(pi)/pi variants of Minissale 2022
+        assert not q == pytest.approx(q_ref * math.sqrt(math.pi), rel=1e-2)
+        assert not q == pytest.approx(q_ref * math.pi, rel=1e-2)
+
+    def test_nonlinear_matches_minissale_table4(self):
+        # CH4: Ix=Iy=Iz=3.17 amu A^2, sigma=12, Tpeak=47 K -> q_rot,3D = 2.25
+        # H2O: 1.83/1.21/0.62 amu A^2, sigma=2, Tpeak=155 K -> 16.77
+        for (Ia, Ib, Ic, sigma, T, q_tab) in [
+            (3.17, 3.17, 3.17, 12, 47.0, 2.25),
+            (1.83, 1.21, 0.62, 2, 155.0, 16.77),
+        ]:
+            q = self._rot_part(18.0 * qcel.constants.get("atomic mass constant"), T, sigma,
+                               Ia * self.amu_A2, Ib * self.amu_A2, Ic * self.amu_A2, 1e-19)
+            assert q == pytest.approx(q_tab, rel=5e-3)
+
+    def test_default_surface_area_is_1e_minus_19(self):
+        from beep.models.pre_exp import PreExpConfig
+        cfg = PreExpConfig(workflow="pre_exp")
+        assert cfg.molecule_surface_area == pytest.approx(1e-19)

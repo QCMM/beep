@@ -116,6 +116,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   when a `be_nocp` entry has no BSSE row (3c methods), and `zpve` no longer
   raises `TypeError` when the Hessian record has no electronic energy.
 
+- **`pre_exp`: prefactors were 10x too large by default and 1.77x too large
+  for linear molecules.** The `molecule_surface_area` default was written
+  `10e-19`, which is 1e-18 m²; the help text and Minissale et al. 2022 (A
+  fixed to 10⁻¹⁹ m² for all molecules) intend 1e-19 m², and ν is linear in
+  A. The linear-rotor branch implemented Minissale et al. 2022 Eq. 20,
+  `sqrt(pi)/(sigma h^2) * 8 pi^2 kB T * I`, which carries a `sqrt(pi)` left
+  over from the three-dimensional orientation volume (their Table 4 values
+  carry a further factor `pi`); the classical linear rotor is
+  `8 pi^2 I kB T / (sigma h^2)`, which reproduces the spectroscopic
+  high-temperature limit `kB T / (sigma h c B)` (CO at 298 K: 107.3 for
+  B = 1.9313 cm⁻¹, versus 190 for Eq. 20 and 337 for Table 4). The
+  nonlinear branch and the translational part were already correct and
+  reproduce Table 4 to four digits. Tests pin the linear branch to the CO
+  spectroscopic value and the nonlinear one to Minissale Table 4.
+
 - **`pre_exp`: `molecule: []` crashed, the temperature range excluded
   `T_max` although the log said inclusive, and linear molecules were
   detected with an exact `Ia == 0` float compare.** `[]` now means all

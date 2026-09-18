@@ -13,7 +13,13 @@ class PreExpConfig(BaseModel):
     level_of_theory: str = Field("blyp_def2-svp", description="Level of theory (method_basis format)")
     range_of_temperature: List[int] = Field([10, 273], description="Temperature range [min, max] in Kelvin (inclusive of max); a single-element list [T] evaluates one temperature")
     temperature_step: int = Field(1, description="Temperature step size in Kelvin")
-    molecule_surface_area: float = Field(10e-19, description="Molecule surface area in m^2")
+    molecule_surface_area: float = Field(
+        1e-19,
+        description=(
+            "Surface area per adsorbed molecule in m^2 (inverse of the site density); "
+            "1e-19 m^2 (10 A^2) for most small molecules (Minissale et al. 2022)."
+        ),
+    )
 
     _lower_lot = field_validator("level_of_theory")(lowercase_str)
 
