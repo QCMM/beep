@@ -87,6 +87,11 @@ def get_cc_keywords(mol_mult):
             "cc_type": "df",
             "freeze_core": "true",
             "qc_module": "OCC",
+            # DF-CCSD DIIS on open-shell systems can oscillate around the
+            # residual criterion with the energy already converged to ~1e-7 Eh;
+            # the default iteration cap then kills a converged calculation
+            # (seen on CN and CH3O). Raising the cap lets DIIS settle.
+            "cc_maxiter": 200,
         }
     else:
         kw = {}
@@ -400,6 +405,28 @@ def _fetch_be_molecules(odset, bench_struct, lot_geom, atom_mol=None):
     return smol_mol, surf_mol, struc_mol
 
 
+def log_mae_per_geometry(logger, df_ae, dft_func_dict, dft_opt_lot, title):
+    """One labeled per-group MAE section per optimization geometry.
+
+    Reaction entries are named ``<bench_struct>_<opt_lot>``, so each
+    section selects its rows by entry-name suffix and reports only the
+    binding sites optimized at that geometry LOT. Pooling every geometry
+    into one unlabeled table (the previous behavior) averaged the MAEs
+    across geometry sets and left the reader unable to tell which
+    geometry the numbers belonged to.
+    """
+    index_lower = df_ae.index.str.lower()
+    for lot in dft_opt_lot:
+        mask = index_lower.str.endswith(f"_{lot.lower()}")
+        if not mask.any():
+            logger.warning(
+                f"  No entries for geometry {lot} — skipping its MAE section."
+            )
+            continue
+        padded_log(logger, f"{title} — {lot} geometries")
+        log_energy_mae_per_group(logger, df_ae[mask], dft_func_dict)
+
+
 def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
 
@@ -665,14 +692,16 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
             logger.warning(f"Plotting failed: {e}. Data files are saved, plots can be regenerated.")
 
     padded_log(logger, "BINDING ENERGY BENCHMARK RESULTS", padding_char=gear)
-    padded_log(logger, "BINDING ENERGY MAE (BSSE / Boys-Bernardi)")
     # If user supplied functional_averages groups, register them as their
     # own per-group category so the averaged DFT_Average_N rows show up
     # alongside the standard functional categories in the per-group log.
     dft_func_with_avgs = dict(dft_func)
     if avg_groups:
         dft_func_with_avgs["Averages"] = [label for label, _ in avg_groups]
-    log_energy_mae_per_group(logger, df_be_ae, dft_func_with_avgs)
+    log_mae_per_geometry(
+        logger, df_be_ae, dft_func_with_avgs, dft_opt_lot,
+        "BINDING ENERGY MAE (BSSE / Boys-Bernardi)",
+    )
     logger.info("")
     logger.info("  Note — Interaction-energy (IE) and deformation-energy (DE)")
     logger.info("         breakdowns are not shown in this summary. Per-method")
@@ -768,8 +797,10 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
                 folder_path_json / "BE_gcp_RE_DFT.json", orient="index",
             )
 
-            padded_log(logger, "gCP-CORRECTED BINDING ENERGY MAE")
-            log_energy_mae_per_group(logger, df_be_gcp_ae, dft_func_with_avgs)
+            log_mae_per_geometry(
+                logger, df_be_gcp_ae, dft_func_with_avgs, dft_opt_lot,
+                "gCP-CORRECTED BINDING ENERGY MAE",
+            )
 
     logger.removeHandler(file_handler)
     file_handler.close()

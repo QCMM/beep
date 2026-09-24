@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`energy_benchmark`: results are now reported per optimization
+  geometry.** Reaction entries have always been per `(structure,
+  opt_level_of_theory)` pair, but the printed MAE summary pooled every
+  geometry's errors into one unlabeled table — with several opt LOTs
+  each functional's MAE was an average over all geometry sets, and even
+  with one LOT the output never said which geometry it belonged to. The
+  BE and gCP-corrected summaries now print one full per-category section
+  per entry in `opt_level_of_theory`, each labeled with its geometry LOT
+  and computed only from that LOT's binding sites (new
+  `log_mae_per_geometry` helper, suffix-matched on the entry names). A
+  LOT with no completed entries warns and is skipped. Regression tests
+  cover per-section MAE separation and the skip path.
+
+- **`energy_benchmark`: open-shell CCSD(T)/CBS records no longer die on
+  the DF-CCSD iteration cap.** On open-shell systems (seen on CN and
+  CH3O) DIIS can oscillate around the residual criterion with the energy
+  already converged to ~1e-7 Eh, and the default `cc_maxiter` then kills
+  a converged calculation. `get_cc_keywords` now sets `cc_maxiter: 200`
+  in the open-shell branch; the closed-shell branch is unchanged.
+  Existing CBS specs on the server keep their stored keywords — repairing
+  the already-failed records needs the spec-keyword update plus
+  cancel→uncancel→reset on those records (documented procedure).
+
 - **`mbe_extract`: ZPVE-corrected MBE binding energies were too large by
   2·ΔZPVE.** MBE BEs are positive-convention (complex minus fragments,
   negated) and `Delta_ZPVE` = ZPVE(complex) − ZPVE(parts) is positive, so
