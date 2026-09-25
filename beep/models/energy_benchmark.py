@@ -58,6 +58,26 @@ class EnergyBenchmarkConfig(BaseModel):
             "JSON results (BE/IE/DE + AE/RE variants) are always written."
         ),
     )
+    scf_state_check: Literal["exclude", "warn", "off"] = Field(
+        "exclude",
+        description=(
+            "Consistency check of the electronic state across the CBS basis "
+            "series. A structure whose SCF interaction or binding energy "
+            "changes by more than scf_jump_threshold between adjacent bases "
+            "is converged to different states in different bases, which "
+            "invalidates its CCSD(T)/CBS reference. 'exclude' drops it from "
+            "the reference set (and hence from all error statistics), 'warn' "
+            "only logs it, 'off' disables the check."
+        ),
+    )
+    scf_jump_threshold: float = Field(
+        1.0, gt=0,
+        description=(
+            "Largest change (kcal/mol) of the SCF IE or BE between adjacent "
+            "bases of the CBS series accepted by scf_state_check. Smooth "
+            "basis-set convergence gives 0.1-0.4 kcal/mol."
+        ),
+    )
     functional_averages: List[List[str]] = Field(
         default_factory=list,
         description=(

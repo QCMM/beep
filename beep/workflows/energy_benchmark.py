@@ -99,6 +99,59 @@ def get_cc_keywords(mol_mult):
     return kw
 
 
+def get_scf_state_keywords(mol_mult, basis, cbs_list):
+    """SCF keywords that keep one electronic state across the CBS basis ladder.
+
+    Open-shell UHF references converged independently in each aug-cc-pVXZ
+    basis can land in different states (seen on OH, CN and CH3O on water
+    clusters), which silently corrupts the extrapolation. Every basis above
+    the smallest one starts from the projected smallest-basis solution, and
+    UHF instabilities are followed down to a stable solution. The same
+    keywords go on the SCF and the correlated records so that both share one
+    reference. Closed shell: no changes.
+    """
+    if mol_mult == 1:
+        return {}
+    smallest = min({lot.split("_")[1] for lot in cbs_list}, key=basis_cardinal)
+    kw = {"reference": "uhf", "stability_analysis": "follow"}
+    if basis_cardinal(basis) > basis_cardinal(smallest):
+        kw["basis_guess"] = smallest
+    return kw
+
+
+def cbs_spec_name(method, basis, mol_mult=1):
+    """Specification name of a CCSD(T)/CBS component record.
+
+    Open-shell specs carry a ``_stab`` suffix: they are computed with the
+    state-controlled keywords of get_scf_state_keywords and must never be
+    confused with earlier records computed without them.
+    """
+    name = f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df"
+    if mol_mult != 1:
+        name += "_stab"
+    return name.lower()
+
+
+def scf_state_jumps(df_dict, threshold=1.0):
+    """Adjacent-basis jumps in the SCF component of the IE and BE.
+
+    df_dict maps 'IE'/'BE' to the incremental tables of get_reference_be_result
+    (rows: bases ordered by cardinal number plus 'CBS'). For a consistent
+    electronic state the SCF interaction and binding energies drift smoothly
+    with basis size (typically 0.1-0.4 kcal/mol); a change larger than
+    threshold (kcal/mol) signals that the reference is in a different state
+    in one of the bases. Returns labels such as 'IE aug-cc-pvdz->aug-cc-pvtz'.
+    """
+    out = []
+    for key in ("IE", "BE"):
+        scf = df_dict[key]["SCF"].drop("CBS").astype(float)
+        items = list(scf.items())
+        for (b1, e1), (b2, e2) in zip(items, items[1:]):
+            if abs(e2 - e1) > threshold:
+                out.append(f"{key} {b1}->{b2} ({e1:+.2f} -> {e2:+.2f})")
+    return out
+
+
 def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, cc_keywords=None,
                     res_folder=None):
     from qcportal.singlepoint.record_models import QCSpecification, SinglepointDriver
@@ -117,9 +170,11 @@ def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, cc_keywords=None,
         method, basis = lot.split("_")[0], lot.split("_")[1]
         logger.info(f"\nSending computations for {method}/{basis}")
 
-        # SCF uses no special keywords; correlated methods use df keywords
-        kw = {} if "scf" in lot else cc_keywords
-        spec_name = (f"{method}_{basis}" if not kw else f"{method}_{basis}_df").lower()
+        # SCF uses no special keywords; correlated methods use df keywords.
+        # Open shell: both share the state-controlled SCF keywords.
+        kw = {} if "scf" in lot else dict(cc_keywords)
+        kw.update(get_scf_state_keywords(mol_mult, basis, cbs_list))
+        spec_name = cbs_spec_name(method, basis, mol_mult)
 
         qc_spec = QCSpecification(
             program="psi4",
@@ -144,7 +199,7 @@ def compute_all_cbs(cbs_col, cbs_list, mol_mult, tag, cc_keywords=None,
         file.write(id_str)
 
 
-def check_dataset_status(dataset, cbs_list, wait_interval=1800):
+def check_dataset_status(dataset, cbs_list, mol_mult=1, wait_interval=1800):
     from beep.adapters.qcfractal_adapter import is_complete, is_incomplete, is_error
 
     logger = logging.getLogger("beep")
@@ -156,7 +211,7 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
 
         for lot in cbs_list:
             method, basis = lot.split("_")
-            spec_name = (f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df").lower()
+            spec_name = cbs_spec_name(method, basis, mol_mult)
 
             for entry_name, sn, record in dataset.iterate_records(
                 specification_names=[spec_name],
@@ -194,8 +249,8 @@ def check_dataset_status(dataset, cbs_list, wait_interval=1800):
         time.sleep(wait_interval)
 
 
-def get_energy_record(ds, struct, method, basis):
-    spec_name = (f"{method}_{basis}" if "scf" in method else f"{method}_{basis}_df").lower()
+def get_energy_record(ds, struct, method, basis, mol_mult=1):
+    spec_name = cbs_spec_name(method, basis, mol_mult)
     record = None
     for name_variant in [struct, struct.upper()]:
         try:
@@ -227,7 +282,7 @@ def basis_cardinal(basis: str) -> int:
     return _CARDINAL[m.group(1)]
 
 
-def get_cbs_energy(ds, struct, cbs_lot_list):
+def get_cbs_energy(ds, struct, cbs_lot_list, mol_mult=1):
     columns = ["SCF", "MP2", "CCSD", "CCSD(T)"]
     # One row per distinct basis, ordered by cardinal number, plus the CBS row.
     # The basis strings are taken verbatim from cbs_lot_list so that the
@@ -250,7 +305,7 @@ def get_cbs_energy(ds, struct, cbs_lot_list):
 
     for lot in cbs_lot_list:
         method, basis = lot.split("_")
-        rec = get_energy_record(ds, struct, method, basis)
+        rec = get_energy_record(ds, struct, method, basis, mol_mult)
         props = rec.properties
 
         if "mp2" in method:
@@ -296,9 +351,18 @@ def get_cbs_energy(ds, struct, cbs_lot_list):
     return cbs_lot_df
 
 
-def get_reference_be_result(bchmk_structs, cbs_col, cbs_list):
+def get_reference_be_result(bchmk_structs, cbs_col, cbs_list, mol_mult=1,
+                            scf_state_check="exclude", scf_jump_threshold=1.0):
+    """CCSD(T)/CBS IE, DE and BE for every benchmark structure.
+
+    scf_state_check: 'exclude' drops a structure whose SCF IE or BE jumps by
+    more than scf_jump_threshold (kcal/mol) between adjacent bases (see
+    scf_state_jumps) from the reference set; 'warn' only logs it; 'off'
+    skips the check.
+    """
     logger = logging.getLogger("beep")
     result_df = pd.DataFrame(columns=["IE", "DE", "BE"])
+    flagged = {}
 
     for bench_struct in bchmk_structs:
         padded_log(logger, f"Calculating CBS extrapolations for {bench_struct}")
@@ -307,11 +371,11 @@ def get_reference_be_result(bchmk_structs, cbs_col, cbs_list):
         mol_name = dataset_name.split("_")[0]
         surf_name = dataset_name.split(f"{mol_name}_", 1)[1]
 
-        struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list)
-        mol_cbs_en = get_cbs_energy(cbs_col, mol_name.upper(), cbs_list)
-        surf_cbs_en = get_cbs_energy(cbs_col, surf_name, cbs_list)
-        struct_cbs_en_f1 = get_cbs_energy(cbs_col, bench_struct + "_f1", cbs_list)
-        struct_cbs_en_f2 = get_cbs_energy(cbs_col, bench_struct + "_f2", cbs_list)
+        struct_cbs_en = get_cbs_energy(cbs_col, bench_struct, cbs_list, mol_mult)
+        mol_cbs_en = get_cbs_energy(cbs_col, mol_name.upper(), cbs_list, mol_mult)
+        surf_cbs_en = get_cbs_energy(cbs_col, surf_name, cbs_list, mol_mult)
+        struct_cbs_en_f1 = get_cbs_energy(cbs_col, bench_struct + "_f1", cbs_list, mol_mult)
+        struct_cbs_en_f2 = get_cbs_energy(cbs_col, bench_struct + "_f2", cbs_list, mol_mult)
 
         ie = (struct_cbs_en - (struct_cbs_en_f1 + struct_cbs_en_f2)) * qcel.constants.hartree2kcalmol
         be = (struct_cbs_en - (mol_cbs_en + surf_cbs_en)) * qcel.constants.hartree2kcalmol
@@ -324,6 +388,21 @@ def get_reference_be_result(bchmk_structs, cbs_col, cbs_list):
             df_formatted = df.fillna("-")
             logger.info(f"\n{df_formatted.to_string()}\n")
 
+        if scf_state_check != "off":
+            jumps = scf_state_jumps(df_dict, threshold=scf_jump_threshold)
+            if jumps:
+                flagged[bench_struct] = jumps
+                logger.warning(
+                    f"\nSCF state check FAILED for {bench_struct}: the SCF "
+                    f"component changes by more than {scf_jump_threshold} "
+                    f"kcal/mol between bases, so the reference is in a "
+                    f"different electronic state in at least one basis:\n  "
+                    + "\n  ".join(jumps)
+                )
+                if scf_state_check == "exclude":
+                    logger.warning(f"{bench_struct} is EXCLUDED from the reference set.\n")
+                    continue
+
         temp_row = {key: df.loc["CBS", "NET"] for key, df in df_dict.items()}
         result_df = pd.concat(
             [result_df, pd.DataFrame(temp_row, index=[bench_struct])],
@@ -332,6 +411,12 @@ def get_reference_be_result(bchmk_structs, cbs_col, cbs_list):
 
     padded_log(logger, "\n FINAL CCSD(T)/CBS RESULTS\n")
     logger.info(result_df)
+    if flagged:
+        action = "excluded" if scf_state_check == "exclude" else "kept (warn only)"
+        logger.warning(
+            f"\n{len(flagged)} structure(s) failed the SCF state check and were "
+            f"{action}: {', '.join(flagged)}\n"
+        )
     return result_df
 
 
@@ -530,9 +615,13 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
 
     compute_all_cbs(cbs_col, cbs_list, mol_mult, tag=config.tag_cbs,
                     cc_keywords=cc_kw, res_folder=data_folder)
-    check_dataset_status(cbs_col, cbs_list)
+    check_dataset_status(cbs_col, cbs_list, mol_mult)
 
-    ref_df = get_reference_be_result(bchmk_structs, cbs_col, cbs_list)
+    ref_df = get_reference_be_result(
+        bchmk_structs, cbs_col, cbs_list, mol_mult,
+        scf_state_check=config.scf_state_check,
+        scf_jump_threshold=config.scf_jump_threshold,
+    )
     logger.info(f"\nFinsihed the Calculation of the CCSD(T)/CBS reference energies:  {bcheck}\n")
 
     padded_log(logger, "Initializing DFT Binding Energy Computations")
@@ -678,15 +767,17 @@ def run(config: EnergyBenchmarkConfig, client: FractalClient) -> None:
         df_be_ae_plt = pd.read_json(folder_path_json / "BE_AE_DFT.json", orient="index")
         df_de_re_plt = pd.read_json(folder_path_json / "DE_RE_DFT.json", orient="index")
         df_ie_re_plt = pd.read_json(folder_path_json / "IE_RE_DFT.json", orient="index")
+        # Structures excluded by the SCF state check have no reference.
+        ref_structs = [s for s in bchmk_structs if s in ref_df.index]
 
         try:
-            plot_violins(df_be_plt, bchmk_structs, smol_name, folder_path_plots, ref_df)
+            plot_violins(df_be_plt, ref_structs, smol_name, folder_path_plots, ref_df)
             padded_log(logger, "Generating violin plots")
-            plot_density_panels(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+            plot_density_panels(df_be_ae_plt, ref_structs, dft_opt_lot, smol_name, folder_path_plots)
             padded_log(logger, "Generating density plots")
-            plot_mean_errors(df_be_ae_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+            plot_mean_errors(df_be_ae_plt, ref_structs, dft_opt_lot, smol_name, folder_path_plots)
             padded_log(logger, "Generating MAE plots")
-            plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, bchmk_structs, dft_opt_lot, smol_name, folder_path_plots)
+            plot_ie_vs_de(df_de_re_plt, df_ie_re_plt, ref_structs, dft_opt_lot, smol_name, folder_path_plots)
             padded_log(logger, "Generating IE vs DE plots")
         except Exception as e:
             logger.warning(f"Plotting failed: {e}. Data files are saved, plots can be regenerated.")

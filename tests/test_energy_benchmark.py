@@ -4,7 +4,10 @@ import logging
 import pandas as pd
 import pytest
 
-from beep.workflows.energy_benchmark import get_cc_keywords, log_mae_per_geometry
+from beep.workflows.energy_benchmark import (
+    get_cc_keywords, log_mae_per_geometry,
+    get_scf_state_keywords, cbs_spec_name, scf_state_jumps,
+)
 
 
 def _capture_logger():
@@ -90,3 +93,71 @@ def test_get_cc_keywords_open_shell_has_iteration_cap():
     kw1 = get_cc_keywords(1)
     assert "cc_maxiter" not in kw1
     assert "reference" not in kw1
+
+
+# --- open-shell state control across the CBS basis series ----------------
+
+_CBS = [
+    "scf_aug-cc-pvdz", "scf_aug-cc-pvtz", "scf_aug-cc-pvqz",
+    "mp2_aug-cc-pvqz", "ccsd(t)_aug-cc-pvdz", "ccsd(t)_aug-cc-pvtz",
+]
+
+
+def test_scf_state_keywords_open_shell_projects_smallest_basis():
+    """Every basis above the smallest starts from the projected smallest-basis
+    solution; all bases follow UHF instabilities."""
+    kw_d = get_scf_state_keywords(2, "aug-cc-pvdz", _CBS)
+    kw_t = get_scf_state_keywords(2, "aug-cc-pvtz", _CBS)
+    kw_q = get_scf_state_keywords(2, "aug-cc-pvqz", _CBS)
+    for kw in (kw_d, kw_t, kw_q):
+        assert kw["reference"] == "uhf"
+        assert kw["stability_analysis"] == "follow"
+    assert "basis_guess" not in kw_d
+    assert kw_t["basis_guess"] == "aug-cc-pvdz"
+    assert kw_q["basis_guess"] == "aug-cc-pvdz"
+
+
+def test_scf_state_keywords_tight_d_family():
+    cbs = [lot.replace("pv", "pv(").replace("z", "+d)z") for lot in _CBS]
+    kw = get_scf_state_keywords(2, "aug-cc-pv(t+d)z", cbs)
+    assert kw["basis_guess"] == "aug-cc-pv(d+d)z"
+
+
+def test_scf_state_keywords_closed_shell_unchanged():
+    assert get_scf_state_keywords(1, "aug-cc-pvtz", _CBS) == {}
+
+
+def test_cbs_spec_name_closed_shell_unchanged_open_shell_suffixed():
+    assert cbs_spec_name("scf", "aug-cc-pVTZ") == "scf_aug-cc-pvtz"
+    assert cbs_spec_name("ccsd(t)", "aug-cc-pVTZ") == "ccsd(t)_aug-cc-pvtz_df"
+    assert cbs_spec_name("scf", "aug-cc-pVTZ", 2) == "scf_aug-cc-pvtz_stab"
+    assert cbs_spec_name("mp2", "aug-cc-pVQZ", 2) == "mp2_aug-cc-pvqz_df_stab"
+
+
+def _scf_tables(ie_scf, be_scf):
+    idx = ["aug-cc-pvdz", "aug-cc-pvtz", "aug-cc-pvqz", "CBS"]
+    return {
+        "IE": pd.DataFrame({"SCF": ie_scf + [0.0]}, index=idx),
+        "BE": pd.DataFrame({"SCF": be_scf + [0.0]}, index=idx),
+    }
+
+
+def test_scf_state_jumps_flags_oh_w3_0005():
+    """OH_W3_01_0005: aVDZ UHF in a different state than aVTZ/aVQZ."""
+    jumps = scf_state_jumps(_scf_tables([-2.50, -0.01, 0.01], [-2.0, 0.4, 0.5]))
+    assert len(jumps) == 2
+    assert jumps[0].startswith("IE aug-cc-pvdz->aug-cc-pvtz")
+    assert jumps[1].startswith("BE aug-cc-pvdz->aug-cc-pvtz")
+
+
+def test_scf_state_jumps_flags_last_basis():
+    """CH3O_W2_01_0007: aVQZ in a different state."""
+    jumps = scf_state_jumps(_scf_tables([-4.76, -4.28, 1.72], [-4.0, -3.6, -3.4]))
+    assert jumps == ["IE aug-cc-pvtz->aug-cc-pvqz (-4.28 -> +1.72)"]
+
+
+def test_scf_state_jumps_smooth_passes():
+    assert scf_state_jumps(_scf_tables([-3.10, -2.85, -2.78], [-2.6, -2.3, -2.2])) == []
+    # Threshold is respected
+    assert scf_state_jumps(_scf_tables([-3.10, -2.85, -2.78], [-2.6, -2.3, -2.2]),
+                           threshold=0.2) != []
