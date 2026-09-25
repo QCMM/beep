@@ -103,7 +103,7 @@ def run(config: BeAssemblePeriodicConfig, client: FractalClient) -> None:
     logger.info(f"  spec lookup: electronic='{elec_spec}', dispersion='{disp_spec}'")
 
     # --- Gas-phase adsorbate energy (once) ---
-    gas_dset_name = f"{smol_name}_gas_be_sp"
+    gas_dset_name = f"{smol_name}_gas_be_sp{config.dataset_suffix}"
     try:
         ds_gas = qcf.get_collection(client, "singlepoint", gas_dset_name)
     except Exception as e:
@@ -127,8 +127,8 @@ def run(config: BeAssemblePeriodicConfig, client: FractalClient) -> None:
         logger.info(f"  Slab: {slab_name}")
         logger.info("=" * 80)
 
-        complex_dset_name = f"{smol_name}_{slab_name}_be_sp{config.sp_dataset_suffix}"
-        surface_dset_name = f"{smol_name}_{slab_name}_surface_be_sp{config.sp_dataset_suffix}"
+        complex_dset_name = f"{smol_name}_{slab_name}{config.dataset_suffix}_be_sp{config.sp_dataset_suffix}"
+        surface_dset_name = f"{smol_name}_{slab_name}{config.dataset_suffix}_surface_be_sp{config.sp_dataset_suffix}"
         try:
             ds_complex = qcf.get_collection(client, "singlepoint", complex_dset_name)
             ds_surface = qcf.get_collection(client, "singlepoint", surface_dset_name)

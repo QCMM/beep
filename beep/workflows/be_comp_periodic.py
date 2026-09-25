@@ -24,6 +24,7 @@ from typing import List, Tuple
 
 from qcportal import PortalClient as FractalClient
 
+from ..core.entry_guard import guard_reused_entries
 from ..models.be_comp_periodic import BeCompPeriodicConfig
 from ..models.base import safe_config_dump
 from ..core.logging_utils import beep_banner
@@ -53,6 +54,7 @@ def config_summary_msg(config: BeCompPeriodicConfig) -> str:
         f"  Slabs:                {len(config.surface_clusters)}  ({', '.join(config.surface_clusters)})",
         f"  BE electronic LOT:    {config.be_electronic_lot.display}",
         f"  BE dispersion:        {config.be_dispersion}",
+        f"  Datasets:             <mol>_<slab>{config.dataset_suffix} (+ _surface, _be_sp)",
         f"  PBC (slab SPs):       {config.pbc}",
         f"  Cell (slab SPs):      {cell_source}",
         f"  Compute tag:          {config.be_tag}",
@@ -176,12 +178,13 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             f"  {smol_name} not optimized at {elec_lot.display}; using initial geometry"
         )
 
-    ds_gas = qcf.get_or_create_singlepoint_dataset(client, f"{smol_name}_gas_be_sp")
+    ds_gas = qcf.get_or_create_singlepoint_dataset(client, f"{smol_name}_gas_be_sp{config.dataset_suffix}")
     gas_specs, _, _ = _build_be_specs(
         ds_gas, elec_lot, config.be_dispersion,
         keywords_periodic={}, keywords_gas={}, logger=logger, periodic=False,
     )
     existing_gas = set(ds_gas.entry_names)
+    guard_reused_entries(ds_gas, [(smol_name, adsorbate)], optimization=False)
     if smol_name not in existing_gas:
         qcf.add_singlepoint_entries(ds_gas, [(smol_name, adsorbate)])
     gas_pids = _submit_and_collect(
@@ -196,7 +199,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
         logger.info(f"  Slab {c+1}/{len(config.surface_clusters)}: {slab_name}")
         logger.info("=" * 80)
 
-        complex_dset_name = f"{smol_name}_{slab_name}"
+        complex_dset_name = f"{smol_name}_{slab_name}{config.dataset_suffix}"
         surface_dset_name = f"{complex_dset_name}_surface"
         try:
             ds_complex = qcf.get_collection(client, "OptimizationDataset", complex_dset_name)
@@ -266,6 +269,8 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             logger=logger, periodic=True,
         )
         existing = set(ds_complex_sp.entry_names)
+        guard_reused_entries(ds_complex_sp, [(n, complex_final_map[n]) for n in complete_common],
+                             optimization=False, cell_ang=cell_ang, pbc=config.pbc)
         new_entries = [
             (n, complex_final_map[n]) for n in complete_common if n not in existing
         ]
@@ -287,6 +292,8 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             logger=logger, periodic=True,
         )
         existing = set(ds_surface_sp.entry_names)
+        guard_reused_entries(ds_surface_sp, [(n, surface_final_map[n]) for n in complete_common],
+                             optimization=False, cell_ang=cell_ang, pbc=config.pbc)
         new_entries = [
             (n, surface_final_map[n]) for n in complete_common if n not in existing
         ]

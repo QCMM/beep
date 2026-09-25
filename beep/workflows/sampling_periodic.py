@@ -18,6 +18,7 @@ from pathlib import Path
 
 from qcportal import PortalClient as FractalClient
 
+from ..core.entry_guard import guard_reused_entries
 from ..models.sampling_periodic import SamplingPeriodicConfig
 from ..models.base import safe_config_dump
 from ..core.logging_utils import beep_banner
@@ -70,6 +71,8 @@ def config_summary_msg(config: SamplingPeriodicConfig) -> str:
         f"  Cavity z-scan:        step {config.cavity_z_scan_step_ang} A, window ±{config.cavity_z_scan_window_ang} A",
         f"  RMSD threshold:       {config.rmsd_value} A",
         f"  Freeze:               {freeze_desc}",
+        f"  Datasets:             <mol>_<slab>{config.dataset_suffix} (+ _surface)",
+        f"  Resume from existing: {'yes (stored entries define the run)' if config.resume_from_existing else 'no'}",
         f"  Bare-surface refs:    {'yes' if config.bare_surface_references else 'no (skipped)'}",
         f"  Random seed:          {config.random_seed}",
         separator,
@@ -222,7 +225,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
         )
 
         # Build the OptimizationDataset for this slab's sampling run
-        opt_dset_name = f"{smol_name}_{slab_name}"
+        opt_dset_name = f"{smol_name}_{slab_name}{config.dataset_suffix}"
         ds_opt = qcf.get_or_create_opt_dataset(client, opt_dset_name)
 
         # Choose freeze list (surface atoms only, indexed 0..N_surface-1)
@@ -274,16 +277,29 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
         # Add entries + submit
         added_names = []
         existing_names = set(ds_opt.entry_names)
-        for name, mol in candidates:
-            entry_name = f"{slab_name}_{name}"
-            if entry_name in existing_names:
-                added_names.append(entry_name)
-                continue
-            try:
-                qcf.add_opt_entry(ds_opt, entry_name, mol)
-                added_names.append(entry_name)
-            except KeyError as e:
-                logger.info(f"  {e}")
+        stored = sorted(n for n in existing_names if n.startswith(f"{slab_name}_"))
+        if config.resume_from_existing and stored:
+            # The stored entries define this run (candidates above are generated only to
+            # keep the random stream identical for the following slabs): finish or extend
+            # it, e.g. add bare-surface references, whatever the current generator yields.
+            added_names = stored
+            logger.info(
+                f"  resume_from_existing: using the {len(stored)} stored entries of "
+                f"{opt_dset_name}; generated candidates are not added"
+            )
+        else:
+            guard_reused_entries(ds_opt, [(f"{slab_name}_{n}", m) for n, m in candidates],
+                                 optimization=True, cell_ang=cell_ang, pbc=config.pbc)
+            for name, mol in candidates:
+                entry_name = f"{slab_name}_{name}"
+                if entry_name in existing_names:
+                    added_names.append(entry_name)
+                    continue
+                try:
+                    qcf.add_opt_entry(ds_opt, entry_name, mol)
+                    added_names.append(entry_name)
+                except KeyError as e:
+                    logger.info(f"  {e}")
 
         if added_names:
             comp_rec = qcf.submit_optimizations(
@@ -357,11 +373,14 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
 
             surface_added = []
             existing_surface = set(ds_surface.entry_names)
+            bare_by_name = {n: strip_adsorbate(m, n_surface_atoms) for n, m in unique}
+            guard_reused_entries(ds_surface, bare_by_name.items(), optimization=True,
+                                 cell_ang=cell_ang, pbc=config.pbc)
             for entry_name, complex_mol in unique:
                 if entry_name in existing_surface:
                     surface_added.append(entry_name)
                     continue
-                bare = strip_adsorbate(complex_mol, n_surface_atoms)
+                bare = bare_by_name[entry_name]
                 try:
                     qcf.add_opt_entry(ds_surface, entry_name, bare)
                     surface_added.append(entry_name)
