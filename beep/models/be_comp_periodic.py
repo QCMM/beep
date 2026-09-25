@@ -47,6 +47,15 @@ class BeCompPeriodicConfig(BaseModel):
             "model, the BE from the electronic model plus explicit dispersion."
         ),
     )
+    dataset_suffix: str = Field(
+        "",
+        description=(
+            "Suffix of the sampling run to evaluate ('<mol>_<slab><suffix>' and its "
+            "'_surface'); the BE single points go to '<mol>_<slab><suffix>_be_sp', "
+            "'<mol>_<slab><suffix>_surface_be_sp' and '<mol>_gas_be_sp<suffix>'. "
+            "Default '' keeps the historical names."
+        ),
+    )
     sp_dataset_suffix: str = Field(
         "",
         description=(

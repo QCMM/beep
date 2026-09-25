@@ -48,6 +48,13 @@ class BeAssemblePeriodicConfig(BaseModel):
     )
 
     # Output
+    dataset_suffix: str = Field(
+        "",
+        description=(
+            "Suffix of the evaluated sampling run, as passed to be_comp_periodic. "
+            "Default '' keeps the historical names."
+        ),
+    )
     sp_dataset_suffix: str = Field(
         "",
         description=(

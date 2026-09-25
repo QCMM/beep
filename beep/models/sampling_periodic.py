@@ -156,17 +156,39 @@ class SamplingPeriodicConfig(BaseModel):
     store_initial_structures: bool = Field(
         False, description="Write pre-optimization xyz files under data/site_finder/ for debugging"
     )
+    dataset_suffix: str = Field(
+        "",
+        description=(
+            "Suffix of this sampling run's datasets: complexes in '<mol>_<slab><suffix>', "
+            "bare-surface references in '<mol>_<slab><suffix>_surface'. Entries are keyed by "
+            "site name and keep the geometry of the run that created them, so every run with "
+            "different geometries (another seed or grid, another sampling model) needs its own "
+            "suffix (e.g. '_v1'). Reusing an entry with a different geometry raises. "
+            "Default '' keeps the historical names."
+        ),
+    )
+    resume_from_existing: bool = Field(
+        False,
+        description=(
+            "Treat the entries already stored in '<mol>_<slab><suffix>' as the run: optimize "
+            "any that are missing, then continue (unique-site filter, bare-surface references) "
+            "without adding newly generated candidates. Use it to finish or extend a run, e.g. "
+            "add bare-surface references later, when the candidate generator of the current "
+            "BEEP version no longer reproduces the stored placements. Slabs without stored "
+            "entries are sampled normally."
+        ),
+    )
     bare_surface_references: bool = Field(
         True,
         description=(
             "Optimize one bare-surface reference per unique site (the adsorbate "
-            "stripped from the relaxed complex) into '<mol>_<slab>_surface'. "
+            "stripped from the relaxed complex) into '<mol>_<slab><suffix>_surface'. "
             "They are needed only for binding energies: an active-learning round "
             "that consumes the sampling trajectories can set this to false and "
             "skip roughly half of the optimizations. be_comp_periodic processes "
             "only sites present in both datasets, so the references can be added "
-            "later by re-running sampling with the flag back on (sampling is "
-            "deterministic under random_seed and reuses existing entries)."
+            "later by re-running sampling with the flag back on and "
+            "resume_from_existing = true."
         ),
     )
 
