@@ -4,9 +4,10 @@ import logging
 import pandas as pd
 import pytest
 
+from types import SimpleNamespace
+
 from beep.workflows.energy_benchmark import (
-    get_cc_keywords, log_mae_per_geometry,
-    get_scf_state_keywords, cbs_spec_name, scf_state_jumps,
+    get_cc_keywords, log_mae_per_geometry, scf_state_jumps, check_scf_states,
 )
 
 
@@ -95,69 +96,56 @@ def test_get_cc_keywords_open_shell_has_iteration_cap():
     assert "reference" not in kw1
 
 
-# --- open-shell state control across the CBS basis series ----------------
+# --- open-shell SCF state check -------------------------------------------
 
-_CBS = [
-    "scf_aug-cc-pvdz", "scf_aug-cc-pvtz", "scf_aug-cc-pvqz",
-    "mp2_aug-cc-pvqz", "ccsd(t)_aug-cc-pvdz", "ccsd(t)_aug-cc-pvtz",
-]
-
-
-def test_scf_state_keywords_open_shell_projects_smallest_basis():
-    """Every basis above the smallest starts from the projected smallest-basis
-    solution; all bases follow UHF instabilities."""
-    kw_d = get_scf_state_keywords(2, "aug-cc-pvdz", _CBS)
-    kw_t = get_scf_state_keywords(2, "aug-cc-pvtz", _CBS)
-    kw_q = get_scf_state_keywords(2, "aug-cc-pvqz", _CBS)
-    for kw in (kw_d, kw_t, kw_q):
-        assert kw["reference"] == "uhf"
-        assert kw["stability_analysis"] == "follow"
-    assert "basis_guess" not in kw_d
-    assert kw_t["basis_guess"] == "aug-cc-pvdz"
-    assert kw_q["basis_guess"] == "aug-cc-pvdz"
-
-
-def test_scf_state_keywords_tight_d_family():
-    cbs = [lot.replace("pv", "pv(").replace("z", "+d)z") for lot in _CBS]
-    kw = get_scf_state_keywords(2, "aug-cc-pv(t+d)z", cbs)
-    assert kw["basis_guess"] == "aug-cc-pv(d+d)z"
-
-
-def test_scf_state_keywords_closed_shell_unchanged():
-    assert get_scf_state_keywords(1, "aug-cc-pvtz", _CBS) == {}
-
-
-def test_cbs_spec_name_closed_shell_unchanged_open_shell_suffixed():
-    assert cbs_spec_name("scf", "aug-cc-pVTZ") == "scf_aug-cc-pvtz"
-    assert cbs_spec_name("ccsd(t)", "aug-cc-pVTZ") == "ccsd(t)_aug-cc-pvtz_df"
-    assert cbs_spec_name("scf", "aug-cc-pVTZ", 2) == "scf_aug-cc-pvtz_stab"
-    assert cbs_spec_name("mp2", "aug-cc-pVQZ", 2) == "mp2_aug-cc-pvqz_df_stab"
-
-
-def _scf_tables(ie_scf, be_scf):
-    idx = ["aug-cc-pvdz", "aug-cc-pvtz", "aug-cc-pvqz", "CBS"]
-    return {
-        "IE": pd.DataFrame({"SCF": ie_scf + [0.0]}, index=idx),
-        "BE": pd.DataFrame({"SCF": be_scf + [0.0]}, index=idx),
-    }
-
-
-def test_scf_state_jumps_flags_oh_w3_0005():
-    """OH_W3_01_0005: aVDZ UHF in a different state than aVTZ/aVQZ."""
-    jumps = scf_state_jumps(_scf_tables([-2.50, -0.01, 0.01], [-2.0, 0.4, 0.5]))
-    assert len(jumps) == 2
-    assert jumps[0].startswith("IE aug-cc-pvdz->aug-cc-pvtz")
-    assert jumps[1].startswith("BE aug-cc-pvdz->aug-cc-pvtz")
-
-
-def test_scf_state_jumps_flags_last_basis():
-    """CH3O_W2_01_0007: aVQZ in a different state."""
-    jumps = scf_state_jumps(_scf_tables([-4.76, -4.28, 1.72], [-4.0, -3.6, -3.4]))
-    assert jumps == ["IE aug-cc-pvtz->aug-cc-pvqz (-4.28 -> +1.72)"]
+_H2K = 627.5094740631
+_BASES = ["aug-cc-pvdz", "aug-cc-pvtz", "aug-cc-pvqz"]
+_SCF_LOTS = [f"scf_{b}" for b in _BASES]
 
 
 def test_scf_state_jumps_smooth_passes():
-    assert scf_state_jumps(_scf_tables([-3.10, -2.85, -2.78], [-2.6, -2.3, -2.2])) == []
-    # Threshold is respected
-    assert scf_state_jumps(_scf_tables([-3.10, -2.85, -2.78], [-2.6, -2.3, -2.2]),
-                           threshold=0.2) != []
+    ie = dict(zip(_BASES, [-3.10, -2.85, -2.78]))
+    be = dict(zip(_BASES, [-2.60, -2.30, -2.20]))
+    assert scf_state_jumps(ie, be) == []
+    assert scf_state_jumps(ie, be, threshold=0.2) != []
+
+
+def test_scf_state_jumps_oh_w3_0005():
+    """OH_W3_01_0005: aVTZ/aVQZ complex in a different state than aVDZ."""
+    ie = dict(zip(_BASES, [-2.50, -0.01, 0.01]))
+    be = dict(zip(_BASES, [-2.00, 0.40, 0.50]))
+    jumps = scf_state_jumps(ie, be)
+    assert len(jumps) == 2
+    assert jumps[0].startswith("IE aug-cc-pvdz->aug-cc-pvtz")
+
+
+class _FakeDS:
+    def __init__(self, energies):
+        self.energies = energies
+
+    def get_record(self, entry, spec):
+        e = self.energies.get((entry, spec))
+        return None if e is None else SimpleNamespace(return_result=e)
+
+
+def _site(struct, ie_scf):
+    """SCF records of one site with the given IE ladder (BE follows the IE)."""
+    mol, surf = struct.split("_")[0], "_".join(struct.split("_")[1:3])
+    out = {}
+    for b, ie in zip(_BASES, ie_scf):
+        f1, f2 = -100.0, -50.0
+        cx = f1 + f2 + ie / _H2K
+        for ent, e in [(struct, cx), (struct + "_f1", f1), (struct + "_f2", f2),
+                       (mol, f2), (surf, f1)]:
+            out[(ent, f"scf_{b}")] = e
+    return out
+
+
+def test_check_scf_states_passes_and_fails():
+    ok = _site("OH_W3_01_0002", [-3.10, -2.85, -2.78])
+    check_scf_states(_FakeDS(ok), ["OH_W3_01_0002"], _SCF_LOTS)
+
+    bad = dict(ok)
+    bad.update(_site("OH_W3_01_0005", [-2.50, -0.01, 0.01]))
+    with pytest.raises(RuntimeError, match="OH_W3_01_0005"):
+        check_scf_states(_FakeDS(bad), ["OH_W3_01_0002", "OH_W3_01_0005"], _SCF_LOTS)
