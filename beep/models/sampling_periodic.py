@@ -147,7 +147,10 @@ class SamplingPeriodicConfig(BaseModel):
     # Filter
     rmsd_value: float = Field(
         0.40,
-        description="Post-optimization RMSD threshold (Angstrom) for reporting unique binding sites.",
+        description=(
+            "Duplicate-site tolerance (Angstrom). With site_filter='periodic', the adsorbate "
+            "centre-of-mass distance (minimum image); with 'rmsd', the RMSD threshold."
+        ),
     )
     rmsd_symmetry: bool = Field(False, description="Account for molecular symmetry in RMSD comparison")
 

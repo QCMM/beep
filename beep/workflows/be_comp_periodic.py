@@ -7,6 +7,10 @@ SP specs on:
 
 Once (across all runs), on:
 - ``<smol>_gas_be_sp``               (gas-phase adsorbate, non-periodic)
+With ``quantity`` 'ie' or 'all', also the fragments frozen at the complex geometry:
+- ``<smol>_<slab>_ie_slab_sp``       (slab with the adsorbate removed, periodic)
+- ``<smol>_<slab>_ie_ads_sp``        (adsorbate alone, non-periodic)
+'ie' needs no bare-surface dataset and skips the gas-phase reference.
 
 Submits everything, waits for completion. Assembly happens in
 ``be_assemble_periodic``.
@@ -16,7 +20,12 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from beep.core.periodic_sampler import pad_nonperiodic_axes
+from beep.core.periodic_sampler import (
+    adsorbate_fragment,
+    filter_periodic_sites,
+    pad_nonperiodic_axes,
+    strip_adsorbate,
+)
 
 BOHR2ANG = 0.529177210903
 from pathlib import Path
@@ -54,6 +63,8 @@ def config_summary_msg(config: BeCompPeriodicConfig) -> str:
         f"  Slabs:                {len(config.surface_clusters)}  ({', '.join(config.surface_clusters)})",
         f"  BE electronic LOT:    {config.be_electronic_lot.display}",
         f"  BE dispersion:        {config.be_dispersion}",
+        f"  Quantity:             {config.quantity}"
+        + (f" (sites: {config.ie_site_filter})" if config.quantity == "ie" else ""),
         f"  Datasets:             <mol>_<slab>{config.dataset_suffix} (+ _surface, _be_sp)",
         f"  PBC (slab SPs):       {config.pbc}",
         f"  Cell (slab SPs):      {cell_source}",
@@ -178,22 +189,23 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             f"  {smol_name} not optimized at {elec_lot.display}; using initial geometry"
         )
 
-    ds_gas = qcf.get_or_create_singlepoint_dataset(client, f"{smol_name}_gas_be_sp{config.dataset_suffix}")
-    gas_specs, _, _ = _build_be_specs(
-        ds_gas, elec_lot, config.be_dispersion,
-        keywords_periodic={}, keywords_gas={}, logger=logger, periodic=False,
-    )
-    existing_gas = set(ds_gas.entry_names)
-    guard_reused_entries(ds_gas, [(smol_name, adsorbate)], optimization=False)
-    if smol_name not in existing_gas:
-        qcf.add_singlepoint_entries(ds_gas, [(smol_name, adsorbate)])
-    gas_pids = _submit_and_collect(
-        ds_gas, gas_specs, subset=[smol_name], tag=config.be_tag, logger=logger,
-    )
+    all_pids: List[int] = []
+    if config.quantity in ("be", "all"):
+        ds_gas = qcf.get_or_create_singlepoint_dataset(client, f"{smol_name}_gas_be_sp{config.dataset_suffix}")
+        gas_specs, _, _ = _build_be_specs(
+            ds_gas, elec_lot, config.be_dispersion,
+            keywords_periodic={}, keywords_gas={}, logger=logger, periodic=False,
+        )
+        existing_gas = set(ds_gas.entry_names)
+        guard_reused_entries(ds_gas, [(smol_name, adsorbate)], optimization=False)
+        if smol_name not in existing_gas:
+            qcf.add_singlepoint_entries(ds_gas, [(smol_name, adsorbate)])
+        all_pids.extend(_submit_and_collect(
+            ds_gas, gas_specs, subset=[smol_name], tag=config.be_tag, logger=logger,
+        ))
+    n_ads = len(adsorbate.symbols)
 
-    # --- Per-slab BE SPs on complex + bare-surface geometries ---
-    all_pids: List[int] = list(gas_pids)
-
+    # --- Per-slab SPs: complexes, bare surfaces (be/all), frozen fragments (ie/all) ---
     for c, slab_name in enumerate(config.surface_clusters):
         logger.info("\n" + "=" * 80)
         logger.info(f"  Slab {c+1}/{len(config.surface_clusters)}: {slab_name}")
@@ -201,41 +213,54 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
 
         complex_dset_name = f"{smol_name}_{slab_name}{config.dataset_suffix}"
         surface_dset_name = f"{complex_dset_name}_surface"
+        want_be = config.quantity in ("be", "all")
         try:
             ds_complex = qcf.get_collection(client, "OptimizationDataset", complex_dset_name)
-            ds_surface = qcf.get_collection(client, "OptimizationDataset", surface_dset_name)
+            ds_surface = (qcf.get_collection(client, "OptimizationDataset", surface_dset_name)
+                          if want_be else None)
         except Exception as e:
             logger.info(f"  skip {slab_name}: {e}")
             continue
 
-        # Only work on entries that exist in BOTH datasets (bare exists only
-        # for RMSD-unique confirmed sites from sampling_periodic).
-        complex_entries = set(ds_complex.entry_names)
-        surface_entries = set(ds_surface.entry_names)
-        common = sorted(complex_entries & surface_entries)
-        if not common:
-            logger.info(f"  no entries common to {complex_dset_name} and {surface_dset_name}; skip")
-            continue
+        if want_be:
+            # Only work on entries that exist in BOTH datasets (bare exists only
+            # for RMSD-unique confirmed sites from sampling_periodic).
+            complex_entries = set(ds_complex.entry_names)
+            surface_entries = set(ds_surface.entry_names)
+            common = sorted(complex_entries & surface_entries)
+            if not common:
+                logger.info(f"  no entries common to {complex_dset_name} and {surface_dset_name}; skip")
+                continue
 
-        # Pull the final optimized molecules for each; use surface.extras for cell fallback
-        # (any complete surface record works — they all sit on the same slab).
-        surface_final = qcf.fetch_opt_molecules(
-            ds_surface, common, opt_lot, status="COMPLETE",
-        )
-        complex_final = qcf.fetch_opt_molecules(
-            ds_complex, common, opt_lot, status="COMPLETE",
-        )
-        surface_final_map = dict(surface_final)
-        complex_final_map = dict(complex_final)
-        complete_common = [n for n in common if n in surface_final_map and n in complex_final_map]
+            # Pull the final optimized molecules for each; use surface.extras for cell fallback
+            # (any complete surface record works — they all sit on the same slab).
+            surface_final = qcf.fetch_opt_molecules(
+                ds_surface, common, opt_lot, status="COMPLETE",
+            )
+            complex_final = qcf.fetch_opt_molecules(
+                ds_complex, common, opt_lot, status="COMPLETE",
+            )
+            surface_final_map = dict(surface_final)
+            complex_final_map = dict(complex_final)
+            complete_common = [n for n in common if n in surface_final_map and n in complex_final_map]
 
-        if not complete_common:
-            logger.info(f"  no COMPLETE sites common to both datasets; skip {slab_name}")
-            continue
+            if not complete_common:
+                logger.info(f"  no COMPLETE sites common to both datasets; skip {slab_name}")
+                continue
+        else:
+            # quantity='ie': no bare-surface dataset; the sites are the complete complexes,
+            # optionally deduplicated with the same periodic filter sampling_periodic uses.
+            names = sorted(ds_complex.entry_names)
+            complex_final_map = dict(qcf.fetch_opt_molecules(ds_complex, names, opt_lot, status="COMPLETE"))
+            complete_common = sorted(complex_final_map)
+            if not complete_common:
+                logger.info(f"  no COMPLETE complexes in {complex_dset_name}; skip {slab_name}")
+                continue
 
         # Cell: config-level or from any slab record's extras
-        sample_mol = surface_final_map[complete_common[0]]
-        record_cell, _ = qcf.fetch_opt_cell(ds_surface, complete_common[0], opt_lot)
+        cell_source = ds_surface if want_be else ds_complex
+        sample_mol = (surface_final_map if want_be else complex_final_map)[complete_common[0]]
+        record_cell, _ = qcf.fetch_opt_cell(cell_source, complete_common[0], opt_lot)
         cell_ang = _resolve_cell(config, sample_mol.extras, record_cell)
         # Pad non-periodic axes. The cell recorded by sampling_periodic can be
         # thinner than the slab (X x X x X/2 against an 18 A slab), and the
@@ -255,9 +280,22 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             f"  cell for SPs (non-periodic axes padded): "
             f"{[round(float(cell_ang[i][i]), 2) for i in range(3)]} Angstrom"
         )
-        logger.info(
-            f"  {len(complete_common)}/{len(common)} sites COMPLETE in both datasets"
-        )
+        if want_be:
+            logger.info(
+                f"  {len(complete_common)}/{len(common)} sites COMPLETE in both datasets"
+            )
+        elif config.ie_site_filter == "unique":
+            energies = qcf.fetch_opt_energies(ds_complex, complete_common, opt_lot)
+            unique = filter_periodic_sites(
+                [(n, complex_final_map[n]) for n in complete_common], cell_ang, config.pbc,
+                n_adsorbate_atoms=n_ads, com_tol_ang=config.com_tol_ang,
+                orient_tol_ang=config.orientation_tol_ang, energies=energies, logger=logger,
+            )
+            n_before = len(complete_common)
+            complete_common = sorted(name for name, _ in unique)
+            logger.info(f"  IE sites: {len(complete_common)} unique of {n_before} complete complexes")
+        else:
+            logger.info(f"  IE sites: all {len(complete_common)} complete complexes")
 
         # Register + submit on complex SP dataset
         ds_complex_sp = qcf.get_or_create_singlepoint_dataset(
@@ -282,32 +320,70 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
         )
         all_pids.extend(pids_c)
 
-        # Register + submit on bare-surface SP dataset
-        ds_surface_sp = qcf.get_or_create_singlepoint_dataset(
-            client, f"{surface_dset_name}_be_sp{config.sp_dataset_suffix}",
-        )
-        specs_surface, _, _ = _build_be_specs(
-            ds_surface_sp, elec_lot, config.be_dispersion,
-            keywords_periodic=keywords_periodic, keywords_gas={},
-            logger=logger, periodic=True,
-        )
-        existing = set(ds_surface_sp.entry_names)
-        guard_reused_entries(ds_surface_sp, [(n, surface_final_map[n]) for n in complete_common],
-                             optimization=False, cell_ang=cell_ang, pbc=config.pbc)
-        new_entries = [
-            (n, surface_final_map[n]) for n in complete_common if n not in existing
-        ]
-        if new_entries:
-            qcf.add_singlepoint_entries(ds_surface_sp, new_entries)
-        pids_s = _submit_and_collect(
-            ds_surface_sp, specs_surface, subset=complete_common,
-            tag=config.be_tag, logger=logger,
-        )
-        all_pids.extend(pids_s)
+        pids_s: List[int] = []
+        if want_be:
+            # Register + submit on bare-surface SP dataset
+            ds_surface_sp = qcf.get_or_create_singlepoint_dataset(
+                client, f"{surface_dset_name}_be_sp{config.sp_dataset_suffix}",
+            )
+            specs_surface, _, _ = _build_be_specs(
+                ds_surface_sp, elec_lot, config.be_dispersion,
+                keywords_periodic=keywords_periodic, keywords_gas={},
+                logger=logger, periodic=True,
+            )
+            existing = set(ds_surface_sp.entry_names)
+            guard_reused_entries(ds_surface_sp, [(n, surface_final_map[n]) for n in complete_common],
+                                 optimization=False, cell_ang=cell_ang, pbc=config.pbc)
+            new_entries = [
+                (n, surface_final_map[n]) for n in complete_common if n not in existing
+            ]
+            if new_entries:
+                qcf.add_singlepoint_entries(ds_surface_sp, new_entries)
+            pids_s = _submit_and_collect(
+                ds_surface_sp, specs_surface, subset=complete_common,
+                tag=config.be_tag, logger=logger,
+            )
+            all_pids.extend(pids_s)
+
+        pids_ie: List[int] = []
+        if config.quantity in ("ie", "all"):
+            # Frozen fragments at the complex geometry: the slab keeps the periodic cell,
+            # the adsorbate is isolated (non-periodic), as the gas-phase reference.
+            n_slab = len(complex_final_map[complete_common[0]].symbols) - n_ads
+            slab_frozen = {n: strip_adsorbate(complex_final_map[n], n_slab) for n in complete_common}
+            ads_frozen = {
+                n: adsorbate_fragment(
+                    complex_final_map[n], n_slab, cell_ang, config.pbc,
+                    molecular_charge=adsorbate.molecular_charge,
+                    molecular_multiplicity=adsorbate.molecular_multiplicity,
+                )
+                for n in complete_common
+            }
+            for suffix, frags, periodic in (("_ie_slab_sp", slab_frozen, True),
+                                            ("_ie_ads_sp", ads_frozen, False)):
+                ds_frag = qcf.get_or_create_singlepoint_dataset(
+                    client, f"{complex_dset_name}{suffix}{config.sp_dataset_suffix}",
+                )
+                specs_frag, _, _ = _build_be_specs(
+                    ds_frag, elec_lot, config.be_dispersion,
+                    keywords_periodic=keywords_periodic, keywords_gas={},
+                    logger=logger, periodic=periodic,
+                )
+                guard_reused_entries(ds_frag, list(frags.items()), optimization=False,
+                                     cell_ang=cell_ang if periodic else None,
+                                     pbc=config.pbc if periodic else None)
+                existing = set(ds_frag.entry_names)
+                new_entries = [(n, m) for n, m in frags.items() if n not in existing]
+                if new_entries:
+                    qcf.add_singlepoint_entries(ds_frag, new_entries)
+                pids_ie += _submit_and_collect(
+                    ds_frag, specs_frag, subset=complete_common, tag=config.be_tag, logger=logger,
+                )
+            all_pids.extend(pids_ie)
 
         logger.info(
-            f"  {bcheck} slab {slab_name}: submitted {len(pids_c) + len(pids_s)} SPs "
-            f"({len(complete_common)} sites x 2 specs x 2 datasets)"
+            f"  {bcheck} slab {slab_name}: submitted {len(pids_c) + len(pids_s) + len(pids_ie)} SPs "
+            f"({len(complete_common)} sites, quantity={config.quantity})"
         )
 
     # --- Wait for the whole set ---

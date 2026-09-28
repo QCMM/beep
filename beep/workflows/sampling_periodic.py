@@ -3,7 +3,7 @@
 Single-pass workflow (no refinement): for each slab in the surface collection,
 place adsorbate candidates on a periodic-aware xy grid, optimize each with a
 MACE MLP under periodic boundary conditions, then report per-cluster unique
-binding sites via RMSD filtering.
+binding sites via the duplicate-site filter (``site_filter``).
 
 The cell + pbc are passed to the MACE harness via the QC spec keywords (see
 QCEngine's MACE harness patch that reads keywords['cell'] / keywords['pbc']).
@@ -50,6 +50,15 @@ welcome_msg = beep_banner(
 )
 
 
+def _filter_label(config: SamplingPeriodicConfig) -> str:
+    """Name the duplicate filter and the tolerances it actually applies."""
+    if config.site_filter == "periodic":
+        orient = (f", height profile {config.orientation_tol_ang} A"
+                  if config.orientation_tol_ang is not None else "")
+        return f"periodic: adsorbate COM {config.rmsd_value} A{orient}"
+    return f"RMSD {config.rmsd_value} A"
+
+
 def config_summary_msg(config: SamplingPeriodicConfig) -> str:
     """Format a clean summary of the periodic sampling configuration."""
     separator = "-" * 88
@@ -69,7 +78,7 @@ def config_summary_msg(config: SamplingPeriodicConfig) -> str:
         f"  Sampling distance:    {config.sampling_distance_ang} A",
         f"  Sanity min distance:  {config.sanity_min_distance_ang} A  (max {config.sanity_max_iter} attempts)",
         f"  Cavity z-scan:        step {config.cavity_z_scan_step_ang} A, window ±{config.cavity_z_scan_window_ang} A",
-        f"  RMSD threshold:       {config.rmsd_value} A",
+        f"  Site filter:          {_filter_label(config)}",
         f"  Freeze:               {freeze_desc}",
         f"  Datasets:             <mol>_<slab>{config.dataset_suffix} (+ _surface)",
         f"  Resume from existing: {'yes (stored entries define the run)' if config.resume_from_existing else 'no'}",
@@ -315,7 +324,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
             logger.info(f"  Optimizing {len(pid_list)} candidates (tag='{config.sampling_tag}')")
             qcf.wait_for_completion(client, pid_list, POLL_FREQUENCY_SEC, logger)
 
-        # Pull optimized molecules + RMSD dedup
+        # Pull optimized molecules + duplicate-site filter
         opt_molecules = qcf.fetch_opt_molecules(
             ds_opt, added_names, lot.lot_name, status="COMPLETE",
         )
@@ -414,7 +423,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
 
         logger.info(
             f"\n  {bcheck} Slab {slab_name}: {n_complete} complex opts, "
-            f"{n_unique} unique (RMSD {config.rmsd_value} A), "
+            f"{n_unique} unique ({_filter_label(config)}), "
             f"{n_surface_complete} bare-surface refs"
         )
         total_candidates += n_complete

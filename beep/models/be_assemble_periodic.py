@@ -65,6 +65,17 @@ class BeAssemblePeriodicConfig(BaseModel):
             "Default '' keeps the historical names."
         ),
     )
+    quantity: Literal["be", "ie", "all"] = Field(
+        "be",
+        description=(
+            "'be': binding energies, E(complex) - E(relaxed bare surface) - E(relaxed gas "
+            "adsorbate); needs the bare-surface references of sampling_periodic. "
+            "'ie': interaction energies, E(complex) - E(slab) - E(adsorbate) with both "
+            "fragments frozen at the complex geometry; needs no bare-surface optimizations "
+            "(two single points per site), e.g. for active-learning rounds. "
+            "'all': both, which also gives the deformation energy DE = BE - IE."
+        ),
+    )
     output_prefix: str = Field(
         "be_periodic",
         description="Prefix for output CSV filenames (`<prefix>_<slab>.csv`, `<prefix>_summary.csv`).",

@@ -47,6 +47,30 @@ class BeCompPeriodicConfig(BaseModel):
             "model, the BE from the electronic model plus explicit dispersion."
         ),
     )
+    quantity: Literal["be", "ie", "all"] = Field(
+        "be",
+        description=(
+            "'be': binding energies, E(complex) - E(relaxed bare surface) - E(relaxed gas "
+            "adsorbate); needs the bare-surface references of sampling_periodic. "
+            "'ie': interaction energies, E(complex) - E(slab) - E(adsorbate) with both "
+            "fragments frozen at the complex geometry; needs no bare-surface optimizations "
+            "(two single points per site), e.g. for active-learning rounds. "
+            "'all': both, which also gives the deformation energy DE = BE - IE."
+        ),
+    )
+    ie_site_filter: Literal["unique", "all"] = Field(
+        "unique",
+        description=(
+            "Sites for quantity='ie' (no bare-surface dataset to define them): 'unique' "
+            "applies sampling_periodic's periodic duplicate filter to the complete "
+            "complexes, so IE and a later BE cover the same sites; 'all' keeps every "
+            "complete complex. With 'all' quantity the BE sites are used."
+        ),
+    )
+    com_tol_ang: float = Field(0.40, description="Periodic duplicate filter: adsorbate COM tolerance (A), "
+                                                "as sampling_periodic's rmsd_value.")
+    orientation_tol_ang: Optional[float] = Field(0.3, description="Periodic duplicate filter: height-profile "
+                                                                   "tolerance (A), as sampling_periodic.")
     dataset_suffix: str = Field(
         "",
         description=(

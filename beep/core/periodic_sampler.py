@@ -626,6 +626,51 @@ def strip_adsorbate(
     )
 
 
+def adsorbate_fragment(
+    combined_mol: Molecule,
+    n_surface_atoms: int,
+    cell_ang: Optional[Sequence[Sequence[float]]] = None,
+    pbc: Optional[Sequence[bool]] = None,
+    molecular_charge: Optional[float] = None,
+    molecular_multiplicity: Optional[int] = None,
+) -> Molecule:
+    """Return the adsorbate (atoms after ``n_surface_atoms``) of a combined slab+adsorbate,
+    frozen at the complex geometry, as an isolated molecule.
+
+    The adsorbate can straddle a periodic boundary (one atom wrapped into the next
+    image); with ``cell_ang`` and ``pbc`` it is made whole by shifting every atom to
+    the image nearest the first one, otherwise the isolated fragment would be torn
+    apart. Charge and multiplicity default to the second fragment of the complex when
+    present (``_combine`` convention), else the given values, else qcelemental's.
+    """
+    n = int(n_surface_atoms)
+    symbols = list(combined_mol.symbols[n:])
+    geometry = np.asarray(combined_mol.geometry, dtype=float).reshape(-1, 3)[n:].copy()
+    if cell_ang is not None and pbc is not None:
+        lengths = np.diag(np.asarray(cell_ang, dtype=float)) * ANG2BOHR
+        for k in range(3):
+            if pbc[k] and lengths[k] > 0:
+                geometry[:, k] -= lengths[k] * np.round((geometry[:, k] - geometry[0, k]) / lengths[k])
+    state: Dict[str, Any] = {}
+    fragments = getattr(combined_mol, "fragments", None)
+    if fragments is not None and len(fragments) >= 2 and list(fragments[0]) == list(range(n)):
+        state = {
+            "molecular_charge": float(combined_mol.fragment_charges[1]),
+            "molecular_multiplicity": int(combined_mol.fragment_multiplicities[1]),
+        }
+    if molecular_charge is not None:
+        state["molecular_charge"] = float(molecular_charge)
+    if molecular_multiplicity is not None:
+        state["molecular_multiplicity"] = int(molecular_multiplicity)
+    return qcel.models.Molecule(
+        symbols=symbols,
+        geometry=geometry.flatten(),
+        fix_com=False,
+        fix_orientation=False,
+        **state,
+    )
+
+
 def recenter_adsorbate_com(
     combined_geom: np.ndarray,
     n_surface_atoms: int,
