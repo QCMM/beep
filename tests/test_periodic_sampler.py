@@ -18,6 +18,7 @@ from beep.core.periodic_sampler import (
     build_freeze_constraints,
     build_grid,
     find_cavity_z,
+    cavity_scan_range,
     frozen_atom_indices,
     hemisphere_z_shift,
     min_image_distance,
@@ -144,6 +145,28 @@ def test_find_cavity_z_picks_best_fit():
         cell_diag_bohr=cell_diag, pbc=pbc,
     )
     assert best_z == pytest.approx(2.5)
+
+
+def test_find_cavity_z_takes_first_window_from_the_top():
+    """A gap at the bottom of the slab fits sampling_distance better than the top surface,
+    but the candidate must go to the top: the first qualifying window seen from above."""
+    cell_diag = np.array([50.0, 50.0, 50.0])
+    pbc = [True, True, False]
+    # top-layer atom 2.2 bohr off in x at z=10; bottom atom right below the probe at z=0
+    surface_geom = np.array([[7.2, 5.0, 10.0], [5.0, 5.0, 0.0]])
+    z = find_cavity_z(
+        surface_geom, x=5.0, y=5.0, z_range_bohr=(0.0, 13.0),
+        scan_step_bohr=0.5, sampling_distance_bohr=2.5, window_bohr=1.0,
+        cell_diag_bohr=cell_diag, pbc=pbc,
+    )
+    assert z is not None and z > 8.0          # at the top layer, not at z=2.5 by the bottom atom
+
+
+def test_cavity_scan_range_floor():
+    g = np.array([[0.0, 0.0, -2.0], [0.0, 0.0, 30.0]])
+    assert cavity_scan_range(g, 4.7) == pytest.approx((-2.0, 34.7))
+    assert cavity_scan_range(g, 4.7, z_floor_bohr=9.45) == pytest.approx((9.45, 34.7))
+    assert cavity_scan_range(g, 4.7, z_floor_bohr=-10.0) == pytest.approx((-2.0, 34.7))
 
 
 def test_find_cavity_z_returns_none_when_no_z_qualifies():

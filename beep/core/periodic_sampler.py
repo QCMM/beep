@@ -204,12 +204,16 @@ def find_cavity_z(
     cell_diag_bohr: np.ndarray,
     pbc: Sequence[bool],
 ) -> Optional[float]:
-    """Scan z to find the best-fit height inside a cavity.
+    """Scan z top-down for the first height that sits at ``sampling_distance`` from the slab.
 
-    Returns the z (Bohr) at which the nearest-atom distance is closest to
-    ``sampling_distance`` while still within
-    ``[sampling_distance - window, sampling_distance]``, or None if no
-    z in the scan range qualifies. Scans top-down; ties broken by first hit.
+    Walks down from the top of ``z_range`` and takes the FIRST contiguous run of heights
+    whose nearest-atom distance lies in ``[sampling_distance - window, sampling_distance]``;
+    within that run, the z closest to ``sampling_distance`` (ties: the higher one). Returns
+    None if no z in the range qualifies.
+
+    Only the first run counts: that is the local surface seen from the vacuum side. Taking
+    the best fit over the whole range (as before) could pick a gap deep in the slab or at its
+    frozen underside, i.e. a candidate buried under or below the slab.
     """
     z_lo, z_hi = z_range_bohr
     z_grid = np.arange(z_lo, z_hi, scan_step_bohr)
@@ -217,16 +221,30 @@ def find_cavity_z(
     best_err = float("inf")
     lower = sampling_distance_bohr - window_bohr
     upper = sampling_distance_bohr
+    in_run = False
     for z in reversed(z_grid):
         _, d = nearest_surface_atom(
             surface_geom_bohr, np.array([x, y, z]), cell_diag_bohr, pbc
         )
         if lower <= d <= upper:
+            in_run = True
             err = abs(d - sampling_distance_bohr)
             if err < best_err:
                 best_err = err
                 best_z = float(z)
+        elif in_run:
+            break
     return best_z
+
+
+def cavity_scan_range(surface_geom_bohr: np.ndarray, sampling_distance_bohr: float,
+                      z_floor_bohr: Optional[float] = None) -> Tuple[float, float]:
+    """z range of the cavity scan: from the floor (default: the lowest slab atom) up to the
+    top of the slab plus the sampling distance. Pass the freeze height as the floor so that
+    no candidate is placed in the frozen bottom layer."""
+    z = np.asarray(surface_geom_bohr, float)[:, 2]
+    lo = float(z.min()) if z_floor_bohr is None else max(float(z.min()), float(z_floor_bohr))
+    return lo, float(z.max()) + sampling_distance_bohr
 
 
 def all_atoms_ok(
@@ -716,6 +734,7 @@ def run_periodic_sampling(
     sanity_max_iter: int,
     rng: random.Random,
     logger: Optional[logging.Logger] = None,
+    z_floor_ang: Optional[float] = None,
 ) -> Tuple[List[Tuple[str, Molecule]], Molecule]:
     """Generate one candidate per grid node over the slab's periodic footprint.
 
@@ -724,6 +743,9 @@ def run_periodic_sampling(
       grid node that produced a valid placement. Skipped nodes are logged.
     - ``debug_molecule``: a single Molecule containing the slab plus every
       accepted adsorbate copy, useful for a-glance visualisation.
+
+    ``z_floor_ang``: lowest height (A) the cavity scan may place an adsorbate at; the
+    workflow passes the freeze height, so candidates never start in the frozen layer.
     """
     logger = logger or logging.getLogger(__name__)
     cell_diag_bohr = _cell_diag_bohr(cell_ang)
@@ -741,7 +763,10 @@ def run_periodic_sampling(
     # detection has a sensible "above the surface" starting point.
     surface_geom = surface.geometry
     z_top = float(surface_geom[:, 2].max()) + sampling_distance_bohr
-    z_scan_range = (0.0, float(surface_geom[:, 2].max()) + sampling_distance_bohr)
+    z_scan_range = cavity_scan_range(
+        surface_geom, sampling_distance_bohr,
+        None if z_floor_ang is None else z_floor_ang * ANG2BOHR,
+    )
 
     candidates: List[Tuple[str, Molecule]] = []
     all_ads_coords: List[np.ndarray] = []

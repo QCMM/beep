@@ -267,6 +267,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
             sanity_max_iter=config.sanity_max_iter,
             rng=rng,
             logger=logger,
+            z_floor_ang=config.freeze_below_z_ang,
         )
 
         # Aggregate xyz (slab + every accepted adsorbate copy in its ORIGINAL
