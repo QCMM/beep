@@ -144,16 +144,24 @@ def build_grid(
     step_size_bohr: float,
     noise_frac: float,
     rng: random.Random,
+    offset: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Return (x_grid, y_grid) in Bohr covering the full [0, Lx) x [0, Ly) footprint.
 
     Interior nodes get an independent random jitter of ±noise_frac * step_size.
     Boundary nodes (0 and Lx - step) are left unperturbed so PBC wrapping of
     the two ends stays consistent.
+
+    ``offset=True`` first shifts the whole lattice by a random amount in [0, step) along x
+    and y (drawn from ``rng``), so a different seed samples genuinely different positions
+    instead of the same lattice jittered by at most noise_frac * step. The nodes stay in
+    [0, L) and in ascending order, one step apart.
     """
     Lx, Ly = cell_diag_bohr[0], cell_diag_bohr[1]
-    x_grid = np.arange(0.0, Lx, step_size_bohr, dtype=float)
-    y_grid = np.arange(0.0, Ly, step_size_bohr, dtype=float)
+    ox = rng.uniform(0.0, step_size_bohr) if offset else 0.0
+    oy = rng.uniform(0.0, step_size_bohr) if offset else 0.0
+    x_grid = np.arange(ox, Lx, step_size_bohr, dtype=float)
+    y_grid = np.arange(oy, Ly, step_size_bohr, dtype=float)
     if noise_frac > 0.0:
         span = noise_frac * step_size_bohr
         for i in range(1, len(x_grid) - 1):
@@ -735,6 +743,7 @@ def run_periodic_sampling(
     rng: random.Random,
     logger: Optional[logging.Logger] = None,
     z_floor_ang: Optional[float] = None,
+    grid_offset: bool = False,
 ) -> Tuple[List[Tuple[str, Molecule]], Molecule]:
     """Generate one candidate per grid node over the slab's periodic footprint.
 
@@ -746,6 +755,7 @@ def run_periodic_sampling(
 
     ``z_floor_ang``: lowest height (A) the cavity scan may place an adsorbate at; the
     workflow passes the freeze height, so candidates never start in the frozen layer.
+    ``grid_offset``: shift the sampling lattice by a random amount (see ``build_grid``).
     """
     logger = logger or logging.getLogger(__name__)
     cell_diag_bohr = _cell_diag_bohr(cell_ang)
@@ -756,7 +766,7 @@ def run_periodic_sampling(
     cavity_window_bohr = cavity_z_scan_window_ang * ANG2BOHR
     sanity_min_dist_bohr = sanity_min_distance_ang * ANG2BOHR
 
-    x_grid, y_grid = build_grid(cell_diag_bohr, step_size_bohr, grid_noise_frac, rng)
+    x_grid, y_grid = build_grid(cell_diag_bohr, step_size_bohr, grid_noise_frac, rng, offset=grid_offset)
 
     # z reference: top of the slab plus a bit of clearance for the initial
     # nearest-atom probe. Use the slab's max z + sampling_distance so cavity

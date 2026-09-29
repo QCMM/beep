@@ -41,6 +41,14 @@ class SamplingPeriodicConfig(BaseModel):
         0.25,
         description="Random ± jitter per interior grid node as fraction of step_size_ang. Set 0.0 to disable.",
     )
+    grid_offset: bool = Field(
+        False,
+        description=(
+            "Shift the sampling lattice by a random amount in [0, step) along x and y, drawn "
+            "from random_seed. With a new seed this samples new positions; without it, seeds "
+            "only differ by the jitter of at most grid_noise_frac * step."
+        ),
+    )
 
     # Placement
     sampling_distance_ang: float = Field(

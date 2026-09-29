@@ -111,6 +111,18 @@ def test_build_grid_reproducible_with_seed():
 # Placement primitives
 # ---------------------------------------------------------------------------
 
+def test_build_grid_offset_shifts_lattice_reproducibly():
+    cell_diag = np.array([30.0, 30.0, 60.0])
+    x0, y0 = build_grid(cell_diag, 3.0, 0.0, random.Random(7))
+    x1, y1 = build_grid(cell_diag, 3.0, 0.0, random.Random(7), offset=True)
+    x2, _ = build_grid(cell_diag, 3.0, 0.0, random.Random(7), offset=True)
+    assert np.allclose(x1, x2)                                  # reproducible with the seed
+    assert 0.0 < x1[0] < 3.0 and 0.0 < y1[0] < 3.0 and x0[0] == 0.0
+    assert np.allclose(np.diff(x1), 3.0) and x1[-1] < 30.0     # still one step apart, inside the cell
+    x3, _ = build_grid(cell_diag, 3.0, 0.0, random.Random(8), offset=True)
+    assert not np.isclose(x3[0], x1[0])                         # another seed, another lattice
+
+
 def test_hemisphere_z_shift_positive_and_none():
     d = 2.5
     assert hemisphere_z_shift(d, 0.0) == pytest.approx(2.5)

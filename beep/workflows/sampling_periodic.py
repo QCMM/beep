@@ -74,7 +74,8 @@ def config_summary_msg(config: SamplingPeriodicConfig) -> str:
         f"  Surface collection:   {config.surface_collection}",
         f"  Level of theory:      {lot.display}",
         f"  PBC:                  {config.pbc}",
-        f"  Step size:            {config.step_size_ang} A  (noise ±{config.grid_noise_frac*config.step_size_ang:.2f} A)",
+        f"  Step size:            {config.step_size_ang} A  (noise ±{config.grid_noise_frac*config.step_size_ang:.2f} A"
+        f"{', random lattice offset' if config.grid_offset else ''})",
         f"  Sampling distance:    {config.sampling_distance_ang} A",
         f"  Sanity min distance:  {config.sanity_min_distance_ang} A  (max {config.sanity_max_iter} attempts)",
         f"  Cavity z-scan:        step {config.cavity_z_scan_step_ang} A, window ±{config.cavity_z_scan_window_ang} A",
@@ -268,6 +269,7 @@ def run(config: SamplingPeriodicConfig, client: FractalClient) -> None:
             rng=rng,
             logger=logger,
             z_floor_ang=config.freeze_below_z_ang,
+            grid_offset=config.grid_offset,
         )
 
         # Aggregate xyz (slab + every accepted adsorbate copy in its ORIGINAL
