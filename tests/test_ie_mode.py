@@ -86,3 +86,22 @@ def test_quantity_rejects_unknown_value():
     cfg["quantity"] = "de"
     with pytest.raises(Exception):
         BeCompPeriodicConfig(**cfg)
+
+
+def test_gas_adsorbate_without_spec_uses_entry_geometry():
+    """A small-molecule collection without a spec for the electronic LOT (e.g. 'volatiles' on
+    another server) must fall back to the entry geometry, not raise."""
+    import logging
+    from types import SimpleNamespace
+    from beep.workflows.be_comp_periodic import gas_adsorbate
+    co = qcel.models.Molecule(symbols=["C", "O"], geometry=[0, 0, 0, 0, 0, 2.13])
+
+    class DS:
+        specifications = {"b3lyp-d4_def2-tzvpd": object()}
+        def get_entry(self, name):
+            return SimpleNamespace(initial_molecule=co)
+        def get_record(self, *a, **k):
+            raise AssertionError("must not ask for a record of a missing spec")
+
+    lot = SimpleNamespace(lot_name="lmft-co-b3lyp-v1-s1", display="lmft-co-b3lyp-v1-s1 (mace)")
+    assert gas_adsorbate(DS(), "CO", lot, logging.getLogger("t")) is co

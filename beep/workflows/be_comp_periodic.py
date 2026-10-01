@@ -156,6 +156,22 @@ def _resolve_cell(config: BeCompPeriodicConfig, surface_extras, record_cell=None
     return extras_cell
 
 
+def gas_adsorbate(ds_sm, smol_name: str, elec_lot, logger):
+    """The adsorbate optimized at the electronic LOT, else the entry's input geometry.
+
+    The collection need not carry a spec for the electronic LOT at all (qcportal then raises
+    PortalRequestError, not KeyError), so the spec is checked before asking for the record;
+    the fallback reads the entry itself, which needs no spec.
+    """
+    if elec_lot.lot_name in ds_sm.specifications:
+        try:
+            return qcf.fetch_final_molecule(ds_sm, smol_name, elec_lot.lot_name)
+        except KeyError:
+            pass
+    logger.info(f"  {smol_name} not optimized at {elec_lot.display}; using initial geometry")
+    return qcf.fetch_entry_initial_molecule(ds_sm, smol_name)
+
+
 def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
 
@@ -181,13 +197,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
     # --- Gas-phase adsorbate reference (once) ---
     logger.info("\n--- gas-phase adsorbate reference ---")
     ds_sm = qcf.get_collection(client, "OptimizationDataset", config.small_molecule_collection)
-    try:
-        adsorbate = qcf.fetch_final_molecule(ds_sm, smol_name, elec_lot.lot_name)
-    except KeyError:
-        adsorbate = qcf.fetch_initial_molecule(ds_sm, smol_name, elec_lot.lot_name)
-        logger.info(
-            f"  {smol_name} not optimized at {elec_lot.display}; using initial geometry"
-        )
+    adsorbate = gas_adsorbate(ds_sm, smol_name, elec_lot, logger)
 
     all_pids: List[int] = []
     if config.quantity in ("be", "all"):
