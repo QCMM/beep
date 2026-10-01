@@ -69,6 +69,10 @@ __all__ += ["ManybodyDataset", "get_or_create_manybody_dataset",
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+# Default upper bound for the job-wait helpers below. Batches can sit queued
+# behind other work on a shared manager for days, so keep this generous.
+DEFAULT_MAX_WAIT = 14 * 24 * 3600  # two weeks
+
 STOICH_TYPES = ("bsse", "be_nocp", "ie", "ie_nocp", "de")
 # Stoichiometries saved for MACE (MLP) runs: only ghost-free ones. The
 # counterpoise stoichiometries (``bsse``, ``ie``) use ghost atoms, which a
@@ -799,13 +803,13 @@ def check_for_completion(client: PortalClient, pid: List[int],
 
 def wait_for_completion(client: PortalClient, pid_list: List[int],
                         frequency: int, logger: logging.Logger,
-                        max_wait: int = 86400) -> None:
+                        max_wait: int = DEFAULT_MAX_WAIT) -> None:
     """Poll until all jobs reach a terminal state (complete or error).
 
     Parameters
     ----------
     max_wait : int
-        Maximum total wait time in seconds (default 24 hours).
+        Maximum total wait time in seconds (default two weeks).
         Raises ``TimeoutError`` if exceeded.
     """
     if not pid_list:
@@ -868,7 +872,7 @@ def report_errored_records(
 def check_jobs_status(client: PortalClient, job_ids: List[int],
                       logger: logging.Logger, wait_interval: int = 600,
                       print_job_ids: bool = False,
-                      max_wait: int = 172800,
+                      max_wait: int = DEFAULT_MAX_WAIT,
                       auto_recover_services: bool = True) -> None:
     """
     Continuously monitor and report computation status, processing in chunks.
@@ -876,7 +880,7 @@ def check_jobs_status(client: PortalClient, job_ids: List[int],
     Parameters
     ----------
     max_wait : int
-        Maximum total wait time in seconds (default 48 hours).
+        Maximum total wait time in seconds (default two weeks).
         Raises ``TimeoutError`` if exceeded.
     auto_recover_services : bool
         If True (default), service records (e.g. ReactionRecord) found at
