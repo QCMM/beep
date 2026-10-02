@@ -363,14 +363,18 @@ def test_run_passes_keywords_to_refinement_spec(tmp_path, monkeypatch):
     )
     ds_wc = MagicMock(); ds_wc.entry_names = ["W3_01", "W3_02"]
     ds_sm = MagicMock()
-    ds_ref = MagicMock(); ds_ref.entry_names = ["CO_W3_01_0001"]
+    dsets = _empty_datasets(["W3_01", "W3_02"])
     target = MagicMock(); target.symbols = ["C", "O"]
     specs = []
 
-    with patch.object(wf, "qcf") as qcf, patch.object(wf, "run_sampling") as run_sampling:
+    def fake_sampling(**kw):
+        kw["refinement_opt_dset"].entry_names = ["CO_W3_01_0001"]
+
+    with patch.object(wf, "qcf") as qcf, \
+         patch.object(wf, "run_sampling", side_effect=fake_sampling) as run_sampling:
         qcf.get_collection.side_effect = lambda c, k, n: ds_sm if n == cfg.small_molecule_collection else ds_wc
         qcf.fetch_initial_molecule.return_value = target
-        qcf.get_or_create_opt_dataset.return_value = ds_ref
+        qcf.get_or_create_opt_dataset.side_effect = lambda client, name: dsets[name]
         qcf.add_opt_specification.side_effect = lambda ds, spec, overwrite=True: specs.append(spec)
         qcf.get_job_ids.return_value = []
         wf.run(cfg, MagicMock())
@@ -381,3 +385,134 @@ def test_run_passes_keywords_to_refinement_spec(tmp_path, monkeypatch):
     assert run_sampling.call_args.kwargs["kw_id"] is None
     # total_binding_sites=1 reached after the first cluster (>=, not >): stop early
     assert run_sampling.call_count == 1
+
+
+def _empty_datasets(clusters, mol="CO"):
+    """One MagicMock per '<mol>_<w>' / 'pre_<mol>_<w>' dataset, all empty."""
+    dsets = {}
+    for w in clusters:
+        for name in (f"{mol}_{w}", f"pre_{mol}_{w}"):
+            ds = MagicMock(); ds.name = name; ds.entry_names = []
+            dsets[name] = ds
+    return dsets
+
+
+def _resume_config(total):
+    from beep.models.sampling import SamplingConfig
+    return SamplingConfig(
+        workflow="sampling", molecule="CO", total_binding_sites=total,
+        sampling_level_of_theory={"method": "gfn2-xtb", "program": "xtb"},
+        refinement_level_of_theory={"method": "hf", "basis": "sto-3g", "program": "psi4"},
+    )
+
+
+def _run_with_mocks(cfg, dsets, clusters, harvest_side_effect=None, sampling_side_effect=None):
+    from beep.workflows import sampling as wf
+
+    ds_wc = MagicMock(); ds_wc.entry_names = list(clusters)
+    ds_sm = MagicMock()
+    target = MagicMock(); target.symbols = ["C", "O"]
+    with patch.object(wf, "qcf") as qcf, \
+         patch.object(wf, "run_sampling", side_effect=sampling_side_effect) as run_sampling, \
+         patch.object(wf, "harvest_cluster", side_effect=harvest_side_effect) as harvest, \
+         patch.object(wf, "process_refinement") as refine:
+        qcf.get_collection.side_effect = lambda c, k, n: ds_sm if n == cfg.small_molecule_collection else ds_wc
+        qcf.fetch_initial_molecule.return_value = target
+        qcf.get_or_create_opt_dataset.side_effect = lambda client, name: dsets[name]
+        qcf.get_job_ids.side_effect = lambda ds, entries, lot: list(range(len(entries)))
+        qcf.check_for_completion.return_value = (True, {"COMPLETE": 0})
+        wf.run(cfg, MagicMock())
+    return run_sampling, harvest, refine
+
+
+def test_run_relaunch_does_not_resample_when_target_already_met(tmp_path, monkeypatch):
+    """Regression: a relaunch after a crash re-sampled every finished cluster,
+    paying a full gfn2 round per cluster before noticing the target was met.
+    With enough refined sites already stored, run() must not place anything."""
+    monkeypatch.chdir(tmp_path)
+    clusters = ["W3_01", "W3_02"]
+    dsets = _empty_datasets(clusters)
+    dsets["CO_W3_01"].entry_names = ["CO_W3_01_0001", "CO_W3_01_0002"]
+    dsets["pre_CO_W3_01"].entry_names = [f"pre_{i}" for i in range(5)]
+    dsets["CO_W3_02"].entry_names = ["CO_W3_02_0001"]
+    dsets["pre_CO_W3_02"].entry_names = [f"pre_{i}" for i in range(5)]
+
+    run_sampling, harvest, refine = _run_with_mocks(
+        _resume_config(total=3), dsets, clusters, harvest_side_effect=lambda *a, **k: 0,
+    )
+
+    assert run_sampling.call_count == 0
+    # every cluster with sampling entries is harvested, even the ones after the target
+    assert harvest.call_count == 2
+    # nothing new was found, so no refinement resubmission either
+    assert refine.call_count == 0
+
+
+def test_run_harvest_counts_before_top_up(tmp_path, monkeypatch):
+    """Harvested sites count toward the target: with 1 stored and 2 harvested
+    (recovered after a crash) against a target of 3, no new placements."""
+    monkeypatch.chdir(tmp_path)
+    clusters = ["W3_01", "W3_02"]
+    dsets = _empty_datasets(clusters)
+    dsets["CO_W3_01"].entry_names = ["CO_W3_01_0001"]
+    dsets["pre_CO_W3_01"].entry_names = [f"pre_{i}" for i in range(5)]
+
+    def fake_harvest(client, ds_smplg, ds_ref, *a, **k):
+        ds_ref.entry_names = ds_ref.entry_names + ["CO_W3_01_0002", "CO_W3_01_0003"]
+        return 2
+
+    run_sampling, harvest, refine = _run_with_mocks(
+        _resume_config(total=3), dsets, clusters, harvest_side_effect=fake_harvest,
+    )
+
+    assert harvest.call_count == 1          # W3_02 has no sampling entries: skipped
+    assert refine.call_count == 1           # new sites -> refinement resubmitted
+    assert run_sampling.call_count == 0
+
+
+def test_run_tops_up_only_while_below_target(tmp_path, monkeypatch):
+    """Below target after harvesting, run() falls back to new placements and
+    stops as soon as the running total reaches the target."""
+    monkeypatch.chdir(tmp_path)
+    clusters = ["W3_01", "W3_02", "W3_03"]
+    dsets = _empty_datasets(clusters)
+    dsets["CO_W3_01"].entry_names = ["CO_W3_01_0001"]
+    dsets["pre_CO_W3_01"].entry_names = ["pre_0"]
+
+    def fake_sampling(**kw):
+        ds_ref = kw["refinement_opt_dset"]
+        ds_ref.entry_names = ds_ref.entry_names + [f"{ds_ref.name}_new1", f"{ds_ref.name}_new2"]
+
+    run_sampling, harvest, refine = _run_with_mocks(
+        _resume_config(total=4), dsets, clusters,
+        harvest_side_effect=lambda *a, **k: 0, sampling_side_effect=fake_sampling,
+    )
+
+    # 1 stored + 2 (W3_01 top-up) = 3 < 4, + 2 (W3_02) = 5 >= 4 -> W3_03 untouched
+    assert run_sampling.call_count == 2
+    sampled = [c.kwargs["sampling_opt_dset"].name for c in run_sampling.call_args_list]
+    assert sampled == ["pre_CO_W3_01", "pre_CO_W3_02"]
+    assert refine.call_count == 2
+
+
+def test_harvest_cluster_skips_entries_already_refined(test_logger):
+    """harvest_cluster only filters sampling entries not yet promoted to the
+    refinement dataset, and waits for the pending ones first."""
+    from beep.workflows import sampling as wf
+
+    ds_smplg = MagicMock(); ds_smplg.entry_names = ["a", "b", "c"]
+    ds_ref = MagicMock(); ds_ref.entry_names = ["a"]
+    target = MagicMock(); target.symbols = ["C", "O"]
+
+    with patch.object(wf, "qcf") as qcf, \
+         patch.object(wf, "_filter_and_register", return_value=1) as reg:
+        qcf.get_job_ids.return_value = [1, 2, 3]
+        qcf.fetch_opt_molecules.return_value = [("b", MagicMock())]
+        n = wf.harvest_cluster(MagicMock(), ds_smplg, ds_ref, "lot", target, 0.4, False, test_logger)
+
+    assert n == 1
+    qcf.wait_for_completion.assert_called_once()
+    assert qcf.fetch_opt_molecules.call_args.args[1] == ["b", "c"]
+    assert qcf.fetch_opt_molecules.call_args.kwargs["status"] == "COMPLETE"
+    assert reg.call_count == 1
+    assert [name for name, _ in reg.call_args.args[0]] == ["b"]

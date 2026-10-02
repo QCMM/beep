@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`sampling`: relaunches resume instead of re-sampling finished
+  clusters.** `run()` walked the clusters in order and ran a full
+  placement + gfn2 round on each one before checking the target, so a
+  relaunch after a crash or a timeout re-sampled every finished cluster
+  (a whole gfn2 batch per cluster, often hitting the 24 h limit again
+  before reaching the remaining ones), and a running workflow never
+  revisited a cluster whose sampling optimizations finished or were
+  reset after it had moved on. `run()` is now three phases: a pre-scan
+  that opens every cluster's `pre_<mol>_<w>` / `<mol>_<w>` datasets and
+  logs a resume table (sampled / complete / refined per cluster); a
+  harvest pass (new `harvest_cluster`) that waits for pending sampling
+  optimizations, filters the completed ones not yet in the refinement
+  dataset and resubmits refinement for the new unique sites, without
+  generating any placements; and a top-up pass that runs the existing
+  per-cluster placement loop only while the global refined count is
+  still below `total_binding_sites`. The sampling summary now covers
+  all clusters and reports how many sites each one contributed by
+  harvesting. Datasets and entry names are unchanged, so existing runs
+  resume as they are. Regression tests cover the no-resample, harvest-
+  counts-toward-target, top-up-stops-at-target and harvest-skips-
+  refined cases.
+
 - **`energy_benchmark`: results are now reported per optimization
   geometry.** Reaction entries have always been per `(structure,
   opt_level_of_theory)` pair, but the printed MAE summary pooled every

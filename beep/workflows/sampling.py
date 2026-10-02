@@ -76,6 +76,76 @@ def process_refinement(client, ropt_lot_name, rmethod, rbasis, program,
     )
 
 
+def _filter_and_register(opt_molecules_new, refinement_opt_dset, target_mol,
+                         rmsd_val, rmsd_symm, logger):
+    """RMSD-filter completed sampling structures against the refinement
+    dataset and register the unique ones there. Returns the number added.
+    Shared by the top-up path (``run_sampling``) and the harvest path."""
+    from ..core.sampling import filter_binding_sites
+
+    existing = [
+        (entry.name, entry.initial_molecule)
+        for entry in refinement_opt_dset.iterate_entries()
+    ]
+    logger.info(
+        f"Filtering {len(opt_molecules_new)} new molecules against existing "
+        f"{len(existing)} molecules using an RMSD criteria of {rmsd_val}"
+    )
+    unique_mols = filter_binding_sites(
+        opt_molecules_new, existing, cut_off_val=rmsd_val,
+        rmsd_symm=rmsd_symm, ligand_size=len(target_mol.symbols), logger=logger,
+        grid=0.5, nb_radius=4, dm_tau=1e-3,
+    )
+    for entry_name, mol_obj in unique_mols:
+        try:
+            qcf.add_opt_entry(refinement_opt_dset, entry_name, mol_obj)
+        except KeyError as e:
+            logger.info(f"{e} in {refinement_opt_dset.name}")
+    return len(unique_mols)
+
+
+def harvest_cluster(client, sampling_opt_dset, refinement_opt_dset, opt_lot,
+                    target_mol, rmsd_val, rmsd_symm, logger, wait_frequency=120):
+    """Collect finished sampling optimizations into the refinement dataset
+    without generating any new placements.
+
+    This is the resume path. Waits for sampling optimizations still in
+    flight (including records reset since the previous run), then
+    RMSD-filters every COMPLETE sampling structure not yet present in the
+    refinement dataset and registers the unique ones. Structures rejected
+    as duplicates in an earlier run are re-tested (cheap: the filter has a
+    grid prefilter) and rejected again. Returns the number of binding
+    sites added.
+    """
+    entries = list(sampling_opt_dset.entry_names)
+    if not entries:
+        logger.info("  No sampling entries yet; nothing to harvest.")
+        return 0
+
+    pids = qcf.get_job_ids(sampling_opt_dset, entries, opt_lot)
+    if pids:
+        qcf.wait_for_completion(client, pids, wait_frequency, logger)
+
+    refined = set(refinement_opt_dset.entry_names)
+    candidates = [e for e in entries if e not in refined]
+    if not candidates:
+        logger.info("  Every completed sampling structure is already in the refinement dataset.")
+        return 0
+
+    complete = qcf.fetch_opt_molecules(
+        sampling_opt_dset, candidates, opt_lot, status="COMPLETE",
+    )
+    logger.info(
+        f"  Harvest: {len(complete)} completed, not-yet-refined sampling "
+        f"structure(s) out of {len(candidates)} candidate(s)."
+    )
+    if not complete:
+        return 0
+    return _filter_and_register(
+        complete, refinement_opt_dset, target_mol, rmsd_val, rmsd_symm, logger,
+    )
+
+
 def run_sampling(
     method: str,
     basis: str,
@@ -99,9 +169,11 @@ def run_sampling(
     sampling_opt_keywords=None,
 ):
     """
-    Run the full sampling loop: generate structures, optimize, filter by RMSD.
+    Top-up path: generate new placements in the free entry-name slots,
+    optimize them, RMSD-filter against the refinement dataset. Existing
+    entries are waited on and re-filtered too, so after a harvest pass
+    this only adds work for the new placements.
     """
-    from ..core.sampling import filter_binding_sites
     from ..core.molecule_sampler import random_molecule_sampler as mol_sample
 
     FREQUENCY = 120
@@ -283,33 +355,10 @@ def run_sampling(
             f"{len(present_entries) - opt_mol_num} molecules ended in ERROR."
         )
 
-        # Get existing molecules from refinement dataset
-        opt_molecules = []
-        for entry in refinement_opt_dset.iterate_entries():
-            opt_molecules.append((entry.name, entry.initial_molecule))
-
-        logger.info(
-            f"Filtering {opt_mol_num} new molecules against existing "
-            f"{len(opt_molecules)} molecules using an RMSD criteria "
-            f"of {rmsd_val}"
+        new_mols_count = _filter_and_register(
+            opt_molecules_new, refinement_opt_dset, target_mol,
+            rmsd_val, rmsd_symm, logger,
         )
-        mol_size = len(target_mol.symbols)
-        unique_mols = filter_binding_sites(
-            opt_molecules_new, opt_molecules, cut_off_val=rmsd_val,
-            rmsd_symm=rmsd_symm, ligand_size=mol_size, logger=logger,
-            grid=0.5, nb_radius=4, dm_tau=1e-3,
-        )
-
-        for mol_info in unique_mols:
-            entry_name, mol_obj = mol_info
-            try:
-                qcf.add_opt_entry(
-                    refinement_opt_dset, entry_name, mol_obj,
-                )
-            except KeyError as e:
-                logger.info(f"{e} in {refinement_opt_dset.name}")
-
-        new_mols_count = len(unique_mols)
         binding_site_num += new_mols_count
 
         logger.info(
@@ -428,35 +477,9 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
 
     args_dict["client"] = client
 
-    # --- Sampling loop ---
-    count = 0
-    cluster_results = []
-    refinement_dsets = []
+    target = config.total_binding_sites
 
-    for c, w in enumerate(cluster_names):
-        args_dict["cluster"] = qcf.fetch_final_molecule(ds_wc, w, opt_lot)
-
-        ref_opt_dset_name = smol_name + "_" + w
-        smplg_opt_dset_name = "pre_" + ref_opt_dset_name
-
-        ds_smplg = qcf.get_or_create_opt_dataset(client, smplg_opt_dset_name)
-        ds_ref = qcf.get_or_create_opt_dataset(client, ref_opt_dset_name)
-        args_dict["sampling_opt_dset"] = ds_smplg
-        args_dict["refinement_opt_dset"] = ds_ref
-
-        logger.info(f"\n{'=' * 80}")
-        logger.info(f"  Cluster {c+1}/{len(cluster_names)}: {w}")
-        logger.info(f"  Sampling dataset:    {smplg_opt_dset_name}")
-        logger.info(f"  Refinement dataset:  {ref_opt_dset_name}")
-        logger.info(f"{'=' * 80}\n")
-
-        debug_path = data_folder / "site_finder" / (str(smol_name) + "_w") / w
-        if not debug_path.exists() and config.store_initial_structures:
-            debug_path.parent.mkdir(parents=True, exist_ok=True)
-        args_dict["debug_path"] = debug_path
-
-        run_sampling(**args_dict)
-
+    def _submit_refinement(ds_ref):
         process_refinement(
             client, ropt_lot, rmethod, rbasis, rprogram,
             qc_keyword, ds_ref, logger, config.refinement_tag,
@@ -464,28 +487,113 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
             refinement_opt_keywords=config.refinement_opt_keywords,
         )
 
-        ds_ref = qcf.get_or_create_opt_dataset(client, ref_opt_dset_name)
-        n_sites = len(ds_ref.entry_names)
-        count += n_sites
-        cluster_results.append((w, n_sites))
-        refinement_dsets.append((w, ds_ref))
+    # --- Phase 0: pre-scan (resume table) ---
+    # Open every cluster's datasets and count what previous runs left behind
+    # BEFORE doing any work. A relaunch used to walk cluster by cluster,
+    # topping each one up with new placements and waiting a full gfn2
+    # round, only to discover at the end that the target was already met.
+    datasets = {}        # w -> (ds_smplg, ds_ref)
+    refined = {}         # w -> refinement entry count
+    logger.info(f"\n{'=' * 80}")
+    logger.info(f"  RESUME SCAN FOR {smol_name}")
+    logger.info(f"{'=' * 80}")
+    logger.info(f"  {'Cluster':<15} {'Sampled':>9} {'Complete':>9} {'Refined':>9}")
+    logger.info(f"  {'-'*15} {'-'*9} {'-'*9} {'-'*9}")
+    for w in cluster_names:
+        ref_name = smol_name + "_" + w
+        ds_smplg = qcf.get_or_create_opt_dataset(client, "pre_" + ref_name)
+        ds_ref = qcf.get_or_create_opt_dataset(client, ref_name)
+        datasets[w] = (ds_smplg, ds_ref)
+        sampled = list(ds_smplg.entry_names)
+        n_complete = 0
+        if sampled:
+            pids = qcf.get_job_ids(ds_smplg, sampled, opt_lot)
+            if pids:
+                _, counts = qcf.check_for_completion(client, pids)
+                n_complete = counts.get("COMPLETE", 0)
+        refined[w] = len(ds_ref.entry_names)
+        logger.info(f"  {w:<15} {len(sampled):>9} {n_complete:>9} {refined[w]:>9}")
+    logger.info(f"  {'-'*15} {'-'*9} {'-'*9} {'-'*9}")
+    logger.info(f"  {'TOTAL':<15} {'':>9} {'':>9} {sum(refined.values()):>9}")
+    logger.info(f"  Target: {target}")
+    logger.info(f"{'=' * 80}\n")
 
-        logger.info(f"\n  {bcheck} Cluster {w}: {n_sites} binding sites  |  Running total: {count}")
+    # --- Phase 1: harvest existing sampling results, no new placements ---
+    # Picks up optimizations finished or reset since the previous run and
+    # registers newly unique sites. This is what makes a relaunch cheap
+    # and what counts crash-recovered clusters without another relaunch.
+    harvested = {w: 0 for w in cluster_names}
+    if any(len(datasets[w][0].entry_names) for w in cluster_names):
+        logger.info(f"{'=' * 80}")
+        logger.info("  PHASE 1 — harvesting existing sampling results")
+        logger.info(f"{'=' * 80}\n")
+        for w in cluster_names:
+            ds_smplg, ds_ref = datasets[w]
+            if not len(ds_smplg.entry_names):
+                continue
+            logger.info(f"\n  Cluster {w}:")
+            harvested[w] = harvest_cluster(
+                client, ds_smplg, ds_ref, opt_lot, args_dict["target_mol"],
+                config.rmsd_value, config.rmsd_symmetry, logger,
+            )
+            if harvested[w]:
+                _submit_refinement(ds_ref)
+            refined[w] = len(ds_ref.entry_names)
+            logger.info(
+                f"  {bcheck} {w}: +{harvested[w]} new unique site(s), "
+                f"{refined[w]} refined total"
+            )
+    count = sum(refined.values())
+    logger.info(f"\n  Binding sites after harvest: {count} / target {target}")
 
-        if count >= config.total_binding_sites:
-            logger.info(f"\n  Target of {config.total_binding_sites} binding sites reached. Stopping early.")
-            break
+    # --- Phase 2: top up with new placements only while below target ---
+    if count >= target:
+        logger.info(
+            f"  Target already met by existing data; no new placements generated.\n"
+        )
+    else:
+        for c, w in enumerate(cluster_names):
+            ds_smplg, ds_ref = datasets[w]
+            args_dict["cluster"] = qcf.fetch_final_molecule(ds_wc, w, opt_lot)
+            args_dict["sampling_opt_dset"] = ds_smplg
+            args_dict["refinement_opt_dset"] = ds_ref
 
-    # --- Sampling summary (binding sites found per cluster) ---
+            logger.info(f"\n{'=' * 80}")
+            logger.info(f"  PHASE 2 — Cluster {c+1}/{len(cluster_names)}: {w}")
+            logger.info(f"  Sampling dataset:    {ds_smplg.name}")
+            logger.info(f"  Refinement dataset:  {ds_ref.name}")
+            logger.info(f"{'=' * 80}\n")
+
+            debug_path = data_folder / "site_finder" / (str(smol_name) + "_w") / w
+            if not debug_path.exists() and config.store_initial_structures:
+                debug_path.parent.mkdir(parents=True, exist_ok=True)
+            args_dict["debug_path"] = debug_path
+
+            run_sampling(**args_dict)
+            _submit_refinement(ds_ref)
+
+            refined[w] = len(ds_ref.entry_names)
+            count = sum(refined.values())
+            logger.info(
+                f"\n  {bcheck} Cluster {w}: {refined[w]} binding sites  |  Running total: {count}"
+            )
+            if count >= target:
+                logger.info(f"\n  Target of {target} binding sites reached. Stopping early.")
+                break
+
+    cluster_results = [(w, refined[w]) for w in cluster_names]
+    refinement_dsets = [(w, datasets[w][1]) for w in cluster_names if refined[w]]
+
+    # --- Sampling summary (binding sites per cluster, all clusters) ---
     logger.info(f"\n\n{'=' * 80}")
     logger.info(f"  SAMPLING SUMMARY FOR {smol_name}")
     logger.info(f"{'=' * 80}")
-    logger.info(f"  {'Cluster':<15} {'Binding sites':>15}")
-    logger.info(f"  {'-'*15} {'-'*15}")
+    logger.info(f"  {'Cluster':<15} {'Binding sites':>15} {'Harvested':>10}")
+    logger.info(f"  {'-'*15} {'-'*15} {'-'*10}")
     for w, n in cluster_results:
-        logger.info(f"  {w:<15} {n:>15}")
-    logger.info(f"  {'-'*15} {'-'*15}")
-    logger.info(f"  {'TOTAL':<15} {count:>15}")
+        logger.info(f"  {w:<15} {n:>15} {harvested[w]:>10}")
+    logger.info(f"  {'-'*15} {'-'*15} {'-'*10}")
+    logger.info(f"  {'TOTAL':<15} {count:>15} {sum(harvested.values()):>10}")
     logger.info(f"{'=' * 80}\n")
 
     # --- Wait for refinement optimizations to finish ---
