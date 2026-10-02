@@ -2449,3 +2449,51 @@ def wait_for_dataset_records(
 
     logger.info(f"Dataset monitoring complete: total={len(per_record_status)}")
     return dict(per_record_status), timed_out
+
+
+def add_reaction_energy_spec(
+    ds_rxn: ReactionDataset,
+    spec_name: str,
+    method: str,
+    basis: Optional[str],
+    program: str = "psi4",
+    keywords: Optional[dict] = None,
+    description: str = "",
+) -> str:
+    """Add an energy ``ReactionSpecification`` to a ``ReactionDataset``.
+
+    The singlepoint part is built exactly like :func:`add_energy_spec`, so the component
+    records of a reaction are the same records a SinglepointDataset with that spec would hold
+    (QCFractal deduplicates them). Idempotent; returns the lowercased spec name.
+    """
+    qc_spec = QCSpecification(
+        program=program,
+        driver=SinglepointDriver.energy,
+        method=method,
+        basis=basis,
+        keywords=keywords or {},
+    )
+    name = spec_name.lower()
+    rxn_spec = ReactionSpecification(program="reaction", singlepoint_specification=qc_spec,
+                                     keywords=ReactionKeywords())
+    meta = ds_rxn.add_specification(name=name, specification=rxn_spec, description=description)
+    _check_insert_meta(meta, f"reaction specification '{name}' in {ds_rxn.name}")
+    return name
+
+
+def reaction_component_energies(record) -> Optional[List[Tuple[float, int, float]]]:
+    """``[(coefficient, n_atoms, energy)]`` of a complete reaction record's components, or None
+    when the record or any component is missing or not complete. Fetch the records with
+    ``include=["components"]`` so this needs no further server calls."""
+    if record is None or not is_complete(record.status):
+        return None
+    out = []
+    for comp in record.components:
+        sp = comp.singlepoint_record
+        if sp is None or not is_complete(sp.status):
+            return None
+        e = (sp.properties or {}).get("return_energy")
+        if e is None:
+            return None
+        out.append((float(comp.coefficient), len(comp.molecule.symbols), float(e)))
+    return out

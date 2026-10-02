@@ -105,3 +105,43 @@ def test_gas_adsorbate_without_spec_uses_entry_geometry():
 
     lot = SimpleNamespace(lot_name="lmft-co-b3lyp-v1-s1", display="lmft-co-b3lyp-v1-s1 (mace)")
     assert gas_adsorbate(DS(), "CO", lot, logging.getLogger("t")) is co
+
+
+# ---------------------------------------------------------------------------
+# ie_nocp ReactionDataset form
+# ---------------------------------------------------------------------------
+
+def test_periodic_ie_nocp_stoichiometry():
+    from beep.core.stoichiometry import periodic_ie_nocp_stoichiometry
+    mol = _complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]])
+    st = periodic_ie_nocp_stoichiometry(mol, 3, molecular_charge=0, molecular_multiplicity=1)
+    assert [c for _, c in st] == [1.0, -1.0, -1.0]
+    cpx, slab, ads = (m for m, _ in st)
+    assert cpx is mol
+    assert list(slab.symbols) == ["O", "H", "H"] and list(ads.symbols) == ["C", "O"]
+    # fragments keep the in-complex coordinates
+    np.testing.assert_allclose(np.vstack([slab.geometry, ads.geometry]),
+                               np.asarray(mol.geometry).reshape(-1, 3))
+
+
+def test_split_ie_components():
+    from beep.workflows.be_assemble_periodic import split_ie_components
+    comps = [(-1.0, 2, -113.0), (1.0, 5, -190.01), (-1.0, 3, -77.0)]
+    assert split_ie_components(comps) == (-190.01, -77.0, -113.0)
+    assert split_ie_components(comps[:2]) is None
+    assert split_ie_components([(1.0, 5, 0.0), (-1.0, 2, 0.0), (-1.0, 2, 0.0)]) is None
+
+
+def test_reaction_component_energies():
+    from types import SimpleNamespace as NS
+    from beep.adapters.qcfractal_adapter import reaction_component_energies
+
+    def comp(coef, n, e, status="complete"):
+        sp = NS(status=status, properties={"return_energy": e})
+        return NS(coefficient=coef, molecule=NS(symbols=["X"] * n), singlepoint_record=sp)
+
+    rec = NS(status="complete", components=[comp(1, 5, -1.5), comp(-1, 3, -1.0), comp(-1, 2, -0.4)])
+    assert reaction_component_energies(rec) == [(1.0, 5, -1.5), (-1.0, 3, -1.0), (-1.0, 2, -0.4)]
+    assert reaction_component_energies(None) is None
+    rec.components[2] = comp(-1, 2, -0.4, status="error")
+    assert reaction_component_energies(rec) is None

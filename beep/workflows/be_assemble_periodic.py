@@ -17,12 +17,12 @@ energy, then::
 Writes ``<molecule>/data/<prefix>_<slab>.csv`` per slab and a
 ``<prefix>_summary.csv`` across all slabs, plus a summary log line.
 
-With ``quantity`` 'ie' or 'all', also reads the frozen fragments::
+With ``quantity`` 'ie' or 'all', also reads the ie_nocp ReactionDataset::
 
-    <smol>_<slab>_ie_slab_sp         (slab at the complex geometry, adsorbate removed)
-    <smol>_<slab>_ie_ads_sp          (adsorbate at the complex geometry, isolated)
+    <smol>_<slab>_ie_nocp            (complex - slab - adsorbate, fragments frozen at the
+                                      complex geometry, one periodic spec for all three)
 
-and writes ``<prefix>_ie_<slab>.csv`` and ``<prefix>_ie_summary.csv`` with::
+summing the electronic and dispersion reaction records per site, and writes ``<prefix>_ie_<slab>.csv`` and ``<prefix>_ie_summary.csv`` with::
 
     IE_kcal = (E(complex) - E(slab_frozen) - E(ads_frozen)) * hartree2kcal
 
@@ -123,6 +123,42 @@ def interaction_rows(
         be = (ec - e_surface[n] - e_gas) * HARTREE2KCAL
         rows.append((n, ec, es, ea, ie, be, de_slab, de_ads, de_slab + de_ads))
     return rows
+
+
+def split_ie_components(comps: List[Tuple[float, int, float]]) -> Optional[Tuple[float, float, float]]:
+    """(E_complex, E_slab_frozen, E_ads_frozen) from the ``(coefficient, n_atoms, energy)``
+    components of one ie_nocp reaction record: the complex has coefficient +1, the slab is the
+    larger and the adsorbate the smaller of the two -1 fragments. None if the shape differs."""
+    pos = [c for c in comps if c[0] > 0]
+    neg = sorted((c for c in comps if c[0] < 0), key=lambda c: c[1])
+    if len(pos) != 1 or len(neg) != 2 or neg[0][1] == neg[1][1]:
+        return None
+    return pos[0][2], neg[1][2], neg[0][2]
+
+
+def _reaction_fragment_energies(ds_rxn, names, elec_spec: str, disp_spec: str, logger):
+    """Per-site complex, frozen-slab and frozen-adsorbate energies (electronic + dispersion)
+    from the ie_nocp ReactionDataset, as three dicts keyed by entry name."""
+    parts = {}
+    for spec in (elec_spec, disp_spec):
+        got = {}
+        for name, _spec, rec in ds_rxn.iterate_records(entry_names=names, specification_names=[spec],
+                                                       include=["components"]):
+            comps = qcf.reaction_component_energies(rec)
+            split = split_ie_components(comps) if comps is not None else None
+            if split is not None:
+                got[name] = split
+        parts[spec] = got
+    ec: Dict[str, float] = {}
+    es: Dict[str, float] = {}
+    ea: Dict[str, float] = {}
+    for n in names:
+        a, b = parts[elec_spec].get(n), parts[disp_spec].get(n)
+        if a is None or b is None:
+            logger.info(f"  skip {n}: IE {'electronic' if a is None else 'dispersion'} reaction MISSING")
+            continue
+        ec[n], es[n], ea[n] = a[0] + b[0], a[1] + b[1], a[2] + b[2]
+    return ec, es, ea
 
 
 def _energies(ds_sp, names, elec_spec: str, disp_spec: str, logger, label: str) -> Dict[str, float]:
@@ -242,18 +278,13 @@ def run(config: BeAssemblePeriodicConfig, client: FractalClient) -> None:
         if want_ie:
             base = f"{smol_name}_{slab_name}{config.dataset_suffix}"
             try:
-                ds_slab_fz = qcf.get_collection(
-                    client, "singlepoint", f"{base}_ie_slab_sp{config.sp_dataset_suffix}")
-                ds_ads_fz = qcf.get_collection(
-                    client, "singlepoint", f"{base}_ie_ads_sp{config.sp_dataset_suffix}")
+                ds_rxn = qcf.get_collection(
+                    client, "reaction", f"{base}_ie_nocp{config.sp_dataset_suffix}")
             except Exception as e:
                 logger.info(f"  skip IE for {slab_name}: {e}")
                 continue
-            ie_names = sorted(set(ds_complex.entry_names) & set(ds_slab_fz.entry_names)
-                              & set(ds_ads_fz.entry_names))
-            ec = _energies(ds_complex, ie_names, elec_spec, disp_spec, logger, "complex")
-            es = _energies(ds_slab_fz, ie_names, elec_spec, disp_spec, logger, "slab_frozen")
-            ea = _energies(ds_ads_fz, ie_names, elec_spec, disp_spec, logger, "ads_frozen")
+            ie_names = sorted(ds_rxn.entry_names)
+            ec, es, ea = _reaction_fragment_energies(ds_rxn, ie_names, elec_spec, disp_spec, logger)
             e_surf = None
             if want_be:
                 e_surf = _energies(ds_surface, [n for n in common if n in ec],

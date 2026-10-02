@@ -88,3 +88,20 @@ def be_stoichiometry(smol_mol: Molecule, cluster_mol: Molecule, struc_mol: Molec
     }
 
     return be_stoic
+
+
+def periodic_ie_nocp_stoichiometry(complex_mol: Molecule, n_surface_atoms: int,
+                                   molecular_charge=None, molecular_multiplicity=None):
+    """``ie_nocp`` stoichiometry of a periodic slab + adsorbate complex, for a ReactionDataset:
+    [(complex, +1), (slab, -1), (adsorbate, -1)], both fragments frozen at the complex geometry.
+
+    All three components are evaluated with the same periodic specification (cell, pbc), so the
+    adsorbate fragment keeps the interaction with its own periodic images that the complex also
+    contains, and it cancels. The adsorbate keeps its in-complex coordinates (no unwrapping is
+    needed under pbc); its charge and multiplicity are those of the gas-phase adsorbate.
+    """
+    from .periodic_sampler import adsorbate_fragment, strip_adsorbate
+    slab = strip_adsorbate(complex_mol, n_surface_atoms)
+    ads = adsorbate_fragment(complex_mol, n_surface_atoms, molecular_charge=molecular_charge,
+                             molecular_multiplicity=molecular_multiplicity)
+    return [(complex_mol, 1.0), (slab, -1.0), (ads, -1.0)]

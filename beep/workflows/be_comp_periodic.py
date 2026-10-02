@@ -7,9 +7,9 @@ SP specs on:
 
 Once (across all runs), on:
 - ``<smol>_gas_be_sp``               (gas-phase adsorbate, non-periodic)
-With ``quantity`` 'ie' or 'all', also the fragments frozen at the complex geometry:
-- ``<smol>_<slab>_ie_slab_sp``       (slab with the adsorbate removed, periodic)
-- ``<smol>_<slab>_ie_ads_sp``        (adsorbate alone, non-periodic)
+With ``quantity`` 'ie' or 'all', the interaction energy as a ReactionDataset:
+- ``<smol>_<slab>_ie_nocp``          (complex - slab - adsorbate, fragments frozen at the
+                                       complex geometry; one periodic spec for all three)
 'ie' needs no bare-surface dataset and skips the gas-phase reference.
 
 Submits everything, waits for completion. Assembly happens in
@@ -21,11 +21,10 @@ import logging
 
 import numpy as np
 from beep.core.periodic_sampler import (
-    adsorbate_fragment,
     filter_periodic_sites,
     pad_nonperiodic_axes,
-    strip_adsorbate,
 )
+from beep.core.stoichiometry import periodic_ie_nocp_stoichiometry
 
 BOHR2ANG = 0.529177210903
 from pathlib import Path
@@ -33,7 +32,9 @@ from typing import List, Tuple
 
 from qcportal import PortalClient as FractalClient
 
-from ..core.entry_guard import guard_reused_entries
+from qcportal.reaction import ReactionDatasetNewEntry
+
+from ..core.entry_guard import check_entry_geometry, guard_reused_entries
 from ..models.be_comp_periodic import BeCompPeriodicConfig
 from ..models.base import safe_config_dump
 from ..core.logging_utils import beep_banner
@@ -118,6 +119,27 @@ def _build_be_specs(
         f"  registered specs on {ds_sp.name}: {elec_spec}  +  {disp_spec}"
     )
     return [elec_spec, disp_spec], elec_spec, disp_spec
+
+
+def _build_ie_reaction_specs(ds_rxn, electronic_lot, be_dispersion: str, keywords_periodic: dict,
+                             logger) -> List[str]:
+    """Register the paired (electronic, dispersion) IE specs on the ie_nocp ReactionDataset, with
+    the same spec names and singlepoint content as ``_build_be_specs`` (periodic)."""
+    elec_alias = electronic_lot.alias
+    _bare, _disp_method, disp_program = _split_dispersion(be_dispersion)
+    disp_program = periodic_dispersion_program(disp_program)
+    disp_suffix = be_dispersion[len(_bare):]
+    elec = qcf.add_reaction_energy_spec(
+        ds_rxn, spec_name=elec_alias, method=electronic_lot.qc_method, basis=None, program="mace",
+        keywords=keywords_periodic, description=f"IE electronic ({electronic_lot.display}) [periodic]",
+    )
+    disp = qcf.add_reaction_energy_spec(
+        ds_rxn, spec_name=f"{elec_alias}{disp_suffix}", method=be_dispersion, basis=None,
+        program=disp_program, keywords=keywords_periodic,
+        description=f"IE dispersion ({be_dispersion} via {disp_program}) [periodic]",
+    )
+    logger.info(f"  registered reaction specs on {ds_rxn.name}: {elec}  +  {disp}")
+    return [elec, disp]
 
 
 def _submit_and_collect(
@@ -357,38 +379,42 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
 
         pids_ie: List[int] = []
         if config.quantity in ("ie", "all"):
-            # Frozen fragments at the complex geometry: the slab keeps the periodic cell,
-            # the adsorbate is isolated (non-periodic), as the gas-phase reference.
+            # IE as a ReactionDataset with the ie_nocp stoichiometry (as in be_hess for clusters):
+            # complex - slab - adsorbate, fragments frozen at the complex geometry, all three with
+            # the same periodic specification, electronic and dispersion as separate specs.
             n_slab = len(complex_final_map[complete_common[0]].symbols) - n_ads
-            slab_frozen = {n: strip_adsorbate(complex_final_map[n], n_slab) for n in complete_common}
-            ads_frozen = {
-                n: adsorbate_fragment(
-                    complex_final_map[n], n_slab, cell_ang, config.pbc,
+            ds_rxn = qcf.create_reaction_dataset(
+                client, f"{complex_dset_name}_ie_nocp{config.sp_dataset_suffix}",
+            )
+            rxn_specs = _build_ie_reaction_specs(
+                ds_rxn, elec_lot, config.be_dispersion, keywords_periodic, logger,
+            )
+            stoich = {
+                n: periodic_ie_nocp_stoichiometry(
+                    complex_final_map[n], n_slab,
                     molecular_charge=adsorbate.molecular_charge,
                     molecular_multiplicity=adsorbate.molecular_multiplicity,
                 )
                 for n in complete_common
             }
-            for suffix, frags, periodic in (("_ie_slab_sp", slab_frozen, True),
-                                            ("_ie_ads_sp", ads_frozen, False)):
-                ds_frag = qcf.get_or_create_singlepoint_dataset(
-                    client, f"{complex_dset_name}{suffix}{config.sp_dataset_suffix}",
-                )
-                specs_frag, _, _ = _build_be_specs(
-                    ds_frag, elec_lot, config.be_dispersion,
-                    keywords_periodic=keywords_periodic, keywords_gas={},
-                    logger=logger, periodic=periodic,
-                )
-                guard_reused_entries(ds_frag, list(frags.items()), optimization=False,
-                                     cell_ang=cell_ang if periodic else None,
-                                     pbc=config.pbc if periodic else None)
-                existing = set(ds_frag.entry_names)
-                new_entries = [(n, m) for n, m in frags.items() if n not in existing]
-                if new_entries:
-                    qcf.add_singlepoint_entries(ds_frag, new_entries)
-                pids_ie += _submit_and_collect(
-                    ds_frag, specs_frag, subset=complete_common, tag=config.be_tag, logger=logger,
-                )
+            # a reused entry must hold the same complex (first component)
+            existing = set(ds_rxn.entry_names)
+            stored = {e.name: e for e in ds_rxn.iterate_entries(entry_names=[n for n in stoich if n in existing])}
+            for n, e in stored.items():
+                first = next(x.molecule for x in e.stoichiometries if x.coefficient > 0)
+                check_entry_geometry(first, stoich[n][0][0], n, ds_rxn.name, cell_ang=cell_ang, pbc=config.pbc)
+            new_entries = [ReactionDatasetNewEntry(name=n, stoichiometries=[(c, m) for m, c in st])
+                           for n, st in stoich.items() if n not in existing]
+            if new_entries:
+                qcf._check_insert_meta(ds_rxn.add_entries(new_entries), f"ie_nocp entries in {ds_rxn.name}")
+            meta = ds_rxn.submit(entry_names=complete_common, specification_names=rxn_specs,
+                                 compute_tag=config.be_tag)
+            logger.info(f"  submit {ds_rxn.name}: {meta.n_inserted} new, {meta.n_existing} existing")
+            for spec_name in rxn_specs:
+                for n in complete_common:
+                    rec = ds_rxn.get_record(n, spec_name)
+                    if rec is not None:
+                        pids_ie.append(rec.id)
             all_pids.extend(pids_ie)
 
         logger.info(
