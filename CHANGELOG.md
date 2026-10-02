@@ -24,7 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   dataset and resubmits refinement for the new unique sites, without
   generating any placements; and a top-up pass that runs the existing
   per-cluster placement loop only while the global refined count is
-  still below `total_binding_sites`. The sampling summary now covers
+  still below `total_binding_sites`, visiting never-sampled clusters
+  first and topping up already-sampled ones only if the target is still
+  unmet after every cluster has had one round (a second round on a
+  sampled cluster mostly rediscovers minima the filter already
+  removed). The sampling summary now covers
   all clusters and reports how many sites each one contributed by
   harvesting. Datasets and entry names are unchanged, so existing runs
   resume as they are. Regression tests cover the no-resample, harvest-

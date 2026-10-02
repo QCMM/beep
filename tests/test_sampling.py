@@ -488,11 +488,56 @@ def test_run_tops_up_only_while_below_target(tmp_path, monkeypatch):
         harvest_side_effect=lambda *a, **k: 0, sampling_side_effect=fake_sampling,
     )
 
-    # 1 stored + 2 (W3_01 top-up) = 3 < 4, + 2 (W3_02) = 5 >= 4 -> W3_03 untouched
+    # fresh clusters first: 1 stored + 2 (W3_02) = 3 < 4, + 2 (W3_03) = 5 >= 4
+    # -> the already-sampled W3_01 is never topped up
     assert run_sampling.call_count == 2
     sampled = [c.kwargs["sampling_opt_dset"].name for c in run_sampling.call_args_list]
-    assert sampled == ["pre_CO_W3_01", "pre_CO_W3_02"]
+    assert sampled == ["pre_CO_W3_02", "pre_CO_W3_03"]
     assert refine.call_count == 2
+
+
+def test_run_top_up_visits_never_sampled_clusters_first(tmp_path, monkeypatch):
+    """A relaunch below target must place new sites on clusters that were
+    never sampled before topping up ones that already had a round, even when
+    the sampled cluster comes first in the surface collection."""
+    monkeypatch.chdir(tmp_path)
+    clusters = ["W3_01", "W3_02", "W3_03"]
+    dsets = _empty_datasets(clusters)
+    dsets["CO_W3_01"].entry_names = ["CO_W3_01_0001"]
+    dsets["pre_CO_W3_01"].entry_names = [f"pre_{i}" for i in range(5)]
+
+    def fake_sampling(**kw):
+        ds_ref = kw["refinement_opt_dset"]
+        ds_ref.entry_names = ds_ref.entry_names + [f"{ds_ref.name}_new1", f"{ds_ref.name}_new2"]
+
+    run_sampling, harvest, refine = _run_with_mocks(
+        _resume_config(total=3), dsets, clusters,
+        harvest_side_effect=lambda *a, **k: 0, sampling_side_effect=fake_sampling,
+    )
+
+    # 1 stored + 2 from the first fresh cluster = 3 >= 3: W3_01 is never topped up
+    sampled = [c.kwargs["sampling_opt_dset"].name for c in run_sampling.call_args_list]
+    assert sampled == ["pre_CO_W3_02"]
+
+
+def test_run_top_up_falls_back_to_sampled_clusters_after_fresh_ones(tmp_path, monkeypatch):
+    """Sampled clusters are topped up only once every fresh cluster had a round."""
+    monkeypatch.chdir(tmp_path)
+    clusters = ["W3_01", "W3_02"]
+    dsets = _empty_datasets(clusters)
+    dsets["pre_CO_W3_01"].entry_names = ["pre_0"]
+
+    def fake_sampling(**kw):
+        ds_ref = kw["refinement_opt_dset"]
+        ds_ref.entry_names = ds_ref.entry_names + [f"{ds_ref.name}_new"]
+
+    run_sampling, harvest, refine = _run_with_mocks(
+        _resume_config(total=2), dsets, clusters,
+        harvest_side_effect=lambda *a, **k: 0, sampling_side_effect=fake_sampling,
+    )
+
+    sampled = [c.kwargs["sampling_opt_dset"].name for c in run_sampling.call_args_list]
+    assert sampled == ["pre_CO_W3_02", "pre_CO_W3_01"]
 
 
 def test_harvest_cluster_skips_entries_already_refined(test_logger):

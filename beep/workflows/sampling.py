@@ -552,14 +552,21 @@ def run(config: SamplingConfig, client: FractalClient) -> None:
             f"  Target already met by existing data; no new placements generated.\n"
         )
     else:
-        for c, w in enumerate(cluster_names):
+        # Never-sampled clusters first: a fresh cluster yields new sites at
+        # full rate, a second round on a sampled one mostly rediscovers the
+        # minima already filtered out. Sampled clusters are topped up only if
+        # the target is still unmet after every cluster has had one round.
+        fresh = [w for w in cluster_names if not len(datasets[w][0].entry_names)]
+        topup = [w for w in cluster_names if w not in fresh]
+        order = [(w, "first round") for w in fresh] + [(w, "top-up") for w in topup]
+        for c, (w, pass_kind) in enumerate(order):
             ds_smplg, ds_ref = datasets[w]
             args_dict["cluster"] = qcf.fetch_final_molecule(ds_wc, w, opt_lot)
             args_dict["sampling_opt_dset"] = ds_smplg
             args_dict["refinement_opt_dset"] = ds_ref
 
             logger.info(f"\n{'=' * 80}")
-            logger.info(f"  PHASE 2 — Cluster {c+1}/{len(cluster_names)}: {w}")
+            logger.info(f"  PHASE 2 — Cluster {c+1}/{len(order)}: {w} ({pass_kind})")
             logger.info(f"  Sampling dataset:    {ds_smplg.name}")
             logger.info(f"  Refinement dataset:  {ds_ref.name}")
             logger.info(f"{'=' * 80}\n")
