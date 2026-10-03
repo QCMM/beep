@@ -135,16 +135,20 @@ def split_components(comps: List[Tuple[float, int, float]], kind: str) -> Option
 def reaction_energies(ds_rxn, kind: str, names, elec_spec: str, disp_spec: str,
                       logger) -> Dict[str, Dict[str, float]]:
     """Per-site component energies by role (electronic + dispersion, hartree) from a periodic
-    BE/IE/DE ReactionDataset, plus ``"total"`` = sum of coefficient x energy."""
+    BE/IE/DE ReactionDataset, plus ``"total"`` = sum of coefficient x energy. A DE entry whose
+    identical molecules were merged (see ``merge_components``) has only its total."""
     parts = {}
     for spec in (elec_spec, disp_spec):
         got = {}
         for name, _spec, rec in ds_rxn.iterate_records(entry_names=names, specification_names=[spec],
                                                        include=["components"]):
             comps = qcf.reaction_component_energies(rec)
-            split = split_components(comps, kind) if comps is not None else None
-            if split is not None:
-                got[name] = split
+            if comps is None:
+                continue
+            split = split_components(comps, kind)
+            if split is None and kind != "de":  # be/ie need their roles; de only its total
+                continue
+            got[name] = (split or {}, sum(c * e for c, _, e in comps))
         parts[spec] = got
     out: Dict[str, Dict[str, float]] = {}
     for n in names:
@@ -153,8 +157,8 @@ def reaction_energies(ds_rxn, kind: str, names, elec_spec: str, disp_spec: str,
             logger.info(f"  skip {n}: {kind.upper()} {'electronic' if a is None else 'dispersion'} "
                         f"reaction MISSING")
             continue
-        e = {role: a[role] + b[role] for role in a}
-        e["total"] = sum(sign * e[role] for sign, roles in ROLES[kind].items() for role in roles)
+        e = {role: a[0][role] + b[0][role] for role in a[0] if role in b[0]}
+        e["total"] = a[1] + b[1]
         out[n] = e
     return out
 

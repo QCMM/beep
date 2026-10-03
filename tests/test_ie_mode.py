@@ -112,8 +112,9 @@ def test_gas_adsorbate_without_spec_uses_entry_geometry():
 # ---------------------------------------------------------------------------
 
 def _surface_and_gas():
-    surf = _complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]])
-    surf = strip_adsorbate(surf, 3)
+    # a relaxed bare surface: the slab moved slightly from its geometry in the complex
+    surf = strip_adsorbate(_complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]]), 3)
+    surf = surf.copy(update={"geometry": np.asarray(surf.geometry) + 0.01})
     gas = qcel.models.Molecule(symbols=["C", "O"], geometry=[0, 0, 0, 0, 0, 2.13],
                                molecular_charge=0, molecular_multiplicity=1)
     return surf, gas
@@ -233,3 +234,49 @@ def test_reaction_component_energies():
     assert reaction_component_energies(None) is None
     rec.components[2] = comp(-1, 2, -0.4, status="error")
     assert reaction_component_energies(rec) is None
+
+
+def test_unmoved_surface_merges_de_components():
+    """A bare-surface optimization that converged at its first step returns the frozen slab
+    itself: the DE's +1/-1 slab terms are one molecule, merged away; BE = IE + DE still holds."""
+    from beep.core.stoichiometry import periodic_stoichiometry
+    mol = _complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]])
+    _, gas = _surface_and_gas()
+    surf = strip_adsorbate(mol, 3)  # 'relaxed' surface == frozen slab
+    st = periodic_stoichiometry(mol, 3, surface_mol=surf, gas_mol=gas)
+    assert len(st["de"]) == 2 and sorted(c for _, c in st["de"]) == [-1.0, 1.0]
+    assert {len(m.symbols) for m, _ in st["de"]} == {2}
+    assert len({m.get_hash() for m, _ in st["de"]}) == 2
+    assert len(st["be"]) == 3 and len(st["ie"]) == 3
+
+    def energy(m):
+        return float(np.sum(np.asarray(m.geometry) ** 2)) + 0.1 * len(m.symbols)
+
+    tot = {k: sum(c * energy(m) for m, c in v) for k, v in st.items()}
+    assert tot["be"] == pytest.approx(tot["ie"] + tot["de"], abs=1e-10)
+
+
+def test_reaction_energies_reads_merged_de():
+    from types import SimpleNamespace as NS
+    from beep.workflows.be_assemble_periodic import reaction_energies
+
+    def comp(coef, n, e):
+        return NS(coefficient=coef, molecule=NS(symbols=["X"] * n),
+                  singlepoint_record=NS(status="complete", properties={"return_energy": e}))
+
+    recs = {
+        "elec": NS(status="complete", components=[comp(1, 2, -3.90), comp(-1, 2, -3.95)]),
+        "disp": NS(status="complete", components=[comp(1, 2, -0.01), comp(-1, 2, -0.02)]),
+    }
+
+    class DS:
+        def iterate_records(self, entry_names, specification_names, include):
+            for n in entry_names:
+                for sp in specification_names:
+                    yield n, sp, recs[sp]
+
+    import logging
+    out = reaction_energies(DS(), "de", ["s"], "elec", "disp", logging.getLogger("t"))
+    assert out["s"]["total"] == pytest.approx(0.05 + 0.01)
+    # be/ie still require their full shape
+    assert reaction_energies(DS(), "ie", ["s"], "elec", "disp", logging.getLogger("t")) == {}
