@@ -7,9 +7,8 @@ from .base import ServerConfig, LevelOfTheory
 class BeAssemblePeriodicConfig(BaseModel):
     """Extraction workflow for periodic binding energies.
 
-    Fetches the paired MACE electronic + explicit dispersion single-point
-    energies submitted by ``be_comp_periodic``, sums them to composite BE
-    energies, and computes per site::
+    Fetches the paired MACE electronic + explicit dispersion reaction records
+    submitted by ``be_comp_periodic`` and sums them per site, e.g.::
 
         BE = E(complex) - E(bare_site) - E(adsorbate_gas)
 
@@ -17,9 +16,9 @@ class BeAssemblePeriodicConfig(BaseModel):
     (``zpve_correction_kcal_mol``). Writes per-slab + aggregated CSV
     outputs under ``<molecule>/data/``.
 
-    Only sites COMPLETE in all three record sets (complex SP + bare-surface
-    SP + gas-phase SP) yield a BE; missing/errored records are logged and
-    the site is skipped in the CSV.
+    Only sites whose reaction records (and their components) are COMPLETE
+    yield a value; missing/errored records are logged and the site is
+    skipped in the CSV.
     """
     workflow: Literal["be_assemble_periodic"] = Field(..., description="Must be 'be_assemble_periodic'")
     server: ServerConfig = Field(ServerConfig(), description="QCFractal server connection settings")
@@ -58,8 +57,8 @@ class BeAssemblePeriodicConfig(BaseModel):
     sp_dataset_suffix: str = Field(
         "",
         description=(
-            "Suffix appended to the per-slab BE SinglepointDataset names "
-            "('<mol>_<slab>_be_sp<suffix>' and '<mol>_<slab>_surface_be_sp<suffix>'). "
+            "Suffix appended to the per-slab ReactionDataset names "
+            "('<mol>_<slab>_be<suffix>', '_ie<suffix>', '_de<suffix>'). "
             "Entries are keyed by site name, so geometries from a different "
             "opt_level_of_theory must go to their own datasets (e.g. '_v1'). "
             "Default '' keeps the historical names."

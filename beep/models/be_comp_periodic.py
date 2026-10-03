@@ -7,10 +7,10 @@ from .base import ServerConfig, LevelOfTheory
 class BeCompPeriodicConfig(BaseModel):
     """Submission workflow for periodic binding energies.
 
-    Registers a range-separated MACE + explicit dispersion pair of specs on
-    three SinglepointDatasets (per slab: complex, bare-surface; plus one
-    shared gas-phase adsorbate) and submits the single-point energies.
-    Assembly into per-site BEs happens in ``be_assemble_periodic``.
+    Per slab, builds one ReactionDataset per quantity (``_be``, ``_ie``, ``_de``),
+    each entry carrying its site's stoichiometry, registers a range-separated
+    MACE + explicit dispersion pair of periodic reaction specs and submits them.
+    Assembly into per-site BE / IE / DE happens in ``be_assemble_periodic``.
 
     Consumes the datasets ``sampling_periodic`` produces:
     - ``<molecule>_<slab>``            optimized adsorbate + slab complexes
@@ -75,16 +75,15 @@ class BeCompPeriodicConfig(BaseModel):
         "",
         description=(
             "Suffix of the sampling run to evaluate ('<mol>_<slab><suffix>' and its "
-            "'_surface'); the BE single points go to '<mol>_<slab><suffix>_be_sp', "
-            "'<mol>_<slab><suffix>_surface_be_sp' and '<mol>_gas_be_sp<suffix>'. "
+            "'_surface'); the reactions go to '<mol>_<slab><suffix>_be', '_ie' and '_de'. "
             "Default '' keeps the historical names."
         ),
     )
     sp_dataset_suffix: str = Field(
         "",
         description=(
-            "Suffix appended to the per-slab BE SinglepointDataset names "
-            "('<mol>_<slab>_be_sp<suffix>' and '<mol>_<slab>_surface_be_sp<suffix>'). "
+            "Suffix appended to the per-slab ReactionDataset names "
+            "('<mol>_<slab>_be<suffix>', '_ie<suffix>', '_de<suffix>'). "
             "Entries are keyed by site name, so geometries from a different "
             "opt_level_of_theory must go to their own datasets (e.g. '_v1'). "
             "Default '' keeps the historical names."

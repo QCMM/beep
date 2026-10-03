@@ -1,16 +1,14 @@
-"""BEEP be_comp_periodic — submit periodic BE single-points on sampling outputs.
+"""BEEP be_comp_periodic — submit periodic BE / IE / DE on sampling outputs.
 
-Per slab, registers the range-separated MACE + explicit-dispersion pair of
-SP specs on:
-- ``<smol>_<slab>_be_sp``            (complex geometries from sampling_periodic)
-- ``<smol>_<slab>_surface_be_sp``    (per-site bare-surface geometries)
-
-Once (across all runs), on:
-- ``<smol>_gas_be_sp``               (gas-phase adsorbate, non-periodic)
-With ``quantity`` 'ie' or 'all', the interaction energy as a ReactionDataset:
-- ``<smol>_<slab>_ie_nocp``          (complex - slab - adsorbate, fragments frozen at the
-                                       complex geometry; one periodic spec for all three)
-'ie' needs no bare-surface dataset and skips the gas-phase reference.
+Per slab, one ReactionDataset per quantity, each entry (one per site) carrying its own
+stoichiometry (:func:`beep.core.stoichiometry.periodic_stoichiometry`):
+- ``<smol>_<slab>_be``   complex - relaxed bare surface - gas-phase adsorbate
+- ``<smol>_<slab>_ie``   complex - slab - adsorbate (fragments frozen at the complex geometry)
+- ``<smol>_<slab>_de``   frozen slab + frozen adsorbate - relaxed bare surface - gas adsorbate
+``quantity`` 'be' builds ``_be``, 'ie' builds ``_ie`` (no bare surface or gas-phase reference
+needed), 'all' builds all three. Every component is evaluated with the same periodic
+specification (cell, pbc), as the range-separated pair of an electronic (MACE) and a
+dispersion reaction specification; a component shared between datasets is one record.
 
 Submits everything, waits for completion. Assembly happens in
 ``be_assemble_periodic``.
@@ -24,17 +22,17 @@ from beep.core.periodic_sampler import (
     filter_periodic_sites,
     pad_nonperiodic_axes,
 )
-from beep.core.stoichiometry import periodic_ie_nocp_stoichiometry
+from beep.core.stoichiometry import periodic_stoichiometry
 
 BOHR2ANG = 0.529177210903
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from qcportal import PortalClient as FractalClient
 
 from qcportal.reaction import ReactionDatasetNewEntry
 
-from ..core.entry_guard import check_entry_geometry, guard_reused_entries
+from ..core.entry_guard import check_entry_geometry
 from ..models.be_comp_periodic import BeCompPeriodicConfig
 from ..models.base import safe_config_dump
 from ..core.logging_utils import beep_banner
@@ -66,7 +64,8 @@ def config_summary_msg(config: BeCompPeriodicConfig) -> str:
         f"  BE dispersion:        {config.be_dispersion}",
         f"  Quantity:             {config.quantity}"
         + (f" (sites: {config.ie_site_filter})" if config.quantity == "ie" else ""),
-        f"  Datasets:             <mol>_<slab>{config.dataset_suffix} (+ _surface, _be_sp)",
+        f"  Datasets:             <mol>_<slab>{config.dataset_suffix}_{{{','.join(_quantity_kinds(config.quantity))}}}"
+        f"{config.sp_dataset_suffix}",
         f"  PBC (slab SPs):       {config.pbc}",
         f"  Cell (slab SPs):      {cell_source}",
         f"  Compute tag:          {config.be_tag}",
@@ -76,86 +75,77 @@ def config_summary_msg(config: BeCompPeriodicConfig) -> str:
     return "\n".join(lines)
 
 
-def _build_be_specs(
-    ds_sp,
-    electronic_lot,
-    be_dispersion: str,
-    keywords_periodic: dict,
-    keywords_gas: dict,
-    logger,
-    periodic: bool,
-) -> Tuple[List[str], str, str]:
-    """Register the paired (electronic, dispersion) BE specs on a SinglepointDataset.
+def _quantity_kinds(quantity: str) -> List[str]:
+    """ReactionDataset suffixes built for a ``quantity``."""
+    return {"be": ["be"], "ie": ["ie"], "all": ["be", "ie", "de"]}[quantity]
 
-    Returns (spec_names, elec_spec, disp_spec). ``keywords_periodic`` is
-    used when ``periodic=True`` (adds cell + pbc); ``keywords_gas`` when
-    ``periodic=False`` (empty for a gas-phase adsorbate reference).
-    """
-    kw = keywords_periodic if periodic else keywords_gas
-    elec_alias = electronic_lot.alias  # MACE file stem
+
+def _build_reaction_specs(ds_rxn, kind: str, electronic_lot, be_dispersion: str,
+                          keywords_periodic: dict, logger) -> List[str]:
+    """Register the paired (electronic, dispersion) reaction specs on a periodic BE/IE/DE
+    ReactionDataset. The spec names are the electronic alias and alias + dispersion suffix;
+    both singlepoint specs carry the periodic keywords."""
+    elec_alias = electronic_lot.alias
     _bare, _disp_method, disp_program = _split_dispersion(be_dispersion)
     # Route D3 to the periodic-capable harness. The legacy ``dftd3`` executable
     # wrapper silently ignores cell/pbc, so a slab would get cluster dispersion
-    # with no error. Applied to the gas-phase specs too, so that the
-    # BE = complex - surface - gas difference cancels within one harness.
+    # with no error.
     disp_program = periodic_dispersion_program(disp_program)
     disp_suffix = be_dispersion[len(_bare):]
-
-    elec_spec = qcf.add_energy_spec(
-        ds_sp, spec_name=elec_alias,
-        method=electronic_lot.qc_method, basis=None, program="mace",
-        keywords=kw,
-        description=f"BE electronic ({electronic_lot.display})"
-                    + (" [periodic]" if periodic else " [gas]"),
-    )
-    disp_spec = qcf.add_energy_spec(
-        ds_sp, spec_name=f"{elec_alias}{disp_suffix}",
-        method=be_dispersion, basis=None, program=disp_program,
-        keywords=kw,
-        description=f"BE dispersion ({be_dispersion} via {disp_program})"
-                    + (" [periodic]" if periodic else " [gas]"),
-    )
-    logger.info(
-        f"  registered specs on {ds_sp.name}: {elec_spec}  +  {disp_spec}"
-    )
-    return [elec_spec, disp_spec], elec_spec, disp_spec
-
-
-def _build_ie_reaction_specs(ds_rxn, electronic_lot, be_dispersion: str, keywords_periodic: dict,
-                             logger) -> List[str]:
-    """Register the paired (electronic, dispersion) IE specs on the ie_nocp ReactionDataset, with
-    the same spec names and singlepoint content as ``_build_be_specs`` (periodic)."""
-    elec_alias = electronic_lot.alias
-    _bare, _disp_method, disp_program = _split_dispersion(be_dispersion)
-    disp_program = periodic_dispersion_program(disp_program)
-    disp_suffix = be_dispersion[len(_bare):]
+    label = kind.upper()
     elec = qcf.add_reaction_energy_spec(
         ds_rxn, spec_name=elec_alias, method=electronic_lot.qc_method, basis=None, program="mace",
-        keywords=keywords_periodic, description=f"IE electronic ({electronic_lot.display}) [periodic]",
+        keywords=keywords_periodic, description=f"{label} electronic ({electronic_lot.display}) [periodic]",
     )
     disp = qcf.add_reaction_energy_spec(
         ds_rxn, spec_name=f"{elec_alias}{disp_suffix}", method=be_dispersion, basis=None,
         program=disp_program, keywords=keywords_periodic,
-        description=f"IE dispersion ({be_dispersion} via {disp_program}) [periodic]",
+        description=f"{label} dispersion ({be_dispersion} via {disp_program}) [periodic]",
     )
     logger.info(f"  registered reaction specs on {ds_rxn.name}: {elec}  +  {disp}")
     return [elec, disp]
 
 
-def _submit_and_collect(
-    ds_sp, spec_names: List[str], subset: List[str], tag: str, logger,
-) -> List[int]:
-    """Submit SPs for a subset of entries + return the resulting record IDs."""
-    if not subset:
-        return []
-    meta = qcf.submit_singlepoints_in_dataset(ds_sp, spec_names, tag=tag, subset=subset)
-    logger.info(
-        f"  submit {ds_sp.name}: {meta.n_inserted} new, {meta.n_existing} existing"
-    )
+def _component_key(coefficient: float, mol) -> Tuple[float, int]:
+    return (float(coefficient), len(mol.symbols))
+
+
+def _guard_reused_reactions(ds_rxn, stoich: Dict[str, list], cell_ang, pbc) -> None:
+    """A reused entry must hold the same components: same coefficients and, component by
+    component (matched by coefficient and size), the same geometry modulo lattice vectors."""
+    reused = [n for n in ds_rxn.entry_names if n in stoich]
+    if not reused:
+        return
+    for entry in ds_rxn.iterate_entries(entry_names=reused):
+        old = sorted(((x.coefficient, x.molecule) for x in entry.stoichiometries),
+                     key=lambda cm: _component_key(*cm))
+        new = sorted(((c, m) for m, c in stoich[entry.name]), key=lambda cm: _component_key(*cm))
+        if [_component_key(*cm) for cm in old] != [_component_key(*cm) for cm in new]:
+            raise ValueError(
+                f"{ds_rxn.name}/{entry.name}: an entry of this name already exists with a different "
+                f"stoichiometry. Give this run its own datasets with 'dataset_suffix' (e.g. '_v1')."
+            )
+        for (_, m_old), (_, m_new) in zip(old, new):
+            check_entry_geometry(m_old, m_new, entry.name, ds_rxn.name, cell_ang=cell_ang, pbc=pbc)
+
+
+def _submit_reactions(ds_rxn, stoich: Dict[str, list], spec_names: List[str], tag: str,
+                      cell_ang, pbc, logger) -> List[int]:
+    """Add the missing entries (``stoich``: name -> [(molecule, coefficient)]), submit every
+    entry for ``spec_names`` and return the reaction record IDs."""
+    _guard_reused_reactions(ds_rxn, stoich, cell_ang, pbc)
+    existing = set(ds_rxn.entry_names)
+    new_entries = [ReactionDatasetNewEntry(name=n, stoichiometries=[(c, m) for m, c in st])
+                   for n, st in stoich.items() if n not in existing]
+    if new_entries:
+        qcf._check_insert_meta(ds_rxn.add_entries(new_entries), f"entries in {ds_rxn.name}")
+    names = sorted(stoich)
+    meta = ds_rxn.submit(entry_names=names, specification_names=spec_names, compute_tag=tag)
+    logger.info(f"  submit {ds_rxn.name}: {meta.n_inserted} new, {meta.n_existing} existing")
     pids: List[int] = []
     for spec_name in spec_names:
-        for entry_name in subset:
-            rec = ds_sp.get_record(entry_name, spec_name)
+        for n in names:
+            rec = ds_rxn.get_record(n, spec_name)
             if rec is not None:
                 pids.append(rec.id)
     return pids
@@ -216,28 +206,16 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
     elec_lot = config.be_electronic_lot
     opt_lot = config.opt_level_of_theory
 
-    # --- Gas-phase adsorbate reference (once) ---
+    # --- Gas-phase adsorbate (BE/DE reference; its charge and multiplicity also set the
+    #     frozen adsorbate fragment's) ---
     logger.info("\n--- gas-phase adsorbate reference ---")
     ds_sm = qcf.get_collection(client, "OptimizationDataset", config.small_molecule_collection)
     adsorbate = gas_adsorbate(ds_sm, smol_name, elec_lot, logger)
 
     all_pids: List[int] = []
-    if config.quantity in ("be", "all"):
-        ds_gas = qcf.get_or_create_singlepoint_dataset(client, f"{smol_name}_gas_be_sp{config.dataset_suffix}")
-        gas_specs, _, _ = _build_be_specs(
-            ds_gas, elec_lot, config.be_dispersion,
-            keywords_periodic={}, keywords_gas={}, logger=logger, periodic=False,
-        )
-        existing_gas = set(ds_gas.entry_names)
-        guard_reused_entries(ds_gas, [(smol_name, adsorbate)], optimization=False)
-        if smol_name not in existing_gas:
-            qcf.add_singlepoint_entries(ds_gas, [(smol_name, adsorbate)])
-        all_pids.extend(_submit_and_collect(
-            ds_gas, gas_specs, subset=[smol_name], tag=config.be_tag, logger=logger,
-        ))
     n_ads = len(adsorbate.symbols)
 
-    # --- Per-slab SPs: complexes, bare surfaces (be/all), frozen fragments (ie/all) ---
+    # --- Per slab: complexes, bare surfaces (be/all) -> BE / IE / DE reactions ---
     for c, slab_name in enumerate(config.surface_clusters):
         logger.info("\n" + "=" * 80)
         logger.info(f"  Slab {c+1}/{len(config.surface_clusters)}: {slab_name}")
@@ -329,102 +307,38 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
         else:
             logger.info(f"  IE sites: all {len(complete_common)} complete complexes")
 
-        # Register + submit on complex SP dataset
-        ds_complex_sp = qcf.get_or_create_singlepoint_dataset(
-            client, f"{complex_dset_name}_be_sp{config.sp_dataset_suffix}",
-        )
-        specs_complex, _, _ = _build_be_specs(
-            ds_complex_sp, elec_lot, config.be_dispersion,
-            keywords_periodic=keywords_periodic, keywords_gas={},
-            logger=logger, periodic=True,
-        )
-        existing = set(ds_complex_sp.entry_names)
-        guard_reused_entries(ds_complex_sp, [(n, complex_final_map[n]) for n in complete_common],
-                             optimization=False, cell_ang=cell_ang, pbc=config.pbc)
-        new_entries = [
-            (n, complex_final_map[n]) for n in complete_common if n not in existing
-        ]
-        if new_entries:
-            qcf.add_singlepoint_entries(ds_complex_sp, new_entries)
-        pids_c = _submit_and_collect(
-            ds_complex_sp, specs_complex, subset=complete_common,
-            tag=config.be_tag, logger=logger,
-        )
-        all_pids.extend(pids_c)
-
-        pids_s: List[int] = []
-        if want_be:
-            # Register + submit on bare-surface SP dataset
-            ds_surface_sp = qcf.get_or_create_singlepoint_dataset(
-                client, f"{surface_dset_name}_be_sp{config.sp_dataset_suffix}",
+        # One ReactionDataset per quantity, each entry carrying its stoichiometry
+        n_slab = len(complex_final_map[complete_common[0]].symbols) - n_ads
+        stoich = {
+            n: periodic_stoichiometry(
+                complex_final_map[n], n_slab,
+                surface_mol=surface_final_map[n] if want_be else None, gas_mol=adsorbate,
             )
-            specs_surface, _, _ = _build_be_specs(
-                ds_surface_sp, elec_lot, config.be_dispersion,
-                keywords_periodic=keywords_periodic, keywords_gas={},
-                logger=logger, periodic=True,
-            )
-            existing = set(ds_surface_sp.entry_names)
-            guard_reused_entries(ds_surface_sp, [(n, surface_final_map[n]) for n in complete_common],
-                                 optimization=False, cell_ang=cell_ang, pbc=config.pbc)
-            new_entries = [
-                (n, surface_final_map[n]) for n in complete_common if n not in existing
-            ]
-            if new_entries:
-                qcf.add_singlepoint_entries(ds_surface_sp, new_entries)
-            pids_s = _submit_and_collect(
-                ds_surface_sp, specs_surface, subset=complete_common,
-                tag=config.be_tag, logger=logger,
-            )
-            all_pids.extend(pids_s)
-
-        pids_ie: List[int] = []
-        if config.quantity in ("ie", "all"):
-            # IE as a ReactionDataset with the ie_nocp stoichiometry (as in be_hess for clusters):
-            # complex - slab - adsorbate, fragments frozen at the complex geometry, all three with
-            # the same periodic specification, electronic and dispersion as separate specs.
-            n_slab = len(complex_final_map[complete_common[0]].symbols) - n_ads
+            for n in complete_common
+        }
+        n_records = 0
+        for kind in _quantity_kinds(config.quantity):
             ds_rxn = qcf.create_reaction_dataset(
-                client, f"{complex_dset_name}_ie_nocp{config.sp_dataset_suffix}",
+                client, f"{complex_dset_name}_{kind}{config.sp_dataset_suffix}",
             )
-            rxn_specs = _build_ie_reaction_specs(
-                ds_rxn, elec_lot, config.be_dispersion, keywords_periodic, logger,
+            specs = _build_reaction_specs(
+                ds_rxn, kind, elec_lot, config.be_dispersion, keywords_periodic, logger,
             )
-            stoich = {
-                n: periodic_ie_nocp_stoichiometry(
-                    complex_final_map[n], n_slab,
-                    molecular_charge=adsorbate.molecular_charge,
-                    molecular_multiplicity=adsorbate.molecular_multiplicity,
-                )
-                for n in complete_common
-            }
-            # a reused entry must hold the same complex (first component)
-            existing = set(ds_rxn.entry_names)
-            stored = {e.name: e for e in ds_rxn.iterate_entries(entry_names=[n for n in stoich if n in existing])}
-            for n, e in stored.items():
-                first = next(x.molecule for x in e.stoichiometries if x.coefficient > 0)
-                check_entry_geometry(first, stoich[n][0][0], n, ds_rxn.name, cell_ang=cell_ang, pbc=config.pbc)
-            new_entries = [ReactionDatasetNewEntry(name=n, stoichiometries=[(c, m) for m, c in st])
-                           for n, st in stoich.items() if n not in existing]
-            if new_entries:
-                qcf._check_insert_meta(ds_rxn.add_entries(new_entries), f"ie_nocp entries in {ds_rxn.name}")
-            meta = ds_rxn.submit(entry_names=complete_common, specification_names=rxn_specs,
-                                 compute_tag=config.be_tag)
-            logger.info(f"  submit {ds_rxn.name}: {meta.n_inserted} new, {meta.n_existing} existing")
-            for spec_name in rxn_specs:
-                for n in complete_common:
-                    rec = ds_rxn.get_record(n, spec_name)
-                    if rec is not None:
-                        pids_ie.append(rec.id)
-            all_pids.extend(pids_ie)
+            pids = _submit_reactions(
+                ds_rxn, {n: st[kind] for n, st in stoich.items()}, specs,
+                tag=config.be_tag, cell_ang=cell_ang, pbc=config.pbc, logger=logger,
+            )
+            n_records += len(pids)
+            all_pids.extend(pids)
 
         logger.info(
-            f"  {bcheck} slab {slab_name}: submitted {len(pids_c) + len(pids_s) + len(pids_ie)} SPs "
+            f"  {bcheck} slab {slab_name}: submitted {n_records} reactions "
             f"({len(complete_common)} sites, quantity={config.quantity})"
         )
 
     # --- Wait for the whole set ---
     if all_pids:
-        logger.info(f"\nWaiting on {len(all_pids)} SP records (tag='{config.be_tag}')")
+        logger.info(f"\nWaiting on {len(all_pids)} reaction records (tag='{config.be_tag}')")
         qcf.wait_for_completion(client, all_pids, POLL_FREQUENCY_SEC, logger)
 
     logger.info("\n" + "=" * 80)

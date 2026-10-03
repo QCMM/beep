@@ -108,15 +108,24 @@ def test_gas_adsorbate_without_spec_uses_entry_geometry():
 
 
 # ---------------------------------------------------------------------------
-# ie_nocp ReactionDataset form
+# Periodic BE / IE / DE ReactionDatasets
 # ---------------------------------------------------------------------------
 
-def test_periodic_ie_nocp_stoichiometry():
-    from beep.core.stoichiometry import periodic_ie_nocp_stoichiometry
+def _surface_and_gas():
+    surf = _complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]])
+    surf = strip_adsorbate(surf, 3)
+    gas = qcel.models.Molecule(symbols=["C", "O"], geometry=[0, 0, 0, 0, 0, 2.13],
+                               molecular_charge=0, molecular_multiplicity=1)
+    return surf, gas
+
+
+def test_periodic_stoichiometry_ie_only_without_references():
+    from beep.core.stoichiometry import periodic_stoichiometry
     mol = _complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]])
-    st = periodic_ie_nocp_stoichiometry(mol, 3, molecular_charge=0, molecular_multiplicity=1)
-    assert [c for _, c in st] == [1.0, -1.0, -1.0]
-    cpx, slab, ads = (m for m, _ in st)
+    st = periodic_stoichiometry(mol, 3)
+    assert set(st) == {"ie"}
+    assert [c for _, c in st["ie"]] == [1.0, -1.0, -1.0]
+    cpx, slab, ads = (m for m, _ in st["ie"])
     assert cpx is mol
     assert list(slab.symbols) == ["O", "H", "H"] and list(ads.symbols) == ["C", "O"]
     # fragments keep the in-complex coordinates
@@ -124,12 +133,91 @@ def test_periodic_ie_nocp_stoichiometry():
                                np.asarray(mol.geometry).reshape(-1, 3))
 
 
-def test_split_ie_components():
-    from beep.workflows.be_assemble_periodic import split_ie_components
-    comps = [(-1.0, 2, -113.0), (1.0, 5, -190.01), (-1.0, 3, -77.0)]
-    assert split_ie_components(comps) == (-190.01, -77.0, -113.0)
-    assert split_ie_components(comps[:2]) is None
-    assert split_ie_components([(1.0, 5, 0.0), (-1.0, 2, 0.0), (-1.0, 2, 0.0)]) is None
+def test_periodic_stoichiometry_be_equals_ie_plus_de():
+    from beep.core.stoichiometry import periodic_stoichiometry
+    mol = _complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]])
+    surf, gas = _surface_and_gas()
+    st = periodic_stoichiometry(mol, 3, surface_mol=surf, gas_mol=gas)
+    assert set(st) == {"be", "ie", "de"}
+    assert st["be"][1][0] is surf and st["be"][2][0] is gas
+    assert [c for _, c in st["de"]] == [1.0, 1.0, -1.0, -1.0]
+
+    # any per-molecule energy: sum_be = sum_ie + sum_de
+    def energy(m):
+        return float(np.sum(np.asarray(m.geometry) ** 2)) + 0.1 * len(m.symbols)
+
+    tot = {k: sum(c * energy(m) for m, c in v) for k, v in st.items()}
+    assert tot["be"] == pytest.approx(tot["ie"] + tot["de"], abs=1e-10)
+
+
+def test_split_components():
+    from beep.workflows.be_assemble_periodic import split_components
+    ie = [(-1.0, 2, -113.0), (1.0, 5, -190.01), (-1.0, 3, -77.0)]
+    assert split_components(ie, "ie") == {"complex": -190.01, "slab_frozen": -77.0, "ads_frozen": -113.0}
+    assert split_components(ie, "be") == {"complex": -190.01, "surface": -77.0, "gas": -113.0}
+    de = [(1.0, 3, -76.9), (1.0, 2, -112.9), (-1.0, 3, -77.0), (-1.0, 2, -113.0)]
+    assert split_components(de, "de") == {"slab_frozen": -76.9, "ads_frozen": -112.9,
+                                          "surface": -77.0, "gas": -113.0}
+    assert split_components(ie[:2], "ie") is None
+    assert split_components(de, "ie") is None
+    assert split_components([(1.0, 5, 0.0), (-1.0, 2, 0.0), (-1.0, 2, 0.0)], "ie") is None
+
+
+def test_reaction_energies_sum_specs_and_total():
+    from types import SimpleNamespace as NS
+    from beep.workflows.be_assemble_periodic import reaction_energies
+
+    def comp(coef, n, e):
+        return NS(coefficient=coef, molecule=NS(symbols=["X"] * n),
+                  singlepoint_record=NS(status="complete", properties={"return_energy": e}))
+
+    recs = {
+        "elec": NS(status="complete", components=[comp(1, 5, -10.0), comp(-1, 3, -6.0), comp(-1, 2, -3.9)]),
+        "disp": NS(status="complete", components=[comp(1, 5, -0.30), comp(-1, 3, -0.20), comp(-1, 2, -0.01)]),
+    }
+
+    class DS:
+        def iterate_records(self, entry_names, specification_names, include):
+            for n in entry_names:
+                for sp in specification_names:
+                    if not (n == "b" and sp == "disp"):
+                        yield n, sp, recs[sp]
+
+    import logging
+    out = reaction_energies(DS(), "ie", ["a", "b"], "elec", "disp", logging.getLogger("t"))
+    assert set(out) == {"a"}  # 'b' lacks its dispersion record
+    assert out["a"]["complex"] == pytest.approx(-10.30)
+    assert out["a"]["total"] == pytest.approx(-10.30 + 6.20 + 3.91)
+
+
+def test_interaction_rows_per_site_gas():
+    rows = interaction_rows({"s": -10.0}, {"s": -6.0}, {"s": -3.9}, {"s": -6.1}, {"s": -3.95})
+    n, ec, es, ea, ie, be, de_slab, de_ads, de = rows[0]
+    assert be == pytest.approx(ie + de)
+    assert be == pytest.approx((-10.0 + 6.1 + 3.95) * HARTREE2KCAL)
+
+
+def test_guard_reused_reactions():
+    from types import SimpleNamespace as NS
+    from beep.workflows.be_comp_periodic import _guard_reused_reactions
+    from beep.core.stoichiometry import periodic_stoichiometry
+    mol = _complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]])
+    st = periodic_stoichiometry(mol, 3)["ie"]
+
+    class DS:
+        name = "ds"
+        def __init__(self, stored):
+            self.stored = stored
+            self.entry_names = ["s"]
+        def iterate_entries(self, entry_names):
+            yield NS(name="s", stoichiometries=[NS(coefficient=c, molecule=m) for m, c in self.stored])
+
+    _guard_reused_reactions(DS(st), {"s": st}, CELL, PBC)  # same entry: fine
+    moved = periodic_stoichiometry(_complex([[5.0, 5.0, 8.5], [5.0, 5.0, 9.63]]), 3)["ie"]
+    with pytest.raises(ValueError):
+        _guard_reused_reactions(DS(st), {"s": moved}, CELL, PBC)
+    with pytest.raises(ValueError):
+        _guard_reused_reactions(DS(st[:2]), {"s": st}, CELL, PBC)
 
 
 def test_reaction_component_energies():

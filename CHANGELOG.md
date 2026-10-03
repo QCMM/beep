@@ -260,6 +260,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`be_comp_periodic` / `be_assemble_periodic`: BE, IE and DE as
+  ReactionDatasets.** The periodic energies were single points in
+  separate datasets (`<smol>_<slab>_be_sp`, `_surface_be_sp`,
+  `<smol>_gas_be_sp`, and for the IE `_ie_slab_sp` / `_ie_ads_sp`),
+  combined only in the assembly code. Each quantity is now a
+  ReactionDataset per slab whose entries carry the site's stoichiometry
+  (new `periodic_stoichiometry`): `<smol>_<slab>_be` (complex - relaxed
+  bare surface - gas adsorbate), `_ie` (complex - slab - adsorbate,
+  frozen at the complex geometry) and `_de` (frozen fragments - relaxed
+  references), so BE = IE + DE holds on the server. `quantity` 'be' and
+  'ie' build one dataset, 'all' all three. Every component uses the same
+  periodic specification, the gas-phase adsorbate included; a component
+  shared between datasets is one record. The assembly reads the reaction
+  records and their components and writes the same CSVs as before.
+  Datasets from earlier runs are not read; rerunning `be_comp_periodic`
+  rebuilds them from the existing optimizations and reuses the existing
+  periodic single-point records.
+
 - **Program keywords are `qc_keywords` in every workflow config.** The
   per-program QC options (psi4/ORCA/Gaussian keywords such as `guess`,
   `damping_percentage`, `scf_type`, `reference`) that become a
