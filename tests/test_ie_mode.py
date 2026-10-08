@@ -280,3 +280,38 @@ def test_reaction_energies_reads_merged_de():
     assert out["s"]["total"] == pytest.approx(0.05 + 0.01)
     # be/ie still require their full shape
     assert reaction_energies(DS(), "ie", ["s"], "elec", "disp", logging.getLogger("t")) == {}
+
+
+# ---------------------------------------------------------------------------
+# One ReactionDataset per surface family
+# ---------------------------------------------------------------------------
+
+def test_common_cell_pads_to_the_largest_nonperiodic_axis():
+    from beep.workflows.be_comp_periodic import common_cell
+    def job(slab, z):
+        return (slab, f"CO_{slab}", {}, [[31.06, 0, 0], [0, 31.06, 0], [0, 0, z]])
+    cell = common_cell([job("npASW_01", 99.44), job("npASW_02", 100.565), job("npASW_03", 100.913)], PBC)
+    assert cell[2][2] == pytest.approx(100.913) and cell[0][0] == pytest.approx(31.06)
+
+
+def test_common_cell_rejects_another_lateral_cell():
+    from beep.workflows.be_comp_periodic import common_cell
+    jobs = [("a", "x", {}, [[31.06, 0, 0], [0, 31.06, 0], [0, 0, 99.0]]),
+            ("b", "y", {}, [[25.0, 0, 0], [0, 31.06, 0], [0, 0, 99.0]])]
+    with pytest.raises(ValueError):
+        common_cell(jobs, PBC)
+
+
+def test_slab_entry_matches_the_slab_prefix_only():
+    from beep.workflows.be_assemble_periodic import slab_entry
+    assert slab_entry("npASW_01_X02_Y02", "npASW_01")
+    assert not slab_entry("npASW_010_X02_Y02", "npASW_01")
+    assert not slab_entry("npASW_02_X02_Y02", "npASW_01")
+
+
+def test_surface_family_config_field():
+    raw = json.loads((EXAMPLES / "be_comp_periodic.json").read_text())
+    assert BeCompPeriodicConfig(**raw).surface_family is None
+    assert BeCompPeriodicConfig(**{**raw, "surface_family": "npASW"}).surface_family == "npASW"
+    raw_a = json.loads((EXAMPLES / "be_assemble_periodic.json").read_text())
+    assert BeAssemblePeriodicConfig(**{**raw_a, "surface_family": "npASW"}).surface_family == "npASW"
