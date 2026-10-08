@@ -163,6 +163,11 @@ def reaction_energies(ds_rxn, kind: str, names, elec_spec: str, disp_spec: str,
     return out
 
 
+def slab_entry(entry_name: str, slab_name: str) -> bool:
+    """Entry of ``slab_name`` in a surface-family dataset: '<slab>_X..._Y...' (not '<slab>0_...')."""
+    return entry_name.startswith(slab_name + "_")
+
+
 def run(config: BeAssemblePeriodicConfig, client: FractalClient) -> None:
     logger = logging.getLogger("beep")
 
@@ -194,21 +199,27 @@ def run(config: BeAssemblePeriodicConfig, client: FractalClient) -> None:
     ie_summary_rows = []  # (slab, *interaction_rows tuple)
     total_ie_written = 0
 
+    fetched: Dict[str, object] = {}
     for slab_name in config.surface_clusters:
         logger.info("\n" + "=" * 80)
         logger.info(f"  Slab: {slab_name}")
         logger.info("=" * 80)
 
-        base = f"{smol_name}_{slab_name}{config.dataset_suffix}"
+        base = f"{smol_name}_{config.surface_family or slab_name}{config.dataset_suffix}"
         kinds = ["be"] * want_be + ["ie"] * want_ie + ["de"] * (want_be and want_ie)
         try:
-            ds = {k: qcf.get_collection(client, "reaction", f"{base}_{k}{config.sp_dataset_suffix}")
-                  for k in kinds}
+            for k in kinds:                       # a family dataset is fetched once for all slabs
+                name = f"{base}_{k}{config.sp_dataset_suffix}"
+                if name not in fetched:
+                    fetched[name] = qcf.get_collection(client, "reaction", name)
+            ds = {k: fetched[f"{base}_{k}{config.sp_dataset_suffix}"] for k in kinds}
         except Exception as e:
             logger.info(f"  skip {slab_name}: {e}")
             continue
-        en = {k: reaction_energies(ds[k], k, sorted(ds[k].entry_names), elec_spec, disp_spec, logger)
-             for k in kinds}
+        # one dataset per surface family holds every slab: this slab's entries carry its name
+        names = {k: sorted(n for n in ds[k].entry_names
+                           if not config.surface_family or slab_entry(n, slab_name)) for k in kinds}
+        en = {k: reaction_energies(ds[k], k, names[k], elec_spec, disp_spec, logger) for k in kinds}
 
         if want_be:
             rows = ["entry_name,E_complex_Ha,E_surface_Ha,E_gas_Ha,BE_kcal_mol,BE_ZPVE_kcal_mol"]
@@ -225,7 +236,7 @@ def run(config: BeAssemblePeriodicConfig, client: FractalClient) -> None:
             csv_path.write_text("\n".join(rows) + "\n")
             total_sites_written += n_ok
             logger.info(
-                f"  {bcheck} {slab_name}: {n_ok}/{len(ds['be'].entry_names)} BE sites written  →  {csv_path.name}"
+                f"  {bcheck} {slab_name}: {n_ok}/{len(names['be'])} BE sites written  →  {csv_path.name}"
             )
 
         if want_ie:
@@ -256,7 +267,7 @@ def run(config: BeAssemblePeriodicConfig, client: FractalClient) -> None:
             ie_path.write_text("\n".join(lines) + "\n")
             total_ie_written += len(rows_ie)
             logger.info(
-                f"  {bcheck} {slab_name}: {len(rows_ie)}/{len(ds['ie'].entry_names)} IE sites written  →  {ie_path.name}"
+                f"  {bcheck} {slab_name}: {len(rows_ie)}/{len(names['ie'])} IE sites written  →  {ie_path.name}"
             )
 
     # --- Aggregate summary CSV ---

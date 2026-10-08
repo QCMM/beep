@@ -64,6 +64,16 @@ class BeAssemblePeriodicConfig(BaseModel):
             "Default '' keeps the historical names."
         ),
     )
+    surface_family: Optional[str] = Field(
+        None,
+        description=(
+            "When set (e.g. 'npASW'), the reactions of ALL slabs go to one ReactionDataset per "
+            "quantity, '<mol>_<surface_family><suffix>_be' / '_ie' / '_de' (+ sp_dataset_suffix), "
+            "instead of one per slab. The slabs must share the lateral cell; the non-periodic axis "
+            "is padded to the largest value over the slabs so that one specification fits every "
+            "entry. Entry names carry the slab ('<slab>_X..._Y...'). None: one dataset per slab."
+        ),
+    )
     quantity: Literal["be", "ie", "all"] = Field(
         "be",
         description=(

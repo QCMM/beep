@@ -6,7 +6,9 @@ stoichiometry (:func:`beep.core.stoichiometry.periodic_stoichiometry`):
 - ``<smol>_<slab>_ie``   complex - slab - adsorbate (fragments frozen at the complex geometry)
 - ``<smol>_<slab>_de``   frozen slab + frozen adsorbate - relaxed bare surface - gas adsorbate
 ``quantity`` 'be' builds ``_be``, 'ie' builds ``_ie`` (no bare surface or gas-phase reference
-needed), 'all' builds all three. Every component is evaluated with the same periodic
+needed), 'all' builds all three. With ``surface_family`` set, the slabs share one dataset per
+quantity, ``<smol>_<family>_be`` etc. (one specification: common lateral cell, non-periodic axis
+padded to the largest slab's; entry names carry the slab). Every component is evaluated with the same periodic
 specification (cell, pbc), as the range-separated pair of an electronic (MACE) and a
 dispersion reaction specification; a component shared between datasets is one record.
 
@@ -64,7 +66,7 @@ def config_summary_msg(config: BeCompPeriodicConfig) -> str:
         f"  BE dispersion:        {config.be_dispersion}",
         f"  Quantity:             {config.quantity}"
         + (f" (sites: {config.ie_site_filter})" if config.quantity == "ie" else ""),
-        f"  Datasets:             <mol>_<slab>{config.dataset_suffix}_{{{','.join(_quantity_kinds(config.quantity))}}}"
+        f"  Datasets:             <mol>_{config.surface_family or '<slab>'}{config.dataset_suffix}_{{{','.join(_quantity_kinds(config.quantity))}}}"
         f"{config.sp_dataset_suffix}",
         f"  PBC (slab SPs):       {config.pbc}",
         f"  Cell (slab SPs):      {cell_source}",
@@ -151,6 +153,24 @@ def _submit_reactions(ds_rxn, stoich: Dict[str, list], spec_names: List[str], ta
     return pids
 
 
+def common_cell(slab_jobs, pbc) -> list:
+    """One cell for the reactions of several slabs: they must share the periodic axes (within
+    1e-6 A); each non-periodic axis takes the largest padded length over the slabs (any length
+    above the slab's own padding is equally valid there)."""
+    cells = [np.asarray(cell, dtype=float) for _, _, _, cell in slab_jobs]
+    out = cells[0].copy()
+    for k in range(3):
+        if pbc[k]:
+            for (slab, _, _, _), c in zip(slab_jobs, cells):
+                if np.abs(c[k] - out[k]).max() > 1e-6:
+                    raise ValueError(f"surface_family: slab {slab} has another periodic cell vector {k} "
+                                     f"({c[k].tolist()} vs {out[k].tolist()}); slabs of one family must share "
+                                     f"the lateral cell")
+        else:
+            out[k, k] = max(float(c[k, k]) for c in cells)
+    return [list(row) for row in out]
+
+
 def _resolve_cell(config: BeCompPeriodicConfig, surface_extras, record_cell=None) -> list:
     """Config-level `cell` wins, then the cell the geometries were optimized
     under, then surface Molecule.extras['cell']."""
@@ -213,6 +233,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
     adsorbate = gas_adsorbate(ds_sm, smol_name, elec_lot, logger)
 
     all_pids: List[int] = []
+    slab_jobs = []          # (slab, complex dataset, stoichiometries, padded cell)
     n_ads = len(adsorbate.symbols)
 
     # --- Per slab: complexes, bare surfaces (be/all) -> BE / IE / DE reactions ---
@@ -282,10 +303,6 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             complex_final_map[complete_common[0]].geometry, dtype=float
         ).reshape(-1, 3) * BOHR2ANG
         cell_ang = pad_nonperiodic_axes(cell_ang, config.pbc, complex_geom)
-        keywords_periodic = {
-            "cell": [list(row) for row in cell_ang],
-            "pbc": list(config.pbc),
-        }
         logger.info(
             f"  cell for SPs (non-periodic axes padded): "
             f"{[round(float(cell_ang[i][i]), 2) for i in range(3)]} Angstrom"
@@ -307,7 +324,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
         else:
             logger.info(f"  IE sites: all {len(complete_common)} complete complexes")
 
-        # One ReactionDataset per quantity, each entry carrying its stoichiometry
+        # each entry carries its stoichiometry; submitted below, per slab or per surface family
         n_slab = len(complex_final_map[complete_common[0]].symbols) - n_ads
         stoich = {
             n: periodic_stoichiometry(
@@ -316,11 +333,21 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             )
             for n in complete_common
         }
+        slab_jobs.append((slab_name, complex_dset_name, stoich, cell_ang))
+        logger.info(f"  {bcheck} slab {slab_name}: {len(complete_common)} sites (quantity={config.quantity})")
+
+    # --- Submit: one ReactionDataset per quantity, per slab or for the whole surface family ---
+    if config.surface_family:
+        groups = [(f"{smol_name}_{config.surface_family}{config.dataset_suffix}",
+                   common_cell(slab_jobs, config.pbc),
+                   {n: st for _, _, stoich, _ in slab_jobs for n, st in stoich.items()})] if slab_jobs else []
+    else:
+        groups = [(dset, cell, stoich) for _, dset, stoich, cell in slab_jobs]
+    for base, cell_ang, stoich in groups:
+        keywords_periodic = {"cell": [list(row) for row in cell_ang], "pbc": list(config.pbc)}
         n_records = 0
         for kind in _quantity_kinds(config.quantity):
-            ds_rxn = qcf.create_reaction_dataset(
-                client, f"{complex_dset_name}_{kind}{config.sp_dataset_suffix}",
-            )
+            ds_rxn = qcf.create_reaction_dataset(client, f"{base}_{kind}{config.sp_dataset_suffix}")
             specs = _build_reaction_specs(
                 ds_rxn, kind, elec_lot, config.be_dispersion, keywords_periodic, logger,
             )
@@ -330,11 +357,8 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             )
             n_records += len(pids)
             all_pids.extend(pids)
-
-        logger.info(
-            f"  {bcheck} slab {slab_name}: submitted {n_records} reactions "
-            f"({len(complete_common)} sites, quantity={config.quantity})"
-        )
+        logger.info(f"  {bcheck} {base}: submitted {n_records} reactions ({len(stoich)} sites, "
+                    f"cell {[round(float(cell_ang[i][i]), 2) for i in range(3)]} A)")
 
     # --- Wait for the whole set ---
     if all_pids:

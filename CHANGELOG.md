@@ -260,6 +260,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`be_comp_periodic` / `be_assemble_periodic`: one ReactionDataset per
+  surface family.** New optional `surface_family` (e.g. `"npASW"`): the
+  reactions of all slabs go to `<smol>_<family><suffix>_be` / `_ie` / `_de`
+  instead of one dataset per slab. Per-slab datasets were needed only because
+  the non-periodic axis is padded per slab, so every slab had its own cell
+  keywords and specification; the slabs of a family share the lateral cell and
+  the non-periodic axis is now padded to the largest slab's (any padding above
+  a slab's own is equally valid). Slabs with another lateral cell raise. Entry
+  names already carry the slab; the assembly splits them back per slab and
+  writes the same CSVs. Default `None` keeps one dataset per slab.
+
+- **`sampling_periodic`: a deep cavity-scan best fit that is covered from
+  above goes to the top of the run.** A column running down the wall of a
+  narrow channel can stay inside the scan window for several Angstrom; its
+  best fit could then be the deep end, which placed CO in enclosed cavities
+  (~5 A under the surface, water above, positive frozen-fragment IE). If the
+  slab atoms above the best fit (within 3.5 A laterally) surround it with no
+  azimuthal gap of 120 deg or more, the candidate goes to the top of the run;
+  open channels keep their pore sites.
+
 - **`be_comp_periodic` / `be_assemble_periodic`: BE, IE and DE as
   ReactionDatasets.** The periodic energies were single points in
   separate datasets (`<smol>_<slab>_be_sp`, `_surface_be_sp`,
