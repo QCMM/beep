@@ -174,6 +174,38 @@ def test_find_cavity_z_takes_first_window_from_the_top():
     assert z is not None and z > 8.0          # at the top layer, not at z=2.5 by the bottom atom
 
 
+def _channel(closed: bool):
+    """A column at (5, 5) running down the wall of a channel: the upper wall 2.2 bohr off the
+    probe (z 6-10), the lower wall 2.49 bohr off (z 0-5.5), so the whole column stays in the
+    window and the deep end fits sampling_distance better. ``closed`` adds atoms above the
+    deep end on the other sides (a roof): an enclosed cavity."""
+    atoms = [[7.2, 5.0, z] for z in np.arange(6.0, 10.01, 0.5)]
+    atoms += [[7.49, 5.0, z] for z in np.arange(0.0, 5.51, 0.5)]
+    if closed:
+        atoms += [[5.0 + 2.3 * np.cos(a), 5.0 + 2.3 * np.sin(a), 8.0] for a in np.radians([90, 180, 270])]
+    return np.array(atoms)
+
+
+def test_find_cavity_z_enclosed_channel_goes_to_the_top():
+    """Best fit deep in a channel that is covered from above -> the top of the run."""
+    z = find_cavity_z(
+        _channel(closed=True), x=5.0, y=5.0, z_range_bohr=(0.0, 13.0),
+        scan_step_bohr=0.5, sampling_distance_bohr=2.5, window_bohr=1.0,
+        cell_diag_bohr=np.array([50.0, 50.0, 50.0]), pbc=[True, True, False],
+    )
+    assert z is not None and z >= 10.0
+
+
+def test_find_cavity_z_open_channel_keeps_the_pore_site():
+    """The same channel open to the vacuum (a wall on one side only): the deep best fit stays."""
+    z = find_cavity_z(
+        _channel(closed=False), x=5.0, y=5.0, z_range_bohr=(0.0, 13.0),
+        scan_step_bohr=0.5, sampling_distance_bohr=2.5, window_bohr=1.0,
+        cell_diag_bohr=np.array([50.0, 50.0, 50.0]), pbc=[True, True, False],
+    )
+    assert z is not None and z < 6.0
+
+
 def test_cavity_scan_range_floor():
     g = np.array([[0.0, 0.0, -2.0], [0.0, 0.0, 30.0]])
     assert cavity_scan_range(g, 4.7) == pytest.approx((-2.0, 34.7))

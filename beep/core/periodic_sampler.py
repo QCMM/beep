@@ -211,6 +211,8 @@ def find_cavity_z(
     window_bohr: float,
     cell_diag_bohr: np.ndarray,
     pbc: Sequence[bool],
+    cover_radius_bohr: float = 3.5 * ANG2BOHR,
+    min_open_gap_deg: float = 120.0,
 ) -> Optional[float]:
     """Scan z top-down for the first height that sits at ``sampling_distance`` from the slab.
 
@@ -222,10 +224,19 @@ def find_cavity_z(
     Only the first run counts: that is the local surface seen from the vacuum side. Taking
     the best fit over the whole range (as before) could pick a gap deep in the slab or at its
     frozen underside, i.e. a candidate buried under or below the slab.
+
+    A run can also be several Angstrom long, when the column runs down along the wall of a
+    channel without leaving the window; its best fit may then lie deep in the channel. That is
+    kept when the channel is open to the vacuum (a pore site the adsorbate can reach), but not
+    when the best-fit height is covered: if the slab atoms above it within ``cover_radius``
+    laterally surround the column with no azimuthal gap of ``min_open_gap_deg`` or more, the
+    candidate goes to the top of the run instead (an enclosed cavity, not reachable from the gas
+    phase).
     """
     z_lo, z_hi = z_range_bohr
     z_grid = np.arange(z_lo, z_hi, scan_step_bohr)
     best_z: Optional[float] = None
+    top_z: Optional[float] = None
     best_err = float("inf")
     lower = sampling_distance_bohr - window_bohr
     upper = sampling_distance_bohr
@@ -240,9 +251,29 @@ def find_cavity_z(
             if err < best_err:
                 best_err = err
                 best_z = float(z)
+            if top_z is None:
+                top_z = float(z)
         elif in_run:
             break
+    if best_z is not None and top_z is not None and best_z < top_z and _covered(
+            surface_geom_bohr, np.array([x, y, best_z]), cell_diag_bohr, pbc,
+            cover_radius_bohr, min_open_gap_deg):
+        return top_z
     return best_z
+
+
+def _covered(surface_geom_bohr: np.ndarray, point_bohr: np.ndarray, cell_diag_bohr: np.ndarray,
+             pbc: Sequence[bool], radius_bohr: float, min_open_gap_deg: float) -> bool:
+    """True if the slab atoms above ``point`` (by more than 0.5 A) within ``radius`` laterally
+    surround it: their azimuths leave no open gap of ``min_open_gap_deg`` or more."""
+    d = np.array([min_image_vec(a - point_bohr, cell_diag_bohr, pbc)
+                  for a in np.asarray(surface_geom_bohr, dtype=float).reshape(-1, 3)])
+    sel = (d[:, 2] > 0.5 * ANG2BOHR) & (np.hypot(d[:, 0], d[:, 1]) < radius_bohr)
+    if not sel.any():
+        return False
+    ang = np.sort(np.degrees(np.arctan2(d[sel, 1], d[sel, 0])) % 360.0)
+    gaps = np.diff(np.concatenate([ang, [ang[0] + 360.0]]))
+    return float(gaps.max()) < min_open_gap_deg
 
 
 def cavity_scan_range(surface_geom_bohr: np.ndarray, sampling_distance_bohr: float,
