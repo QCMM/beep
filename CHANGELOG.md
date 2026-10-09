@@ -260,6 +260,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`be_comp_periodic`: separate queue tag for the dispersion.** New optional
+  `disp_tag`: the dispersion reactions (analytic periodic D4/D3, CPU) are
+  submitted under it, the electronic (MACE, GPU) ones under `be_tag`. Before,
+  both went to `be_tag`, so a GPU tag also carried CPU work and the two kinds of
+  manager could only be kept apart by the programs their environments
+  advertise. Default `None` keeps one tag.
+
 - **`be_comp_periodic` / `be_assemble_periodic`: one ReactionDataset per
   surface family.** New optional `surface_family` (e.g. `"npASW"`): the
   reactions of all slabs go to `<smol>_<family><suffix>_be` / `_ie` / `_de`

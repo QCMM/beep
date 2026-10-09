@@ -70,7 +70,7 @@ def config_summary_msg(config: BeCompPeriodicConfig) -> str:
         f"{config.sp_dataset_suffix}",
         f"  PBC (slab SPs):       {config.pbc}",
         f"  Cell (slab SPs):      {cell_source}",
-        f"  Compute tag:          {config.be_tag}",
+        f"  Compute tags:         {config.be_tag} (electronic), {config.disp_tag or config.be_tag} (dispersion)",
         separator,
         "",
     ]
@@ -131,10 +131,11 @@ def _guard_reused_reactions(ds_rxn, stoich: Dict[str, list], cell_ang, pbc) -> N
             check_entry_geometry(m_old, m_new, entry.name, ds_rxn.name, cell_ang=cell_ang, pbc=pbc)
 
 
-def _submit_reactions(ds_rxn, stoich: Dict[str, list], spec_names: List[str], tag: str,
+def _submit_reactions(ds_rxn, stoich: Dict[str, list], spec_tags: Dict[str, str],
                       cell_ang, pbc, logger) -> List[int]:
     """Add the missing entries (``stoich``: name -> [(molecule, coefficient)]), submit every
-    entry for ``spec_names`` and return the reaction record IDs."""
+    entry for each spec of ``spec_tags`` (spec name -> compute tag) and return the reaction
+    record IDs."""
     _guard_reused_reactions(ds_rxn, stoich, cell_ang, pbc)
     existing = set(ds_rxn.entry_names)
     new_entries = [ReactionDatasetNewEntry(name=n, stoichiometries=[(c, m) for m, c in st])
@@ -142,10 +143,12 @@ def _submit_reactions(ds_rxn, stoich: Dict[str, list], spec_names: List[str], ta
     if new_entries:
         qcf._check_insert_meta(ds_rxn.add_entries(new_entries), f"entries in {ds_rxn.name}")
     names = sorted(stoich)
-    meta = ds_rxn.submit(entry_names=names, specification_names=spec_names, compute_tag=tag)
-    logger.info(f"  submit {ds_rxn.name}: {meta.n_inserted} new, {meta.n_existing} existing")
+    for tag in sorted(set(spec_tags.values())):
+        specs = [s for s, t in spec_tags.items() if t == tag]
+        meta = ds_rxn.submit(entry_names=names, specification_names=specs, compute_tag=tag)
+        logger.info(f"  submit {ds_rxn.name} {specs} -> {tag}: {meta.n_inserted} new, {meta.n_existing} existing")
     pids: List[int] = []
-    for spec_name in spec_names:
+    for spec_name in spec_tags:
         for n in names:
             rec = ds_rxn.get_record(n, spec_name)
             if rec is not None:
@@ -351,9 +354,11 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
             specs = _build_reaction_specs(
                 ds_rxn, kind, elec_lot, config.be_dispersion, keywords_periodic, logger,
             )
+            elec_spec, disp_spec = specs
             pids = _submit_reactions(
-                ds_rxn, {n: st[kind] for n, st in stoich.items()}, specs,
-                tag=config.be_tag, cell_ang=cell_ang, pbc=config.pbc, logger=logger,
+                ds_rxn, {n: st[kind] for n, st in stoich.items()},
+                {elec_spec: config.be_tag, disp_spec: config.disp_tag or config.be_tag},
+                cell_ang=cell_ang, pbc=config.pbc, logger=logger,
             )
             n_records += len(pids)
             all_pids.extend(pids)
@@ -362,7 +367,8 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
 
     # --- Wait for the whole set ---
     if all_pids:
-        logger.info(f"\nWaiting on {len(all_pids)} reaction records (tag='{config.be_tag}')")
+        logger.info(f"\nWaiting on {len(all_pids)} reaction records (tags '{config.be_tag}', "
+                    f"'{config.disp_tag or config.be_tag}')")
         qcf.wait_for_completion(client, all_pids, POLL_FREQUENCY_SEC, logger)
 
     logger.info("\n" + "=" * 80)

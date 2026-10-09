@@ -315,3 +315,37 @@ def test_surface_family_config_field():
     assert BeCompPeriodicConfig(**{**raw, "surface_family": "npASW"}).surface_family == "npASW"
     raw_a = json.loads((EXAMPLES / "be_assemble_periodic.json").read_text())
     assert BeAssemblePeriodicConfig(**{**raw_a, "surface_family": "npASW"}).surface_family == "npASW"
+
+
+def test_dispersion_goes_to_its_own_tag():
+    """be_comp_periodic submits the electronic spec with be_tag and the dispersion spec with
+    disp_tag (both under one tag when they are equal)."""
+    from types import SimpleNamespace as NS
+    import logging
+    from beep.workflows.be_comp_periodic import _submit_reactions
+    from beep.core.stoichiometry import periodic_stoichiometry
+
+    class DS:
+        name = "ds"
+        def __init__(self):
+            self.entry_names, self.calls = [], []
+        def iterate_entries(self, entry_names):
+            return iter(())
+        def add_entries(self, entries):
+            self.entry_names += [e.name for e in entries]
+            return NS(error_description=None, errors=[], inserted_idx=list(range(len(entries))), existing_idx=[])
+        def submit(self, entry_names, specification_names, compute_tag):
+            self.calls.append((tuple(specification_names), compute_tag))
+            return NS(n_inserted=len(entry_names), n_existing=0)
+        def get_record(self, n, spec):
+            return NS(id=hash((n, spec)) % 1000)
+
+    st = {"s": periodic_stoichiometry(_complex([[5.0, 5.0, 8.0], [5.0, 5.0, 9.13]]), 3)["ie"]}
+    ds = DS()
+    pids = _submit_reactions(ds, st, {"elec": "mace-gpu", "elec-d4": "disp-cpu"}, CELL, PBC, logging.getLogger("t"))
+    assert sorted(ds.calls) == [(("elec",), "mace-gpu"), (("elec-d4",), "disp-cpu")] and len(pids) == 2
+    ds = DS()
+    _submit_reactions(ds, st, {"elec": "mace-gpu", "elec-d4": "mace-gpu"}, CELL, PBC, logging.getLogger("t"))
+    assert ds.calls == [(("elec", "elec-d4"), "mace-gpu")]
+    raw = json.loads((EXAMPLES / "be_comp_periodic.json").read_text())
+    assert BeCompPeriodicConfig(**raw).disp_tag is None

@@ -125,6 +125,14 @@ class BeCompPeriodicConfig(BaseModel):
 
     # Compute
     be_tag: str = Field("be_periodic_sp", description="Queue tag for the single-point energies")
+    disp_tag: Optional[str] = Field(
+        None,
+        description=(
+            "Queue tag for the dispersion reactions (analytic periodic D4/D3, CPU). None: the "
+            "same as be_tag. Set it to route the dispersion to a CPU manager and keep be_tag "
+            "for the MACE (GPU) work."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate(self):
