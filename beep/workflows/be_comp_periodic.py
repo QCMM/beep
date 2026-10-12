@@ -191,20 +191,28 @@ def _resolve_cell(config: BeCompPeriodicConfig, surface_extras, record_cell=None
     return extras_cell
 
 
-def gas_adsorbate(ds_sm, smol_name: str, elec_lot, logger):
-    """The adsorbate optimized at the electronic LOT, else the entry's input geometry.
+def gas_adsorbate(ds_sm, smol_name: str, opt_lot: str, need_geometry: bool, logger):
+    """The gas-phase adsorbate optimized at ``opt_lot``, the level the complexes and bare
+    surfaces were optimized at (as in be_hess). Required for 'be'/'all': without it the
+    BE/DE reference is not a minimum of the potential and every BE shifts. For 'ie' only the
+    charge and multiplicity are used, so the entry geometry suffices. Single atoms need no
+    optimization.
 
-    The collection need not carry a spec for the electronic LOT at all (qcportal then raises
-    PortalRequestError, not KeyError), so the spec is checked before asking for the record;
-    the fallback reads the entry itself, which needs no spec.
+    The collection need not carry a spec for ``opt_lot`` at all (qcportal then raises
+    PortalRequestError, not KeyError), so the spec is checked before asking for the record.
     """
-    if elec_lot.lot_name in ds_sm.specifications:
-        try:
-            return qcf.fetch_final_molecule(ds_sm, smol_name, elec_lot.lot_name)
-        except KeyError:
-            pass
-    logger.info(f"  {smol_name} not optimized at {elec_lot.display}; using initial geometry")
-    return qcf.fetch_entry_initial_molecule(ds_sm, smol_name)
+    initial = qcf.fetch_entry_initial_molecule(ds_sm, smol_name)
+    if not need_geometry or len(initial.symbols) == 1:
+        return initial
+    if opt_lot not in ds_sm.specifications:
+        logger.info(f"{smol_name} is not optimized at {opt_lot} in '{ds_sm.name}' "
+                    f"(no such specification), please optimize it first.")
+        raise KeyError(f"{ds_sm.name}: no specification {opt_lot}")
+    mol = qcf.fetch_final_molecule(ds_sm, smol_name, opt_lot)    # KeyError if no record
+    if mol is None:
+        logger.info(f"{smol_name} optimization at {opt_lot} is not complete, please optimize it first.")
+        raise KeyError(f"{ds_sm.name}/{smol_name}/{opt_lot}: not complete")
+    return mol
 
 
 def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
@@ -233,7 +241,7 @@ def run(config: BeCompPeriodicConfig, client: FractalClient) -> None:
     #     frozen adsorbate fragment's) ---
     logger.info("\n--- gas-phase adsorbate reference ---")
     ds_sm = qcf.get_collection(client, "OptimizationDataset", config.small_molecule_collection)
-    adsorbate = gas_adsorbate(ds_sm, smol_name, elec_lot, logger)
+    adsorbate = gas_adsorbate(ds_sm, smol_name, opt_lot, config.quantity in ("be", "all"), logger)
 
     all_pids: List[int] = []
     slab_jobs = []          # (slab, complex dataset, stoichiometries, padded cell)

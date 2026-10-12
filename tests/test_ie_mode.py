@@ -88,23 +88,57 @@ def test_quantity_rejects_unknown_value():
         BeCompPeriodicConfig(**cfg)
 
 
-def test_gas_adsorbate_without_spec_uses_entry_geometry():
-    """A small-molecule collection without a spec for the electronic LOT (e.g. 'volatiles' on
-    another server) must fall back to the entry geometry, not raise."""
-    import logging
+def _gas_ds(specs, record=None):
     from types import SimpleNamespace
-    from beep.workflows.be_comp_periodic import gas_adsorbate
     co = qcel.models.Molecule(symbols=["C", "O"], geometry=[0, 0, 0, 0, 0, 2.13])
 
     class DS:
-        specifications = {"b3lyp-d4_def2-tzvpd": object()}
+        name = "volatiles"
+        specifications = {s: object() for s in specs}
         def get_entry(self, name):
             return SimpleNamespace(initial_molecule=co)
         def get_record(self, *a, **k):
-            raise AssertionError("must not ask for a record of a missing spec")
+            if record is None:
+                raise AssertionError("must not ask for a record of a missing spec")
+            return record
 
-    lot = SimpleNamespace(lot_name="lmft-co-b3lyp-v1-s1", display="lmft-co-b3lyp-v1-s1 (mace)")
-    assert gas_adsorbate(DS(), "CO", lot, logging.getLogger("t")) is co
+    return DS(), co
+
+
+def test_gas_adsorbate_ie_without_spec_uses_entry_geometry():
+    """'ie' only needs the adsorbate's charge and multiplicity: a collection without a spec
+    for the geometry LOT (e.g. 'volatiles' on another server) gives the entry geometry."""
+    import logging
+    from beep.workflows.be_comp_periodic import gas_adsorbate
+    ds, co = _gas_ds(["b3lyp-d4_def2-tzvpd"])
+    assert gas_adsorbate(ds, "CO", "lmft-co-b3lypd4-v1", False, logging.getLogger("t")) is co
+
+
+def test_gas_adsorbate_be_without_spec_raises():
+    """'be'/'all' need the gas-phase minimum at the geometry LOT: no spec -> fail, as be_hess."""
+    import logging
+    from beep.workflows.be_comp_periodic import gas_adsorbate
+    ds, _ = _gas_ds(["b3lyp-d4_def2-tzvpd"])
+    with pytest.raises(KeyError):
+        gas_adsorbate(ds, "CO", "lmft-co-b3lypd4-v1", True, logging.getLogger("t"))
+
+
+def test_gas_adsorbate_be_incomplete_record_raises():
+    import logging
+    from types import SimpleNamespace
+    from beep.workflows.be_comp_periodic import gas_adsorbate
+    ds, _ = _gas_ds(["lmft-co-b3lypd4-v1"], record=SimpleNamespace(final_molecule=None))
+    with pytest.raises(KeyError):
+        gas_adsorbate(ds, "CO", "lmft-co-b3lypd4-v1", True, logging.getLogger("t"))
+
+
+def test_gas_adsorbate_be_returns_optimized_geometry():
+    import logging
+    from types import SimpleNamespace
+    from beep.workflows.be_comp_periodic import gas_adsorbate
+    opt = qcel.models.Molecule(symbols=["C", "O"], geometry=[0, 0, 0, 0, 0, 2.126])
+    ds, _ = _gas_ds(["lmft-co-b3lypd4-v1"], record=SimpleNamespace(final_molecule=opt))
+    assert gas_adsorbate(ds, "CO", "lmft-co-b3lypd4-v1", True, logging.getLogger("t")) is opt
 
 
 # ---------------------------------------------------------------------------

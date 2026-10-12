@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`be_comp_periodic`: the gas-phase adsorbate must be optimized at
+  the geometry level, as in `be_hess`.** `gas_adsorbate()` looked for
+  the adsorbate optimized at the *electronic* LOT and, when the
+  small-molecule collection had no such spec (the usual case for an
+  MLP), silently fell back to the entry's input geometry. The BE/DE
+  reference was then not a minimum of the potential and every BE
+  shifted by the same amount (CO with the MPWB1K input geometry under
+  a B3LYP-D4 MACE model: r(CO) 1.114 vs 1.125 Å, BE too strong by
+  0.15 kcal/mol at every site; IE unaffected). For `quantity` 'be' and
+  'all' the adsorbate is now read at `opt_level_of_theory`, the level
+  of the complexes and bare surfaces, and a missing spec or an
+  incomplete record raises with "please optimize it first". 'ie' only
+  needs the adsorbate's charge and multiplicity and still uses the
+  entry geometry; single atoms need no optimization.
 - **`sampling`: relaunches resume instead of re-sampling finished
   clusters.** `run()` walked the clusters in order and ran a full
   placement + gfn2 round on each one before checking the target, so a
