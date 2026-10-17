@@ -125,6 +125,20 @@ class TestPreExponentialFactor:
         assert len(result) == 2
         assert all(v > 0 for v in result)
 
+    def test_atom_is_translational_only(self):
+        """An atom has no rotation: nu = (kB T/h) q_trans,2D, not zero."""
+        kB = qcel.constants.get("kb")
+        h = qcel.constants.get("h")
+        mass = get_mass("N  0.0  0.0  0.0")
+        symbols, coords = parse_coordinates("N  0.0  0.0  0.0")
+        Ia, Ib, Ic = get_moments_of_inertia(symbols, coords)
+        T, A = 10.0, 1e-19
+        expected = (kB * T / h) * (2 * math.pi * mass * kB * T / h**2) * A
+        (v,) = pre_exponential_factor(mass, [T], sigma=1, Ia=Ia, Ib=Ib, Ic=Ic, A=A)
+        (v0,) = pre_exponential_factor(mass, [T], sigma=1, Ia=0.0, Ib=0.0, Ic=0.0, A=A)
+        assert v == pytest.approx(expected, rel=1e-12)
+        assert v0 == pytest.approx(expected, rel=1e-12)
+
     def test_single_temperature(self):
         mass = get_mass(CO_XYZ)
         symbols, coords = parse_coordinates(CO_XYZ)

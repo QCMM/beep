@@ -98,11 +98,19 @@ def get_moments_of_inertia(symbols, coordinates):
 # tensor of a linear molecule gives Ia ~ 1e-60 kg m^2 (round-off, possibly
 # negative) rather than exactly 0, so an exact comparison is not reliable.
 LINEAR_INERTIA_REL_TOL = 1e-6
+# An atom has all three moments zero (round-off at most); H2, the lightest
+# rotor, has I ~ 5e-48 kg m^2, so this bound cannot catch a molecule.
+ATOM_INERTIA_ABS_TOL = 1e-50
 
 
 def is_linear_rotor(Ia, Ib, rel_tol=LINEAR_INERTIA_REL_TOL):
     """True when ``Ia`` is negligible relative to ``Ib`` (linear molecule)."""
     return Ia < rel_tol * Ib
+
+
+def is_atom(Ia, Ib, Ic, abs_tol=ATOM_INERTIA_ABS_TOL):
+    """True when all moments of inertia vanish (atom: no rotational degrees of freedom)."""
+    return max(abs(Ia), abs(Ib), abs(Ic)) < abs_tol
 
 
 def pre_exponential_factor(m, T_list, sigma, Ia, Ib, Ic, A):
@@ -123,6 +131,9 @@ def pre_exponential_factor(m, T_list, sigma, Ia, Ib, Ic, A):
 
         q_rot,3D = sqrt(pi) / (sigma h^3) * (8 pi^2 kB T)^(3/2) * sqrt(Ia Ib Ic)
 
+    and an atom (all moments zero, see :func:`is_atom`) has ``q_rot = 1``, so
+    that ``nu`` reduces to the translational term.
+
     Note: Minissale et al. 2022 Eq. 20 carries an extra ``sqrt(pi)`` in the
     linear form and their Table 4 an extra ``pi``; both are leftovers of the
     three-dimensional orientation volume (8 pi^2) that has no counterpart for
@@ -137,15 +148,18 @@ def pre_exponential_factor(m, T_list, sigma, Ia, Ib, Ic, A):
     kB = qcel.constants.get("kb")
     h = qcel.constants.get("h")
     pi = math.pi
-    linear = is_linear_rotor(Ia, Ib)
-    if not linear and (Ia < 0 or Ib < 0 or Ic < 0):
+    atom = is_atom(Ia, Ib, Ic)
+    linear = not atom and is_linear_rotor(Ia, Ib)
+    if not atom and not linear and (Ia < 0 or Ib < 0 or Ic < 0):
         raise ValueError(
             f"Principal moments of inertia must be non-negative; got Ia={Ia}, Ib={Ib}, Ic={Ic}"
         )
 
     def _single_T(T):
         translational_part = ((2 * pi * m * kB * T) / h**2) * A
-        if linear:
+        if atom:
+            rotational_part = 1.0
+        elif linear:
             rotational_part = (8 * pi**2 * kB * T / h**2) * (Ib / sigma)
         else:
             rotational_part = (pi**0.5 / (sigma * h**3)) * (8 * pi**2 * kB * T)**(3 / 2) * math.sqrt(Ia * Ib * Ic)

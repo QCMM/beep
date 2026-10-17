@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`pre_exp`: atoms got a zero prefactor.** With all three moments of
+  inertia zero, `is_linear_rotor(0, 0)` is false and the nonlinear branch
+  multiplied by `sqrt(Ia Ib Ic) = 0`, so `pre_exponential_factor` returned
+  `nu = 0` for H, C, N, O. Atoms are now detected (`is_atom`, all moments
+  below 1e-50 kg m^2) and take `q_rot = 1`, so `nu` reduces to the
+  translational term. Test added.
+
 - **`be_comp_periodic`: the gas-phase adsorbate must be optimized at
   the geometry level, as in `be_hess`.** `gas_adsorbate()` looked for
   the adsorbate optimized at the *electronic* LOT and, when the
